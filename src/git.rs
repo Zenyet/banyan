@@ -952,6 +952,10 @@ fn command(dir: &Path, args: &[&str]) -> Command {
         // file watcher with it).
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("LC_ALL", "C");
+    // Credentials and ssh passphrases are asked for in the app.
+    if let Some(env) = crate::askpass::env() {
+        cmd.envs(env);
+    }
     cmd
 }
 

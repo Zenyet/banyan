@@ -1,4 +1,5 @@
 mod actions;
+mod askpass;
 mod changes_view;
 mod clone_dialog;
 mod commit_browser;
@@ -37,6 +38,10 @@ use crate::workspace::Workspace;
 actions!(gitbrains, [Quit, OpenRepository, CloseWindow]);
 
 fn main() {
+    // Git runs this executable to ask for credentials; answer and exit.
+    if let Ok(socket) = std::env::var(askpass::SOCKET_ENV) {
+        std::process::exit(askpass::run_client(&socket));
+    }
     let path = std::env::args()
         .nth(1)
         .map(PathBuf::from)
@@ -47,6 +52,10 @@ fn main() {
         .run(move |cx| {
             gpui_kit::init(cx);
             log_view::init(cx);
+            match askpass::start_server() {
+                Ok(requests) => askpass::spawn_prompt_loop(requests, cx),
+                Err(err) => eprintln!("credential prompts unavailable: {err}"),
+            }
             if settings::Settings::load().dark {
                 gpui_kit::component::Theme::change(gpui_kit::component::ThemeMode::Dark, None, cx);
             }
