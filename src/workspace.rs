@@ -16,6 +16,7 @@ use gpui_kit::*;
 
 use crate::actions::{branch_menu, new_branch};
 use crate::changes_view::ChangesView;
+use crate::console::ConsoleView;
 use crate::git::{RefKind, RepoState};
 use crate::log_view::LogView;
 use crate::model::{RepoEvent, RepoModel};
@@ -26,6 +27,7 @@ pub struct Workspace {
     model: Entity<RepoModel>,
     log: Entity<LogView>,
     changes: Entity<ChangesView>,
+    console: Entity<ConsoleView>,
     tab: usize,
     _subscriptions: Vec<Subscription>,
 }
@@ -34,6 +36,7 @@ impl Workspace {
     pub fn new(model: Entity<RepoModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let log = cx.new(|cx| LogView::new(model.clone(), window, cx));
         let changes = cx.new(|cx| ChangesView::new(model.clone(), window, cx));
+        let console = cx.new(|cx| ConsoleView::new(model.clone(), cx));
         let subscriptions = vec![
             cx.subscribe_in(&model, window, |_, _, event, window, cx| match event {
                 RepoEvent::OpFailed(message) => {
@@ -58,6 +61,7 @@ impl Workspace {
             model,
             log,
             changes,
+            console,
             tab: 0,
             _subscriptions: subscriptions,
         }
@@ -305,10 +309,10 @@ impl Workspace {
 impl Render for Workspace {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let changes = self.changes.read(cx).change_count(cx);
-        let content = if self.tab == 0 {
-            self.log.clone().into_any_element()
-        } else {
-            self.changes.clone().into_any_element()
+        let content = match self.tab {
+            0 => self.log.clone().into_any_element(),
+            1 => self.changes.clone().into_any_element(),
+            _ => self.console.clone().into_any_element(),
         };
         v_flex()
             .size_full()
@@ -326,6 +330,7 @@ impl Render for Workspace {
                             .label(format!("Commit ({changes})"))
                             .prefix(Icon::new(IconName::GitCommitHorizontal).small()),
                     )
+                    .child(Tab::new().label("Console").prefix(Icon::new(IconName::SquareTerminal).small()))
                     .on_click(cx.listener(|this, ix: &usize, _, cx| {
                         this.tab = *ix;
                         cx.notify();

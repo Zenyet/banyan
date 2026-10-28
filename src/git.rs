@@ -190,7 +190,7 @@ impl Repo {
     pub fn clone_from(url: &str, dest: &Path) -> Result<Self> {
         let parent = dest.parent().context("invalid destination")?;
         std::fs::create_dir_all(parent)?;
-        run(parent, &["clone", "--", url, &dest.to_string_lossy()])?;
+        crate::console::recording(|| run(parent, &["clone", "--", url, &dest.to_string_lossy()]))?;
         Repo::open(dest)
     }
 
@@ -956,9 +956,20 @@ fn command(dir: &Path, args: &[&str]) -> Command {
 }
 
 fn run(dir: &Path, args: &[&str]) -> Result<String> {
+    let started = std::time::Instant::now();
     let output = command(dir, args)
         .output()
         .context("failed to run git; is it installed?")?;
+    if crate::console::is_recording() {
+        crate::console::record(
+            dir,
+            args,
+            &String::from_utf8_lossy(&output.stdout),
+            &String::from_utf8_lossy(&output.stderr),
+            output.status.success(),
+            started.elapsed().as_millis(),
+        );
+    }
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);

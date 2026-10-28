@@ -166,7 +166,10 @@ impl RepoModel {
         cx.notify();
         let repo = self.repo.clone();
         cx.spawn(async move |this, cx| {
-            let result = cx.background_executor().spawn(async move { op(&repo) }).await;
+            let result = cx
+                .background_executor()
+                .spawn(async move { crate::console::recording(|| op(&repo)) })
+                .await;
             this.update(cx, |this, cx| {
                 this.busy = None;
                 match result {
