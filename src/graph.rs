@@ -89,8 +89,10 @@ pub fn layout(commits: &[Commit]) -> Vec<GraphRow> {
                 .position(|lane| lane.as_ref().is_some_and(|l| l.expect == parent));
             match existing {
                 // Keep the first-parent line in the leftmost lane: the lane to
-                // the right bends into this one instead.
-                Some(ix) if parent_ix == 0 && ix > node => {
+                // the right bends into this one instead. A merge only does so
+                // when its other parents can go left of the node; otherwise
+                // their new lane would cross the bend.
+                Some(ix) if parent_ix == 0 && ix > node && can_bend(&lanes, node, &commit.parents) => {
                     let other = lanes[ix].take().unwrap();
                     ensure_len(&mut lanes, node + 1);
                     lanes[node] = Some(Lane {
@@ -181,6 +183,15 @@ fn ensure_len(lanes: &mut Vec<Option<Lane>>, len: usize) {
     }
 }
 
+/// Whether the other parents of a merge at `node` fit without crossing a
+/// lane that bends into the node from the right.
+fn can_bend(lanes: &[Option<Lane>], node: usize, parents: &[String]) -> bool {
+    let needs_new_lane = parents[1..]
+        .iter()
+        .any(|p| !lanes.iter().any(|lane| lane.as_ref().is_some_and(|l| l.expect == p)));
+    !needs_new_lane || lanes[..node].iter().any(Option::is_none)
+}
+
 fn free_slot(lanes: &mut Vec<Option<Lane>>) -> usize {
     match lanes.iter().position(Option::is_none) {
         Some(ix) => ix,
@@ -230,5 +241,32 @@ mod tests {
         assert!(rows[2].edges.iter().any(|e| e.half == Half::Bottom && e.from == 1 && e.to == 0));
         assert_eq!(rows[3].node, 0);
         assert_eq!(rows[3].width, 1);
+    }
+
+    /// Two edges in the same half of a row cross when they swap sides.
+    fn has_crossing(row: &GraphRow) -> bool {
+        row.edges.iter().any(|a| {
+            row.edges.iter().any(|b| {
+                a.half == b.half
+                    && (a.from as isize - b.from as isize) * (a.to as isize - b.to as isize) < 0
+            })
+        })
+    }
+
+    #[test]
+    fn merge_does_not_cross_a_bending_lane() {
+        // M's first parent A is already expected right of M's lane, and its
+        // second parent B needs a new lane.
+        let rows = layout(&[
+            commit("y", &["m"]),
+            commit("x", &["a"]),
+            commit("m", &["a", "b"]),
+            commit("b", &["a"]),
+            commit("a", &[]),
+        ]);
+        for (ix, row) in rows.iter().enumerate() {
+            assert!(!has_crossing(row), "row {ix} crosses: {:?}", row.edges);
+        }
+        assert_eq!(rows[4].node, 0);
     }
 }
