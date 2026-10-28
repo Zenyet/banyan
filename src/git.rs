@@ -716,10 +716,17 @@ impl Repo {
 
     /// Reworded messages of an interactive rebase that is no longer running.
     fn cleanup_rebase_files(&self) {
-        if self.repo_state() == RepoState::Clean {
-            let dir = std::env::temp_dir().join(format!("gitbrains-rebase-{}", std::process::id()));
+        if self.repo_state() == RepoState::Clean
+            && let Ok(dir) = self.rebase_files_dir()
+        {
             std::fs::remove_dir_all(dir).ok();
         }
+    }
+
+    /// Kept inside the repository's git directory so concurrent rebases of
+    /// different repositories never share it.
+    fn rebase_files_dir(&self) -> Result<PathBuf> {
+        Ok(self.git_dir()?.join("gitbrains-rebase"))
     }
 
     fn abort_op(&self, state: RepoState) -> Result<String> {
@@ -850,7 +857,7 @@ impl Repo {
         if matches!(plan.first().map(|(_, a)| a), Some(RebaseAction::Squash | RebaseAction::Fixup)) {
             bail!("the first commit cannot be squashed or fixed up");
         }
-        let dir = std::env::temp_dir().join(format!("gitbrains-rebase-{}", std::process::id()));
+        let dir = self.rebase_files_dir()?;
         std::fs::create_dir_all(&dir)?;
         let mut todo = String::new();
         for (ix, (id, action)) in plan.iter().enumerate() {
