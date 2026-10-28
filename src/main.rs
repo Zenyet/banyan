@@ -3,6 +3,7 @@ mod changes_view;
 mod diff_pane;
 mod git;
 mod graph;
+mod history;
 mod log_view;
 mod merge_tool;
 mod model;

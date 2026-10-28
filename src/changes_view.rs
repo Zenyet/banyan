@@ -436,6 +436,18 @@ impl ChangesView {
                         }));
                     }
                 } else if !untracked {
+                    for (label, annotate) in [("Show History", false), ("Annotate", true)] {
+                        let model = model.clone();
+                        let path = path.clone();
+                        menu = menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
+                            if annotate {
+                                crate::history::annotate(model.clone(), "HEAD".into(), path.clone(), window, cx)
+                            } else {
+                                crate::history::show_history(model.clone(), path.clone(), window, cx)
+                            }
+                        }));
+                    }
+                    menu = menu.separator();
                     let view = view.clone();
                     let path = path.clone();
                     menu = menu.item(PopupMenuItem::new("Rollback...").on_click(move |_, window, cx| {

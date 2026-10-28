@@ -605,6 +605,9 @@ impl LogView {
 
     fn render_details(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let files = self.files.clone();
+        let menu_files = self.files.clone();
+        let model = self.model.clone();
+        let rev = self.details.as_ref().map(|d| d.id.clone());
         let changed = self.details.as_ref().map(|d| d.files.len()).unwrap_or(0);
         let files_panel = v_flex()
             .size_full()
@@ -637,7 +640,24 @@ impl LogView {
                             }),
                     )
                 },
-            )));
+            )
+            .context_menu(move |_, entry, menu, _, _| {
+                let (Some(change), Some(rev)) = (menu_files.get(&entry.item().id), rev.clone()) else {
+                    return menu;
+                };
+                let path = change.path.clone();
+                let (m, p) = (model.clone(), path.clone());
+                let menu = menu.item(PopupMenuItem::new("Show History").on_click(move |_, window, cx| {
+                    crate::history::show_history(m.clone(), p.clone(), window, cx)
+                }));
+                if change.status == 'D' {
+                    return menu;
+                }
+                let m = model.clone();
+                menu.item(PopupMenuItem::new("Annotate at This Revision").on_click(move |_, window, cx| {
+                    crate::history::annotate(m.clone(), rev.clone(), path.clone(), window, cx)
+                }))
+            })));
 
         let info = match &self.details {
             None => div()

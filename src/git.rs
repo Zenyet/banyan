@@ -44,6 +44,22 @@ impl Commit {
     }
 }
 
+/// A commit that touched a file, with the file's path at that commit.
+#[derive(Clone, Debug)]
+pub struct FileRevision {
+    pub commit: Commit,
+    pub path: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct BlameLine {
+    pub id: String,
+    pub author: String,
+    pub time: i64,
+    pub summary: String,
+    pub text: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct CommitDetails {
     pub id: String,
@@ -204,6 +220,88 @@ impl Repo {
                 })
             })
             .collect())
+    }
+
+    /// Commits that changed `path`, following renames.
+    pub fn file_history(&self, path: &str) -> Result<Vec<FileRevision>> {
+        let format = format!("--format={RECORD}%H{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%at{FIELD}%s");
+        let out = self.git(&["log", "--follow", "--name-only", &format, "--", path])?;
+        Ok(out
+            .split(RECORD)
+            .filter_map(|record| {
+                let (header, names) = record.split_once('\n').unwrap_or((record, ""));
+                let mut fields = header.split(FIELD);
+                let id = fields.next()?.to_string();
+                if id.is_empty() {
+                    return None;
+                }
+                let parents = fields.next()?.split_whitespace().map(str::to_string).collect();
+                let author = fields.next()?.to_string();
+                let email = fields.next()?.to_string();
+                let time = fields.next()?.parse().unwrap_or(0);
+                let subject = fields.next().unwrap_or_default().to_string();
+                let path = names
+                    .lines()
+                    .find(|line| !line.trim().is_empty())
+                    .unwrap_or(path)
+                    .to_string();
+                Some(FileRevision {
+                    commit: Commit {
+                        id,
+                        parents,
+                        author,
+                        email,
+                        time,
+                        subject,
+                        refs: Vec::new(),
+                    },
+                    path,
+                })
+            })
+            .collect())
+    }
+
+    /// Patch of `path` introduced by commit `id` (against its first parent).
+    pub fn revision_diff(&self, id: &str, path: &str) -> Result<String> {
+        self.git(&["show", "--format=", "-M", "--first-parent", id, "--", path])
+    }
+
+    /// Line-by-line blame of `path` at `rev`.
+    pub fn blame(&self, rev: &str, path: &str) -> Result<Vec<BlameLine>> {
+        let out = self.git(&["blame", "--porcelain", rev, "--", path])?;
+        let mut infos: std::collections::HashMap<String, (String, i64, String)> = Default::default();
+        let mut lines = Vec::new();
+        let mut current = String::new();
+        let mut author = String::new();
+        let mut time = 0;
+        let mut summary = String::new();
+        for line in out.lines() {
+            if let Some(text) = line.strip_prefix('\t') {
+                let info = infos
+                    .entry(current.clone())
+                    .or_insert_with(|| (author.clone(), time, summary.clone()))
+                    .clone();
+                lines.push(BlameLine {
+                    id: current.clone(),
+                    author: info.0,
+                    time: info.1,
+                    summary: info.2,
+                    text: text.to_string(),
+                });
+            } else if let Some(value) = line.strip_prefix("author ") {
+                author = value.to_string();
+            } else if let Some(value) = line.strip_prefix("author-time ") {
+                time = value.parse().unwrap_or(0);
+            } else if let Some(value) = line.strip_prefix("summary ") {
+                summary = value.to_string();
+            } else {
+                let id = line.split(' ').next().unwrap_or_default();
+                if id.len() == 40 && id.chars().all(|c| c.is_ascii_hexdigit()) {
+                    current = id.to_string();
+                }
+            }
+        }
+        Ok(lines)
     }
 
     pub fn has_head(&self) -> bool {
