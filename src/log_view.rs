@@ -32,12 +32,19 @@ const GRAPH_PADDING: Pixels = px(6.);
 const LOG_LIMIT: usize = 5000;
 const BRANCH_PREFIX: &str = "b:";
 
-actions!(commit_list, [SelectPrevCommit, SelectNextCommit]);
+actions!(
+    commit_list,
+    [SelectPrevCommit, SelectNextCommit, SelectFirstCommit, SelectLastCommit, PageUpCommits, PageDownCommits]
+);
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("up", SelectPrevCommit, Some("CommitList")),
         KeyBinding::new("down", SelectNextCommit, Some("CommitList")),
+        KeyBinding::new("home", SelectFirstCommit, Some("CommitList")),
+        KeyBinding::new("end", SelectLastCommit, Some("CommitList")),
+        KeyBinding::new("pageup", PageUpCommits, Some("CommitList")),
+        KeyBinding::new("pagedown", PageDownCommits, Some("CommitList")),
     ]);
 }
 
@@ -62,6 +69,8 @@ pub struct LogView {
     scroll: UniformListScrollHandle,
     focus: FocusHandle,
     loading: bool,
+    /// How many commits to load; grows with "Load more".
+    limit: usize,
     log_task: Option<Task<()>>,
     details_task: Option<Task<()>>,
     diff_task: Option<Task<()>>,
@@ -128,6 +137,7 @@ impl LogView {
             scroll: UniformListScrollHandle::new(),
             focus: cx.focus_handle(),
             loading: true,
+            limit: LOG_LIMIT,
             log_task: None,
             details_task: None,
             diff_task: None,
@@ -146,13 +156,14 @@ impl LogView {
     pub fn reload(&mut self, cx: &mut Context<Self>) {
         let repo = self.model.read(cx).repo.clone();
         let refs = self.branch_filter.clone();
+        let limit = self.limit;
         self.loading = true;
         cx.notify();
         self.log_task = Some(cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    let commits = repo.log(refs.as_deref(), LOG_LIMIT)?;
+                    let commits = repo.log(refs.as_deref(), limit)?;
                     let graph = graph::layout(&commits);
                     let head = repo.git(&["rev-parse", "HEAD"]).ok().map(|s| s.trim().to_string());
                     anyhow::Ok((commits, graph, head))
@@ -276,7 +287,10 @@ impl LogView {
             Some(row) => (row as isize + delta).clamp(0, self.rows.len() as isize - 1) as usize,
             None => 0,
         };
-        self.scroll.scroll_to_item(row, ScrollStrategy::Nearest);
+        // At the end, also reveal the "Load more" row below the last commit.
+        let has_more = self.commits.len() >= self.limit;
+        let target = if has_more && row + 1 == self.rows.len() { row + 1 } else { row };
+        self.scroll.scroll_to_item(target, ScrollStrategy::Nearest);
         let id = self.commits[self.rows[row]].id.clone();
         self.select(Some(id), cx);
     }
@@ -484,6 +498,7 @@ impl LogView {
 
     fn render_commits(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let show_graph = !self.is_filtered(cx);
+        let has_more = show_graph && self.commits.len() >= self.limit;
         v_flex()
             .size_full()
             .child(self.render_toolbar(cx))
@@ -494,15 +509,25 @@ impl LogView {
                     .track_focus(&self.focus)
                     .on_action(cx.listener(|this, _: &SelectPrevCommit, _, cx| this.select_offset(-1, cx)))
                     .on_action(cx.listener(|this, _: &SelectNextCommit, _, cx| this.select_offset(1, cx)))
+                    .on_action(cx.listener(|this, _: &SelectFirstCommit, _, cx| this.select_offset(isize::MIN / 2, cx)))
+                    .on_action(cx.listener(|this, _: &SelectLastCommit, _, cx| this.select_offset(isize::MAX / 2, cx)))
+                    .on_action(cx.listener(|this, _: &PageUpCommits, _, cx| this.select_offset(-25, cx)))
+                    .on_action(cx.listener(|this, _: &PageDownCommits, _, cx| this.select_offset(25, cx)))
                     .flex_1()
                     .min_h_0()
                     .child(
                         uniform_list(
                             "commits",
-                            self.rows.len(),
+                            self.rows.len() + has_more as usize,
                             cx.processor(move |this, range: std::ops::Range<usize>, window, cx| {
                                 range
-                                    .map(|row| this.render_commit_row(row, show_graph, window, cx))
+                                    .map(|row| {
+                                        if row < this.rows.len() {
+                                            this.render_commit_row(row, show_graph, window, cx)
+                                        } else {
+                                            this.render_load_more(cx)
+                                        }
+                                    })
                                     .collect::<Vec<_>>()
                             }),
                         )
@@ -510,6 +535,31 @@ impl LogView {
                         .track_scroll(&self.scroll),
                     ),
             )
+    }
+
+    fn render_load_more(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .id("load-more")
+            .h(ROW_HEIGHT)
+            .w_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_sm()
+            .text_color(cx.theme().link)
+            .hover(|style| style.bg(cx.theme().list_hover))
+            .child(if self.loading {
+                "Loading…".to_string()
+            } else {
+                format!("Showing the first {} commits. Load more…", self.limit)
+            })
+            .on_click(cx.listener(|this, _, _, cx| {
+                if !this.loading {
+                    this.limit += LOG_LIMIT;
+                    this.reload(cx);
+                }
+            }))
+            .into_any_element()
     }
 
     fn render_commit_row(

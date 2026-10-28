@@ -20,6 +20,7 @@ cargo run -- /path/to/repo   # or run inside a repository; with no repository a 
   the merge message is pre-filled from `MERGE_MSG`.
 - **File history** and **Annotate** (git blame with age shading), from the changed-files tree or the Commit tab.
 - Fetch / Pull / Push, stash pop / apply / drop, light / dark theme, auto-refresh when the window regains focus.
+- Log loads 5000 commits at a time ("Load more" at the bottom); Home / End / PageUp / PageDown in the commit list.
 
 ## Layout
 
