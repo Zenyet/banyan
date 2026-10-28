@@ -19,7 +19,7 @@ use gpui_kit::component::{
     ActiveTheme as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
-    input::{Input, InputEvent, InputState},
+    input::{Input, InputState},
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
@@ -157,17 +157,6 @@ fn show_prompt(request: Request, window: &mut Window, cx: &mut App) {
             window.close_dialog(cx);
         }
     };
-    let handle = window.window_handle();
-    let on_enter = submit.clone();
-    cx.subscribe(&input, move |_, event: &InputEvent, cx| {
-        if let InputEvent::PressEnter { .. } = event {
-            let on_enter = on_enter.clone();
-            cx.defer(move |cx| {
-                handle.update(cx, |_, window, cx| on_enter(window, cx)).ok();
-            });
-        }
-    })
-    .detach();
 
     let prompt: SharedString = request.prompt.trim().trim_end_matches(':').to_string().into();
     let needs_focus = std::cell::Cell::new(true);
@@ -178,9 +167,16 @@ fn show_prompt(request: Request, window: &mut Window, cx: &mut App) {
         let ok = submit.clone();
         let cancel = answer.clone();
         let close = answer.clone();
+        // Enter confirms the dialog, which then closes it; answer first.
+        let enter = answer.clone();
+        let entered = input.clone();
         dialog
             .title("Git Authentication")
             .w(px(460.))
+            .on_ok(move |_, _, cx| {
+                enter(Some(entered.read(cx).value().to_string()));
+                true
+            })
             .on_close(move |_, _, _| close(None))
             .child(
                 v_flex()
