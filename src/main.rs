@@ -1,5 +1,6 @@
 mod actions;
 mod changes_view;
+mod clone_dialog;
 mod commit_browser;
 mod compare;
 mod diff_pane;
@@ -193,6 +194,14 @@ impl Render for Welcome {
                     .icon(IconName::FolderOpen)
                     .label("Open Repository…")
                     .on_click(|_, window, cx| prompt_open_repo(Some(window.window_handle()), cx)),
+            )
+            .child(
+                Button::new("clone")
+                    .icon(IconName::Download)
+                    .label("Clone Repository…")
+                    .on_click(|_, window, cx| {
+                        clone_dialog::open(Some(window.window_handle()), window, cx)
+                    }),
             )
     }
 }

@@ -225,6 +225,11 @@ impl Workspace {
                                 .icon(IconName::FolderOpen)
                                 .on_click(|_, _, cx| crate::prompt_open_repo(None, cx)),
                         );
+                        menu = menu.item(
+                            PopupMenuItem::new("Clone Repository…")
+                                .icon(IconName::Download)
+                                .on_click(|_, window, cx| crate::clone_dialog::open(None, window, cx)),
+                        );
                         let recent: Vec<_> = Settings::load()
                             .recent
                             .into_iter()

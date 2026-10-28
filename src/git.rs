@@ -186,6 +186,21 @@ impl Repo {
         })
     }
 
+    /// Clone `url` into `dest`, which must not exist or be empty.
+    pub fn clone_from(url: &str, dest: &Path) -> Result<Self> {
+        let parent = dest.parent().context("invalid destination")?;
+        std::fs::create_dir_all(parent)?;
+        run(parent, &["clone", "--", url, &dest.to_string_lossy()])?;
+        Repo::open(dest)
+    }
+
+    /// The directory name `git clone` would pick for `url`.
+    pub fn clone_dir_name(url: &str) -> String {
+        let trimmed = url.trim().trim_end_matches('/');
+        let last = trimmed.rsplit(['/', ':']).next().unwrap_or(trimmed);
+        last.strip_suffix(".git").unwrap_or(last).to_string()
+    }
+
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -1242,5 +1257,23 @@ mod tests {
             t.dir.join("run.log"),
         ];
         assert_eq!(t.repo.not_ignored(&paths).unwrap(), vec![t.dir.join("src/main.rs")]);
+    }
+
+    #[test]
+    fn clone_dir_names() {
+        assert_eq!(Repo::clone_dir_name("https://github.com/zed-industries/zed.git"), "zed");
+        assert_eq!(Repo::clone_dir_name("git@github.com:longbridge/gpui-kit.git"), "gpui-kit");
+        assert_eq!(Repo::clone_dir_name("/srv/repos/project/"), "project");
+    }
+
+    #[test]
+    fn clone_from_local_repository() {
+        let source = TempRepo::new("clone-source");
+        source.commit("a.txt", "a\n", "First");
+        let dest = source.dir.with_extension("clone");
+        let repo = Repo::clone_from(&source.dir.display().to_string(), &dest).unwrap();
+        assert_eq!(repo.current_branch().as_deref(), Some("main"));
+        assert!(dest.join("a.txt").exists());
+        std::fs::remove_dir_all(&dest).ok();
     }
 }
