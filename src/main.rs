@@ -14,6 +14,7 @@ mod rebase_dialog;
 mod settings;
 mod stash_viewer;
 mod ui;
+mod watcher;
 mod workspace;
 
 use std::path::{Path, PathBuf};

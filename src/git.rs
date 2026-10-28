@@ -331,6 +331,43 @@ impl Repo {
         Ok(lines)
     }
 
+    pub fn git_dir(&self) -> Result<PathBuf> {
+        Ok(PathBuf::from(self.git(&["rev-parse", "--absolute-git-dir"])?.trim()))
+    }
+
+    pub fn head(&self) -> Option<String> {
+        self.git(&["rev-parse", "-q", "--verify", "HEAD"])
+            .ok()
+            .map(|out| out.trim().to_string())
+    }
+
+    /// The subset of `paths` (inside the work tree) that git does not ignore.
+    pub fn not_ignored(&self, paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+        use std::io::Write as _;
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut child = command(&self.root, &["check-ignore", "--stdin", "-z"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()?;
+        {
+            let mut stdin = child.stdin.take().context("no stdin")?;
+            for path in paths {
+                stdin.write_all(path.to_string_lossy().as_bytes())?;
+                stdin.write_all(b"\0")?;
+            }
+        }
+        let output = child.wait_with_output()?;
+        let ignored: std::collections::HashSet<PathBuf> = String::from_utf8_lossy(&output.stdout)
+            .split('\0')
+            .filter(|p| !p.is_empty())
+            .map(PathBuf::from)
+            .collect();
+        Ok(paths.iter().filter(|p| !ignored.contains(*p)).cloned().collect())
+    }
+
     pub fn has_head(&self) -> bool {
         self.git(&["rev-parse", "--verify", "-q", "HEAD"]).is_ok()
     }
@@ -896,6 +933,9 @@ fn command(dir: &Path, args: &[&str]) -> Command {
         .args(["-c", "color.ui=false", "-c", "core.quotepath=false"])
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
+        // Never touch the index behind the user's back (and don't wake our own
+        // file watcher with it).
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .env("LC_ALL", "C");
     cmd
 }
@@ -1190,5 +1230,17 @@ mod tests {
         let details = t.repo.commit_details(&stashes[0].commit.id).unwrap();
         let files: Vec<_> = details.files.iter().map(|f| (f.status, f.path.as_str())).collect();
         assert_eq!(files, vec![('M', "a.txt")]);
+    }
+
+    #[test]
+    fn not_ignored_filters_gitignored_paths() {
+        let t = TempRepo::new("ignore");
+        t.commit(".gitignore", "target/\n*.log\n", "Ignore");
+        let paths = vec![
+            t.dir.join("src/main.rs"),
+            t.dir.join("target/debug/app"),
+            t.dir.join("run.log"),
+        ];
+        assert_eq!(t.repo.not_ignored(&paths).unwrap(), vec![t.dir.join("src/main.rs")]);
     }
 }

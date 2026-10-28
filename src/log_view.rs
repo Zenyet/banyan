@@ -72,6 +72,8 @@ pub struct LogView {
     loading: bool,
     /// How many commits to load; grows with "Load more".
     limit: usize,
+    /// The model's `refs_version` the log was last loaded for.
+    refs_version: u64,
     log_task: Option<Task<()>>,
     details_task: Option<Task<()>>,
     diff_task: Option<Task<()>>,
@@ -92,7 +94,7 @@ impl LogView {
             cx.subscribe(&model, |this, _, event, cx| {
                 if let RepoEvent::Changed = event {
                     this.rebuild_branches(cx);
-                    this.reload(cx);
+                    this.reload_if_refs_moved(cx);
                 }
             }),
             cx.subscribe(&filter, |this, _, event, cx| {
@@ -140,14 +142,24 @@ impl LogView {
             focus: cx.focus_handle(),
             loading: true,
             limit: LOG_LIMIT,
+            refs_version: 0,
             log_task: None,
             details_task: None,
             diff_task: None,
             _subscriptions: subscriptions,
         };
         this.rebuild_branches(cx);
-        this.reload(cx);
+        this.reload_if_refs_moved(cx);
         this
+    }
+
+    /// Working tree edits don't change the log; only reload when refs moved.
+    fn reload_if_refs_moved(&mut self, cx: &mut Context<Self>) {
+        let version = self.model.read(cx).refs_version;
+        if version != self.refs_version {
+            self.refs_version = version;
+            self.reload(cx);
+        }
     }
 
     fn report(&self, err: anyhow::Error, cx: &mut Context<Self>) {
@@ -542,6 +554,7 @@ impl LogView {
                     .tooltip("Refresh")
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.model.update(cx, |model, cx| model.refresh(cx));
+                        this.reload(cx);
                     })),
             )
     }
