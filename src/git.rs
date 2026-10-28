@@ -150,6 +150,15 @@ pub enum ResetMode {
 }
 
 #[derive(Clone, Debug)]
+pub struct PushTarget {
+    pub branch: String,
+    pub remote: String,
+    pub remote_branch: String,
+    /// The remote branch does not exist yet; the push sets it as upstream.
+    pub is_new: bool,
+}
+
+#[derive(Clone, Debug)]
 pub struct Stash {
     pub name: String,
     pub message: String,
@@ -180,13 +189,18 @@ impl Repo {
     }
 
     pub fn log(&self, refs: Option<&str>, limit: usize) -> Result<Vec<Commit>> {
+        match refs {
+            Some(refs) => self.log_revs(&[refs], limit),
+            None => self.log_revs(&["--branches", "--remotes", "--tags", "HEAD"], limit),
+        }
+    }
+
+    /// `git log` over arbitrary revision arguments, newest first.
+    pub fn log_revs(&self, revs: &[&str], limit: usize) -> Result<Vec<Commit>> {
         let format = format!("--format=%H{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%at{FIELD}%D{FIELD}%s{RECORD}");
         let limit = format!("-n{limit}");
         let mut args = vec!["log", "--date-order", "--decorate=full", &format, &limit];
-        match refs {
-            Some(refs) => args.push(refs),
-            None => args.extend(["--branches", "--remotes", "--tags", "HEAD"]),
-        }
+        args.extend(revs);
         args.push("--");
         let out = match self.git(&args) {
             Ok(out) => out,
@@ -658,22 +672,67 @@ impl Repo {
         self.git(&["pull", "--no-edit"])
     }
 
-    pub fn push(&self) -> Result<String> {
+    /// Where the current branch pushes to: its upstream, or a new branch of
+    /// the same name on the first remote.
+    pub fn push_target(&self) -> Result<PushTarget> {
         let branch = self.current_branch().context("cannot push a detached HEAD")?;
-        let has_upstream = self
-            .git(&["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
-            .is_ok();
-        if has_upstream {
-            self.git(&["push"])
-        } else {
-            let remote = self
-                .git(&["remote"])?
-                .lines()
-                .next()
-                .map(str::to_string)
-                .context("no remote configured")?;
-            self.git(&["push", "-u", &remote, &branch])
+        let config = |key: String| {
+            self.git(&["config", "--get", &key])
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        };
+        let upstream_remote = config(format!("branch.{branch}.remote"));
+        let upstream_branch = config(format!("branch.{branch}.merge"))
+            .map(|merge| merge.trim_start_matches("refs/heads/").to_string());
+        if let (Some(remote), Some(remote_branch)) = (upstream_remote, upstream_branch) {
+            return Ok(PushTarget {
+                branch,
+                remote,
+                remote_branch,
+                is_new: false,
+            });
         }
+        let remote = self
+            .git(&["remote"])?
+            .lines()
+            .next()
+            .map(str::to_string)
+            .context("no remote configured")?;
+        Ok(PushTarget {
+            remote_branch: branch.clone(),
+            branch,
+            remote,
+            is_new: true,
+        })
+    }
+
+    /// Commits that a push of the current branch would send.
+    pub fn outgoing(&self, target: &PushTarget) -> Result<Vec<Commit>> {
+        if target.is_new {
+            self.log_revs(&["HEAD", "--not", "--remotes"], 1000)
+        } else {
+            let range = format!("{}/{}..HEAD", target.remote, target.remote_branch);
+            self.log_revs(&[&range], 1000)
+        }
+    }
+
+    pub fn push_to(&self, target: &PushTarget, force: bool) -> Result<String> {
+        let refspec = format!("{}:{}", target.branch, target.remote_branch);
+        let mut args = vec!["push"];
+        if force {
+            args.push("--force-with-lease");
+        }
+        if target.is_new {
+            args.push("-u");
+        }
+        args.push(&target.remote);
+        args.push(&refspec);
+        self.git(&args)
+    }
+
+    pub fn push(&self) -> Result<String> {
+        self.push_to(&self.push_target()?, false)
     }
 
     pub fn stashes(&self) -> Result<Vec<Stash>> {

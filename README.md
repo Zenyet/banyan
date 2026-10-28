@@ -18,6 +18,7 @@ cargo run -- /path/to/repo   # or run inside a repository; with no repository a 
   commit and push, rollback, stash; accept yours / theirs for conflicts; continue / abort merge, rebase, cherry-pick.
 - **Merge tool**: resolve conflicts per hunk (accept yours / theirs / both), apply and mark resolved;
   the merge message is pre-filled from `MERGE_MSG`.
+- **Push dialog**: review outgoing commits and their files, see the target branch (new or tracked), optional force push with lease.
 - **File history** and **Annotate** (git blame with age shading), from the changed-files tree or the Commit tab.
 - Fetch / Pull / Push, stash pop / apply / drop, light / dark theme, auto-refresh when the window regains focus.
 - Log loads 5000 commits at a time ("Load more" at the bottom); Home / End / PageUp / PageDown in the commit list.
@@ -35,6 +36,7 @@ cargo run -- /path/to/repo   # or run inside a repository; with no repository a 
 | `src/diff_pane.rs` | Diff preview |
 | `src/merge_tool.rs` | Conflict resolution dialog |
 | `src/history.rs` | File history and annotate dialogs |
+| `src/push_dialog.rs` | Push dialog |
 | `src/settings.rs` | Persisted theme and recent repositories |
 | `src/actions.rs` | Branch / commit context menus |
 | `src/workspace.rs` | Main window, toolbar, tabs |

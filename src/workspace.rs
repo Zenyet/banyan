@@ -260,7 +260,9 @@ impl Workspace {
                     .label("Push")
                     .ghost()
                     .small()
-                    .on_click(cx.listener(|this, _, _, cx| this.run("Push", |repo| repo.push(), cx))),
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        crate::push_dialog::open(this.model.clone(), window, cx)
+                    })),
             )
             .child(self.render_stash_button(cx))
             .child(div().flex_1())
