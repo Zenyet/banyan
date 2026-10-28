@@ -8,6 +8,7 @@ mod log_view;
 mod merge_tool;
 mod model;
 mod push_dialog;
+mod rebase_dialog;
 mod settings;
 mod ui;
 mod workspace;

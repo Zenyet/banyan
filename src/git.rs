@@ -149,6 +149,16 @@ pub enum ResetMode {
     Hard,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RebaseAction {
+    Pick,
+    /// Pick with a new message.
+    Reword(String),
+    Squash,
+    Fixup,
+    Drop,
+}
+
 #[derive(Clone, Debug)]
 pub struct PushTarget {
     pub branch: String,
@@ -637,6 +647,20 @@ impl Repo {
     }
 
     pub fn abort(&self, state: RepoState) -> Result<String> {
+        let result = self.abort_op(state);
+        self.cleanup_rebase_files();
+        result
+    }
+
+    /// Reworded messages of an interactive rebase that is no longer running.
+    fn cleanup_rebase_files(&self) {
+        if self.repo_state() == RepoState::Clean {
+            let dir = std::env::temp_dir().join(format!("gitbrains-rebase-{}", std::process::id()));
+            std::fs::remove_dir_all(dir).ok();
+        }
+    }
+
+    fn abort_op(&self, state: RepoState) -> Result<String> {
         match state {
             RepoState::Clean => Ok(String::new()),
             RepoState::Merging => self.git(&["merge", "--abort"]),
@@ -654,7 +678,9 @@ impl Repo {
             RepoState::CherryPicking => &["-c", "core.editor=true", "cherry-pick", "--continue"],
             RepoState::Reverting => &["-c", "core.editor=true", "revert", "--continue"],
         };
-        self.git(args)
+        let result = self.git(args);
+        self.cleanup_rebase_files();
+        result
     }
 
     pub fn resolve_conflict(&self, path: &str, ours: Option<bool>) -> Result<String> {
@@ -733,6 +759,72 @@ impl Repo {
 
     pub fn push(&self) -> Result<String> {
         self.push_to(&self.push_target()?, false)
+    }
+
+    /// Commits from `from` up to HEAD, oldest first, for an interactive rebase.
+    pub fn rebase_commits(&self, from: &str) -> Result<Vec<Commit>> {
+        if self
+            .git(&["merge-base", "--is-ancestor", from, "HEAD"])
+            .is_err()
+        {
+            bail!("the selected commit is not an ancestor of HEAD");
+        }
+        let is_root = self.git(&["rev-parse", "--verify", "-q", &format!("{from}^")]).is_err();
+        let range = format!("{from}^..HEAD");
+        let mut commits = if is_root {
+            self.log_revs(&["HEAD"], 100_000)?
+        } else {
+            self.log_revs(&["--topo-order", &range], 100_000)?
+        };
+        if commits.iter().any(|c| c.parents.len() > 1) {
+            bail!("interactive rebase over merge commits is not supported");
+        }
+        commits.reverse();
+        Ok(commits)
+    }
+
+    /// Run `git rebase -i` with a prepared todo list instead of an editor.
+    pub fn interactive_rebase(&self, from: &str, plan: &[(String, RebaseAction)]) -> Result<String> {
+        if matches!(plan.first().map(|(_, a)| a), Some(RebaseAction::Squash | RebaseAction::Fixup)) {
+            bail!("the first commit cannot be squashed or fixed up");
+        }
+        let dir = std::env::temp_dir().join(format!("gitbrains-rebase-{}", std::process::id()));
+        std::fs::create_dir_all(&dir)?;
+        let mut todo = String::new();
+        for (ix, (id, action)) in plan.iter().enumerate() {
+            match action {
+                RebaseAction::Pick => todo.push_str(&format!("pick {id}\n")),
+                RebaseAction::Squash => todo.push_str(&format!("squash {id}\n")),
+                RebaseAction::Fixup => todo.push_str(&format!("fixup {id}\n")),
+                RebaseAction::Drop => todo.push_str(&format!("drop {id}\n")),
+                RebaseAction::Reword(message) => {
+                    let file = dir.join(format!("message-{ix}"));
+                    std::fs::write(&file, message)?;
+                    todo.push_str(&format!("pick {id}\n"));
+                    todo.push_str(&format!(
+                        "exec git commit --amend --allow-empty -q -F '{}'\n",
+                        file.display()
+                    ));
+                }
+            }
+        }
+        let todo_file = dir.join("todo");
+        std::fs::write(&todo_file, todo)?;
+        let sequence_editor = format!("sequence.editor=cp '{}'", todo_file.display());
+        let is_root = self.git(&["rev-parse", "--verify", "-q", &format!("{from}^")]).is_err();
+        let base = format!("{from}^");
+        let mut args = vec!["-c", &sequence_editor, "-c", "core.editor=true", "rebase", "-i"];
+        if is_root {
+            args.push("--root");
+        } else {
+            args.push(&base);
+        }
+        let result = self.git(&args);
+        // A rebase stopped on a conflict still needs the reworded messages.
+        if self.repo_state() == RepoState::Clean {
+            std::fs::remove_dir_all(&dir).ok();
+        }
+        result
     }
 
     pub fn stashes(&self) -> Result<Vec<Stash>> {

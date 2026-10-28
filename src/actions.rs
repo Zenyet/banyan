@@ -196,6 +196,10 @@ pub fn commit_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, id: String, s
         let i = i.clone();
         model.update(cx, |m, cx| m.run(format!("Revert {}", short(&i)), move |repo| repo.revert(&i), cx))
     }));
+    let i = id.clone();
+    menu = menu.item(item("Interactively Rebase from Here...", model, move |model, window, cx| {
+        crate::rebase_dialog::open(model.clone(), i.clone(), window, cx)
+    }));
     menu = menu.separator();
 
     for (label, mode) in [
