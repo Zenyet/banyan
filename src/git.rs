@@ -827,6 +827,13 @@ impl Repo {
         result
     }
 
+    /// Commits in `branch` that HEAD lacks, and commits in HEAD that `branch` lacks.
+    pub fn compare_with_head(&self, branch: &str) -> Result<(Vec<Commit>, Vec<Commit>)> {
+        let incoming = self.log_revs(&[&format!("HEAD..{branch}")], 10_000)?;
+        let outgoing = self.log_revs(&[&format!("{branch}..HEAD")], 10_000)?;
+        Ok((incoming, outgoing))
+    }
+
     pub fn stashes(&self) -> Result<Vec<Stash>> {
         let out = self.git(&["stash", "list", &format!("--format=%gd{FIELD}%s")])?;
         Ok(out
@@ -1129,5 +1136,21 @@ mod tests {
         let mut files: Vec<_> = details.files.iter().map(|f| (f.status, f.path.as_str())).collect();
         files.sort();
         assert_eq!(files, vec![('A', "new.txt"), ('M', "a.txt")]);
+    }
+
+    #[test]
+    fn compare_lists_commits_on_each_side() {
+        let t = TempRepo::new("compare");
+        t.commit("a.txt", "a\n", "Base");
+        t.repo.git(&["checkout", "-q", "-b", "topic"]).unwrap();
+        t.commit("b.txt", "b\n", "Topic one");
+        t.commit("c.txt", "c\n", "Topic two");
+        t.repo.git(&["checkout", "-q", "main"]).unwrap();
+        t.commit("d.txt", "d\n", "Main only");
+
+        let (incoming, outgoing) = t.repo.compare_with_head("topic").unwrap();
+        let subjects = |commits: &[Commit]| commits.iter().map(|c| c.subject.clone()).collect::<Vec<_>>();
+        assert_eq!(subjects(&incoming), vec!["Topic two", "Topic one"]);
+        assert_eq!(subjects(&outgoing), vec!["Main only"]);
     }
 }

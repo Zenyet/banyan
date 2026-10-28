@@ -68,6 +68,12 @@ pub fn branch_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, branch: &Bran
         new_branch(model, n.clone(), window, cx)
     }));
     if !is_current {
+        let n = name.clone();
+        menu = menu.item(item(
+            format!("Compare with '{current_label}'"),
+            model,
+            move |model, window, cx| crate::compare::open(model.clone(), n.clone(), window, cx),
+        ));
         menu = menu.separator();
         let n = name.clone();
         menu = menu.item(item(

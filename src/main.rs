@@ -1,5 +1,7 @@
 mod actions;
 mod changes_view;
+mod commit_browser;
+mod compare;
 mod diff_pane;
 mod git;
 mod graph;
