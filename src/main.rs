@@ -12,6 +12,7 @@ mod history;
 mod log_view;
 mod merge_tool;
 mod model;
+mod patch;
 mod push_dialog;
 mod rebase_dialog;
 mod remotes_dialog;

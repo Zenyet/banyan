@@ -3,7 +3,7 @@
 use gpui_kit::component::{
     ActiveTheme as _, Sizable as _,
     button::{Button, ButtonVariants as _},
-    diff::{Diff, DiffFile, DiffMode, DiffState},
+    diff::{Diff, DiffFile, DiffLinePosition, DiffMode, DiffSide, DiffState},
     h_flex, v_flex,
 };
 use gpui_kit::assets::IconName;
@@ -51,6 +51,14 @@ impl DiffPane {
         self.message = Some(message.into());
         self.state.update(cx, |state, cx| state.set_files(Vec::new(), cx));
         cx.notify();
+    }
+
+    /// Scroll to a line of the new version of the file shown.
+    pub fn scroll_to_line(&mut self, line: usize, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, cx| {
+            let Some(path) = state.files().first().map(|f| f.path().clone()) else { return };
+            state.scroll_to_line(DiffLinePosition::new(path, DiffSide::Modified, line), cx);
+        });
     }
 
     pub fn clear(&mut self, cx: &mut Context<Self>) {

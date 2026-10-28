@@ -1,6 +1,6 @@
 //! The "Commit" tab: local changes with checkboxes, commit message and diff preview.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use gpui_kit::component::{
     ActiveTheme as _, Icon, Sizable as _, StyledExt as _,
@@ -17,6 +17,7 @@ use gpui_kit::*;
 
 use crate::diff_pane::DiffPane;
 use crate::git::{RepoState, StatusEntry};
+use crate::patch::{self, Hunk};
 use crate::log_view::panel_header;
 use crate::model::{RepoEvent, RepoModel};
 use crate::ui::{selection_bg, confirm, prompt_text, status_color};
@@ -62,6 +63,10 @@ pub struct ChangesView {
     amend: bool,
     diff: Entity<DiffPane>,
     diff_task: Option<Task<()>>,
+    /// Hunks of the selected file, when it can be committed partially.
+    hunks: Vec<Hunk>,
+    /// Hunk headers left out of the commit, per file.
+    excluded: HashMap<String, HashSet<String>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -100,6 +105,8 @@ impl ChangesView {
             amend: false,
             diff,
             diff_task: None,
+            hunks: Vec::new(),
+            excluded: HashMap::new(),
             _subscriptions: subscriptions,
         };
         this.sync_status(cx);
@@ -138,6 +145,7 @@ impl ChangesView {
             self.pending_message = model.repo.merge_message();
         }
         self.included.retain(|p| paths.contains(p));
+        self.excluded.retain(|p, _| paths.contains(p));
         if self.selected.as_ref().is_some_and(|p| !paths.contains(p)) {
             self.selected = None;
         }
@@ -169,24 +177,72 @@ impl ChangesView {
         };
         let repo = self.model.read(cx).repo.clone();
         let title: SharedString = entry.path.clone().into();
+        let splittable = can_commit_partially(&entry);
         self.diff_task = Some(cx.spawn(async move |this, cx| {
+            let path = entry.path.clone();
             let result = cx
                 .background_executor()
                 .spawn(async move { repo.worktree_diff(&entry) })
                 .await;
             this.update(cx, |this, cx| {
+                this.hunks = match (&result, splittable) {
+                    (Ok(patch), true) => patch::parse(patch).hunks,
+                    _ => Vec::new(),
+                };
+                // Forget exclusions of hunks that no longer exist.
+                if let Some(excluded) = this.excluded.get_mut(&path) {
+                    excluded.retain(|header| this.hunks.iter().any(|h| &h.header == header));
+                    if excluded.is_empty() {
+                        this.excluded.remove(&path);
+                    }
+                }
                 this.diff.update(cx, |diff, cx| match result {
                     Ok(patch) => diff.show_patch(title, &patch, cx),
                     Err(err) => diff.show_message(Some(title), format!("{err:#}"), cx),
-                })
+                });
+                cx.notify();
             })
             .ok();
         }));
     }
 
     fn toggle(&mut self, path: &str, cx: &mut Context<Self>) {
+        self.excluded.remove(path);
         if !self.included.remove(path) {
             self.included.insert(path.to_string());
+        }
+        cx.notify();
+    }
+
+    fn is_partial(&self, path: &str) -> bool {
+        self.included.contains(path) && self.excluded.get(path).is_some_and(|e| !e.is_empty())
+    }
+
+    fn is_hunk_included(&self, path: &str, header: &str) -> bool {
+        self.included.contains(path) && !self.excluded.get(path).is_some_and(|e| e.contains(header))
+    }
+
+    /// Include or leave out one hunk of the selected file. Checking a hunk of
+    /// an unchecked file includes just that hunk.
+    fn toggle_hunk(&mut self, header: String, cx: &mut Context<Self>) {
+        let Some(path) = self.selected.clone() else { return };
+        let all: HashSet<String> = self.hunks.iter().map(|h| h.header.clone()).collect();
+        if !self.included.contains(&path) {
+            self.included.insert(path.clone());
+            let mut excluded = all;
+            excluded.remove(&header);
+            self.excluded.insert(path, excluded);
+        } else {
+            let excluded = self.excluded.entry(path.clone()).or_default();
+            if !excluded.remove(&header) {
+                excluded.insert(header);
+            }
+            if *excluded == all {
+                self.excluded.remove(&path);
+                self.included.remove(&path);
+            } else if excluded.is_empty() {
+                self.excluded.remove(&path);
+            }
         }
         cx.notify();
     }
@@ -230,13 +286,28 @@ impl ChangesView {
             self.model.update(cx, |_, cx| cx.emit(RepoEvent::OpFailed("No changes selected to commit".into())));
             return;
         }
+        let partial: Vec<(String, Vec<String>)> = self
+            .excluded
+            .iter()
+            .filter(|(path, excluded)| self.included.contains(*path) && !excluded.is_empty())
+            .map(|(path, excluded)| (path.clone(), excluded.iter().cloned().collect()))
+            .collect();
+        let full: Vec<String> = paths
+            .into_iter()
+            .filter(|p| !partial.iter().any(|(path, _)| path == p))
+            .collect();
         let amend = self.amend;
         let label = if push { "Commit and Push" } else { "Commit" };
+        self.excluded.clear();
         self.model.update(cx, |model, cx| {
             model.run(
                 label,
                 move |repo| {
-                    repo.commit(&message, &paths, amend)?;
+                    if partial.is_empty() {
+                        repo.commit(&message, &full, amend)?;
+                    } else {
+                        repo.commit_partial(&message, &full, &partial, amend)?;
+                    }
                     if push {
                         repo.push()?;
                     }
@@ -419,6 +490,18 @@ impl ChangesView {
                     .text_color(cx.theme().muted_foreground)
                     .child(dir),
             )
+            .when(self.is_partial(&path), |row| {
+                row.child(
+                    div()
+                        .flex_none()
+                        .px_1()
+                        .rounded(px(3.))
+                        .text_xs()
+                        .bg(cx.theme().secondary)
+                        .text_color(cx.theme().secondary_foreground)
+                        .child("partial"),
+                )
+            })
             .on_click(cx.listener({
                 let path = path.clone();
                 move |this, event: &ClickEvent, window, cx| {
@@ -477,6 +560,57 @@ impl ChangesView {
                 menu
             })
         .into_any_element()
+    }
+
+    /// Checkboxes for the hunks of the selected file, like the gutter
+    /// checkboxes of JetBrains' commit diff.
+    fn render_hunks(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(path) = self.selected.clone() else {
+            return div().into_any_element();
+        };
+        let muted = cx.theme().muted_foreground;
+        let rows = self.hunks.iter().enumerate().map(|(ix, hunk)| {
+            let header = hunk.header.clone();
+            let line = hunk.new_start();
+            let context = hunk.context();
+            h_flex()
+                .id(("hunk", ix))
+                .h(px(24.))
+                .px_2()
+                .gap_2()
+                .text_sm()
+                .hover(|s| s.bg(cx.theme().list_hover))
+                .child(
+                    Checkbox::new(("hunk-include", ix))
+                        .checked(self.is_hunk_included(&path, &header))
+                        .on_click(cx.listener(move |this, _: &bool, _, cx| this.toggle_hunk(header.clone(), cx))),
+                )
+                .child(div().flex_none().text_color(muted).child(format!("Line {line}")))
+                .child(div().flex_1().min_w_0().truncate().child(if context.is_empty() {
+                    format!("Change {}", ix + 1)
+                } else {
+                    context.to_string()
+                }))
+                .child(div().flex_none().text_xs().text_color(cx.theme().success).child(format!("+{}", hunk.additions())))
+                .child(div().flex_none().text_xs().text_color(cx.theme().danger).child(format!("−{}", hunk.deletions())))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.diff.update(cx, |diff, cx| diff.scroll_to_line(line, cx))
+                }))
+        });
+        v_flex()
+            .flex_none()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(
+                div()
+                    .px_2()
+                    .pt_1()
+                    .text_xs()
+                    .text_color(muted)
+                    .child("Changes to commit in this file"),
+            )
+            .child(div().id("hunks").max_h(px(150.)).overflow_y_scroll().py_1().children(rows))
+            .into_any_element()
     }
 
     fn render_commit_box(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -599,6 +733,18 @@ impl Render for ChangesView {
                         .child(self.render_commit_box(cx)),
                 ),
             )
-            .child(resizable_panel().child(self.diff.clone()))
+            .child(
+                resizable_panel().child(
+                    v_flex()
+                        .size_full()
+                        .when(!self.hunks.is_empty(), |col| col.child(self.render_hunks(cx)))
+                        .child(div().flex_1().min_h_0().child(self.diff.clone())),
+                ),
+            )
     }
+}
+
+/// Only plain modifications of tracked files can be split into hunks.
+fn can_commit_partially(entry: &StatusEntry) -> bool {
+    entry.display_status() == 'M' && entry.orig_path.is_none()
 }

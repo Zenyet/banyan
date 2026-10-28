@@ -616,6 +616,68 @@ impl Repo {
         self.git(&args)
     }
 
+    /// Commit whole files plus only some hunks of others. `partial` pairs a
+    /// modified file with the headers of the hunks to leave out.
+    ///
+    /// The index is rebuilt from HEAD: staging done outside the app is not
+    /// kept, matching the changelist model of the Commit tab.
+    pub fn commit_partial(
+        &self,
+        message: &str,
+        full: &[String],
+        partial: &[(String, Vec<String>)],
+        amend: bool,
+    ) -> Result<String> {
+        if self.repo_state() != RepoState::Clean {
+            bail!("partial commits are not possible while a merge or rebase is in progress");
+        }
+        self.git(&["reset", "-q"])?;
+        if !full.is_empty() {
+            let mut add = vec!["add", "-A", "--"];
+            add.extend(full.iter().map(String::as_str));
+            self.git(&add)?;
+        }
+        for (path, excluded) in partial {
+            let diff = self.git(&["diff", "HEAD", "--", path])?;
+            let file = crate::patch::parse(&diff);
+            if let Some(patch) = crate::patch::select(&file, |hunk| !excluded.contains(&hunk.header)) {
+                self.git_with_input(&["apply", "--cached", "--recount", "-"], &patch)?;
+            }
+        }
+        let mut args = vec!["commit", "-m", message];
+        if amend {
+            args.push("--amend");
+        }
+        self.git(&args)
+    }
+
+    /// Run git with `input` on stdin.
+    pub fn git_with_input(&self, args: &[&str], input: &str) -> Result<String> {
+        use std::io::Write as _;
+        let mut child = command(&self.root, args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .context("failed to run git")?;
+        child.stdin.take().context("no stdin")?.write_all(input.as_bytes())?;
+        let output = child.wait_with_output()?;
+        if crate::console::is_recording() {
+            crate::console::record(
+                &self.root,
+                args,
+                &String::from_utf8_lossy(&output.stdout),
+                &String::from_utf8_lossy(&output.stderr),
+                output.status.success(),
+                0,
+            );
+        }
+        if !output.status.success() {
+            bail!("git {}: {}", args.join(" "), String::from_utf8_lossy(&output.stderr).trim());
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+
     pub fn rollback(&self, entries: &[StatusEntry]) -> Result<()> {
         for entry in entries {
             if entry.is_untracked() {
@@ -1362,5 +1424,33 @@ mod tests {
         assert_eq!(remotes[1].push_url, "https://example.com/c.git");
         t.repo.remove_remote("fork").unwrap();
         assert_eq!(t.repo.remotes().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn commit_partial_keeps_excluded_hunks_in_the_work_tree() {
+        let t = TempRepo::new("partial");
+        let original: String = (1..=20).map(|n| format!("line {n}\n")).collect();
+        t.commit("f.txt", &original, "Base");
+        t.commit("other.txt", "x\n", "Other");
+        let changed = original
+            .replace("line 2\n", "line two\n")
+            .replace("line 18\n", "line eighteen\n");
+        t.write("f.txt", &changed);
+        t.write("other.txt", "y\n");
+
+        let diff = t.repo.git(&["diff", "HEAD", "--", "f.txt"]).unwrap();
+        let hunks = crate::patch::parse(&diff).hunks;
+        assert_eq!(hunks.len(), 2);
+
+        // Commit other.txt whole and only the second hunk of f.txt.
+        t.repo
+            .commit_partial("Partial", &["other.txt".into()], &[("f.txt".into(), vec![hunks[0].header.clone()])], false)
+            .unwrap();
+        let committed = t.repo.git(&["show", "HEAD:f.txt"]).unwrap();
+        assert!(committed.contains("line 2\n") && committed.contains("line eighteen\n"));
+        assert_eq!(t.repo.git(&["show", "HEAD:other.txt"]).unwrap(), "y\n");
+        assert_eq!(std::fs::read_to_string(t.dir.join("f.txt")).unwrap(), changed);
+        let status: Vec<_> = t.repo.status().unwrap().into_iter().map(|e| e.path).collect();
+        assert_eq!(status, vec!["f.txt"]);
     }
 }
