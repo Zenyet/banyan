@@ -23,8 +23,26 @@ use crate::model::{RepoEvent, RepoModel};
 use crate::settings::Settings;
 use crate::ui::{confirm, prompt_text};
 
+actions!(
+    workspace,
+    [CommitChanges, PushCommits, UpdateProject, ShowLog, ShowCommitTab, ShowConsole, RefreshRepository]
+);
+
+/// JetBrains' macOS keymap where it has an equivalent.
+pub fn init(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("cmd-k", CommitChanges, Some("Workspace")),
+        KeyBinding::new("cmd-shift-k", PushCommits, Some("Workspace")),
+        KeyBinding::new("cmd-t", UpdateProject, Some("Workspace")),
+        KeyBinding::new("cmd-9", ShowLog, Some("Workspace")),
+        KeyBinding::new("cmd-0", ShowCommitTab, Some("Workspace")),
+        KeyBinding::new("cmd-r", RefreshRepository, Some("Workspace")),
+    ]);
+}
+
 pub struct Workspace {
     model: Entity<RepoModel>,
+    focus: FocusHandle,
     log: Entity<LogView>,
     changes: Entity<ChangesView>,
     console: Entity<ConsoleView>,
@@ -57,8 +75,11 @@ impl Workspace {
         ];
         let name = model.read(cx).repo.name();
         window.set_window_title(&format!("{name} – GitBrains"));
+        let focus = cx.focus_handle();
+        focus.focus(window, cx);
         Self {
             model,
+            focus,
             log,
             changes,
             console,
@@ -74,6 +95,11 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.model.update(cx, |model, cx| model.run(label, op, cx));
+    }
+
+    fn set_tab(&mut self, tab: usize, cx: &mut Context<Self>) {
+        self.tab = tab;
+        cx.notify();
     }
 
     fn render_branch_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -322,6 +348,26 @@ impl Render for Workspace {
             _ => self.console.clone().into_any_element(),
         };
         v_flex()
+            .key_context("Workspace")
+            .track_focus(&self.focus)
+            .on_action(cx.listener(|this, _: &CommitChanges, window, cx| {
+                this.set_tab(1, cx);
+                let message = this.changes.read(cx).message_focus(cx);
+                message.focus(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &PushCommits, window, cx| {
+                crate::push_dialog::open(this.model.clone(), window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &UpdateProject, _, cx| {
+                this.run("Update Project", |repo| repo.pull(), cx)
+            }))
+            .on_action(cx.listener(|this, _: &ShowLog, _, cx| this.set_tab(0, cx)))
+            .on_action(cx.listener(|this, _: &ShowCommitTab, _, cx| this.set_tab(1, cx)))
+            .on_action(cx.listener(|this, _: &ShowConsole, _, cx| this.set_tab(2, cx)))
+            .on_action(cx.listener(|this, _: &RefreshRepository, _, cx| {
+                this.model.update(cx, |model, cx| model.refresh(cx));
+                this.log.update(cx, |log, cx| log.reload(cx));
+            }))
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
@@ -339,8 +385,7 @@ impl Render for Workspace {
                     )
                     .child(Tab::new().label("Console").prefix(Icon::new(IconName::SquareTerminal).small()))
                     .on_click(cx.listener(|this, ix: &usize, _, cx| {
-                        this.tab = *ix;
-                        cx.notify();
+                        this.set_tab(*ix, cx);
                     })),
             )
             .child(div().flex_1().min_h_0().child(content))

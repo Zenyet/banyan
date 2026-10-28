@@ -53,6 +53,7 @@ fn main() {
         .run(move |cx| {
             gpui_kit::init(cx);
             log_view::init(cx);
+            workspace::init(cx);
             match askpass::start_server() {
                 Ok(requests) => askpass::spawn_prompt_loop(requests, cx),
                 Err(err) => eprintln!("credential prompts unavailable: {err}"),
@@ -79,6 +80,20 @@ fn main() {
                 Menu {
                     name: "GitBrains".into(),
                     items: vec![MenuItem::action("Quit GitBrains", Quit)],
+                    disabled: false,
+                },
+                Menu {
+                    name: "Git".into(),
+                    items: vec![
+                        MenuItem::action("Commit…", workspace::CommitChanges),
+                        MenuItem::action("Push…", workspace::PushCommits),
+                        MenuItem::action("Update Project", workspace::UpdateProject),
+                        MenuItem::separator(),
+                        MenuItem::action("Show Log", workspace::ShowLog),
+                        MenuItem::action("Show Commit", workspace::ShowCommitTab),
+                        MenuItem::action("Show Console", workspace::ShowConsole),
+                        MenuItem::action("Refresh", workspace::RefreshRepository),
+                    ],
                     disabled: false,
                 },
                 Menu {

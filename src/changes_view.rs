@@ -7,7 +7,7 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex, h_resizable,
-    input::{Textarea, TextareaState},
+    input::{InputEvent, Textarea, TextareaState},
     menu::{ContextMenuExt as _, PopupMenuItem},
     resizable_panel, v_flex,
 };
@@ -74,11 +74,19 @@ impl ChangesView {
         });
         let diff = cx.new(DiffPane::new);
         diff.update(cx, |diff, cx| diff.clear(cx));
-        let subscriptions = vec![cx.subscribe(&model, |this, _, event, cx| {
-            if let RepoEvent::Changed = event {
-                this.sync_status(cx);
-            }
-        })];
+        let subscriptions = vec![
+            cx.subscribe(&model, |this, _, event, cx| {
+                if let RepoEvent::Changed = event {
+                    this.sync_status(cx);
+                }
+            }),
+            // Cmd-Enter in the message commits, as in JetBrains.
+            cx.subscribe_in(&message, window, |this, _, event, window, cx| {
+                if let InputEvent::PressEnter { secondary: true, .. } = event {
+                    this.commit(false, window, cx);
+                }
+            }),
+        ];
         let mut this = Self {
             model,
             included: HashSet::new(),
@@ -96,6 +104,10 @@ impl ChangesView {
         };
         this.sync_status(cx);
         this
+    }
+
+    pub fn message_focus(&self, cx: &App) -> FocusHandle {
+        self.message.focus_handle(cx)
     }
 
     pub fn change_count(&self, cx: &App) -> usize {
