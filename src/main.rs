@@ -26,7 +26,7 @@ use crate::git::Repo;
 use crate::model::RepoModel;
 use crate::workspace::Workspace;
 
-actions!(gitbrains, [Quit, OpenRepository]);
+actions!(gitbrains, [Quit, OpenRepository, CloseWindow]);
 
 fn main() {
     let path = std::env::args()
@@ -43,10 +43,19 @@ fn main() {
                 gpui_kit::component::Theme::change(gpui_kit::component::ThemeMode::Dark, None, cx);
             }
             cx.on_action(|_: &Quit, cx| cx.quit());
+            cx.on_action(|_: &CloseWindow, cx| {
+                // The action is dispatched from inside the window, so close it afterwards.
+                if let Some(window) = cx.active_window() {
+                    cx.defer(move |cx| {
+                        window.update(cx, |_, window, _| window.remove_window()).ok();
+                    });
+                }
+            });
             cx.on_action(|_: &OpenRepository, cx| prompt_open_repo(None, cx));
             cx.bind_keys([
                 KeyBinding::new("cmd-q", Quit, None),
                 KeyBinding::new("cmd-o", OpenRepository, None),
+                KeyBinding::new("cmd-w", CloseWindow, None),
             ]);
             cx.set_menus(vec![
                 Menu {
@@ -56,7 +65,11 @@ fn main() {
                 },
                 Menu {
                     name: "File".into(),
-                    items: vec![MenuItem::action("Open Repository…", OpenRepository)],
+                    items: vec![
+                        MenuItem::action("Open Repository…", OpenRepository),
+                        MenuItem::separator(),
+                        MenuItem::action("Close Window", CloseWindow),
+                    ],
                     disabled: false,
                 },
             ]);
