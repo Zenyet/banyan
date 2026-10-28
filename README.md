@@ -43,3 +43,9 @@ cargo run -- /path/to/repo   # or run inside a repository; with no repository a 
 | `src/settings.rs` | Persisted theme and recent repositories |
 | `src/actions.rs` | Branch / commit context menus |
 | `src/workspace.rs` | Main window, toolbar, tabs |
+
+## Tests
+
+```sh
+cargo test   # graph layout, ref parsing, and git operations against throwaway repositories
+```

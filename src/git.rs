@@ -958,4 +958,176 @@ mod tests {
             ]
         );
     }
+
+    /// A throwaway repository under the system temp dir.
+    struct TempRepo {
+        repo: Repo,
+        dir: PathBuf,
+    }
+
+    impl TempRepo {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "gitbrains-test-{name}-{}-{:?}",
+                std::process::id(),
+                std::time::SystemTime::now()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            run(&dir, &["init", "-q", "-b", "main"]).unwrap();
+            run(&dir, &["config", "user.name", "Test"]).unwrap();
+            run(&dir, &["config", "user.email", "t@example.com"]).unwrap();
+            let repo = Repo::open(&dir).unwrap();
+            Self { repo, dir }
+        }
+
+        fn write(&self, path: &str, text: &str) {
+            let path = self.dir.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        }
+
+        fn commit(&self, path: &str, text: &str, message: &str) -> String {
+            self.write(path, text);
+            self.repo.git(&["add", "-A"]).unwrap();
+            self.repo.git(&["commit", "-q", "-m", message]).unwrap();
+            self.repo.git(&["rev-parse", "HEAD"]).unwrap().trim().to_string()
+        }
+
+        fn subjects(&self) -> Vec<String> {
+            self.repo
+                .git(&["log", "--format=%s"])
+                .unwrap()
+                .lines()
+                .map(str::to_string)
+                .collect()
+        }
+    }
+
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.dir).ok();
+        }
+    }
+
+    #[test]
+    fn interactive_rebase_squashes_rewords_and_drops() {
+        let t = TempRepo::new("rebase");
+        t.commit("a.txt", "0\n", "Base");
+        let one = t.commit("a.txt", "0\n1\n", "One");
+        let two = t.commit("b.txt", "2\n", "Two");
+        let three = t.commit("c.txt", "3\n", "Three");
+        let four = t.commit("d.txt", "4\n", "Four");
+
+        let commits = t.repo.rebase_commits(&one).unwrap();
+        let ids: Vec<_> = commits.iter().map(|c| c.id.clone()).collect();
+        assert_eq!(ids, vec![one.clone(), two.clone(), three.clone(), four.clone()]);
+
+        t.repo
+            .interactive_rebase(
+                &one,
+                &[
+                    (one.clone(), RebaseAction::Pick),
+                    (two, RebaseAction::Fixup),
+                    (three, RebaseAction::Drop),
+                    (four, RebaseAction::Reword("Four, reworded".into())),
+                ],
+            )
+            .unwrap();
+        assert_eq!(t.subjects(), vec!["Four, reworded", "One", "Base"]);
+        assert!(t.dir.join("b.txt").exists());
+        assert!(!t.dir.join("c.txt").exists());
+        assert_eq!(t.repo.repo_state(), RepoState::Clean);
+    }
+
+    #[test]
+    fn reordering_conflicting_commits_stops_and_aborts() {
+        let t = TempRepo::new("rebase-conflict");
+        t.commit("a.txt", "0\n", "Base");
+        let one = t.commit("a.txt", "0\n1\n", "One");
+        let two = t.commit("a.txt", "0\n1\n2\n", "Two");
+        let result = t
+            .repo
+            .interactive_rebase(&one, &[(two, RebaseAction::Pick), (one.clone(), RebaseAction::Pick)]);
+        assert!(result.is_err());
+        assert_eq!(t.repo.repo_state(), RepoState::Rebasing);
+        assert!(t.repo.status().unwrap().iter().any(|e| e.is_conflicted()));
+        t.repo.abort(RepoState::Rebasing).unwrap();
+        assert_eq!(t.repo.repo_state(), RepoState::Clean);
+        assert_eq!(t.subjects(), vec!["Two", "One", "Base"]);
+    }
+
+    #[test]
+    fn first_commit_cannot_be_squashed() {
+        let t = TempRepo::new("rebase-invalid");
+        t.commit("a.txt", "0\n", "Base");
+        let one = t.commit("a.txt", "1\n", "One");
+        assert!(t.repo.interactive_rebase(&one, &[(one.clone(), RebaseAction::Squash)]).is_err());
+    }
+
+    #[test]
+    fn push_sets_upstream_then_reports_nothing_outgoing() {
+        let t = TempRepo::new("push");
+        let remote = TempRepo::new("push-remote");
+        run(&remote.dir, &["config", "receive.denyCurrentBranch", "ignore"]).unwrap();
+        t.repo.git(&["remote", "add", "origin", &remote.dir.display().to_string()]).unwrap();
+        t.commit("a.txt", "a\n", "First");
+        t.commit("a.txt", "b\n", "Second");
+
+        let target = t.repo.push_target().unwrap();
+        assert!(target.is_new);
+        assert_eq!((target.remote.as_str(), target.remote_branch.as_str()), ("origin", "main"));
+        assert_eq!(t.repo.outgoing(&target).unwrap().len(), 2);
+
+        t.repo.push_to(&target, false).unwrap();
+        let target = t.repo.push_target().unwrap();
+        assert!(!target.is_new);
+        assert!(t.repo.outgoing(&target).unwrap().is_empty());
+
+        t.commit("a.txt", "c\n", "Third");
+        let outgoing = t.repo.outgoing(&target).unwrap();
+        assert_eq!(outgoing.len(), 1);
+        assert_eq!(outgoing[0].subject, "Third");
+    }
+
+    #[test]
+    fn history_follows_renames_and_blame_attributes_lines() {
+        let t = TempRepo::new("history");
+        t.commit("old.txt", "one\n", "Create");
+        t.repo.git(&["mv", "old.txt", "new.txt"]).unwrap();
+        t.repo.git(&["commit", "-q", "-m", "Rename"]).unwrap();
+        t.commit("new.txt", "one\ntwo\n", "Extend");
+
+        let history = t.repo.file_history("new.txt").unwrap();
+        let subjects: Vec<_> = history.iter().map(|r| r.commit.subject.as_str()).collect();
+        assert_eq!(subjects, vec!["Extend", "Rename", "Create"]);
+        assert_eq!(history.last().unwrap().path, "old.txt");
+
+        let blame = t.repo.blame("HEAD", "new.txt").unwrap();
+        assert_eq!(blame.len(), 2);
+        assert_eq!(blame[0].summary, "Create");
+        assert_eq!(blame[1].summary, "Extend");
+        assert_eq!(blame[1].text, "two");
+    }
+
+    #[test]
+    fn commit_only_selected_paths() {
+        let t = TempRepo::new("commit");
+        t.commit("a.txt", "a\n", "Base");
+        t.write("a.txt", "changed\n");
+        t.write("new.txt", "new\n");
+        t.write("skip.txt", "skip\n");
+        let status = t.repo.status().unwrap();
+        assert_eq!(status.len(), 3);
+        assert!(status.iter().any(|e| e.path == "new.txt" && e.is_untracked()));
+
+        t.repo
+            .commit("Selected", &["a.txt".into(), "new.txt".into()], false)
+            .unwrap();
+        let remaining: Vec<_> = t.repo.status().unwrap().into_iter().map(|e| e.path).collect();
+        assert_eq!(remaining, vec!["skip.txt"]);
+        let details = t.repo.commit_details("HEAD").unwrap();
+        let mut files: Vec<_> = details.files.iter().map(|f| (f.status, f.path.as_str())).collect();
+        files.sort();
+        assert_eq!(files, vec![('A', "new.txt"), ('M', "a.txt")]);
+    }
 }
