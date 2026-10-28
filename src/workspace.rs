@@ -19,6 +19,7 @@ use crate::changes_view::ChangesView;
 use crate::git::{RefKind, RepoState};
 use crate::log_view::LogView;
 use crate::model::{RepoEvent, RepoModel};
+use crate::settings::Settings;
 use crate::ui::{confirm, prompt_text};
 
 pub struct Workspace {
@@ -211,8 +212,29 @@ impl Workspace {
                     .label(name)
                     .ghost()
                     .small()
-                    .tooltip(root)
-                    .on_click(|_, _, cx| crate::prompt_open_repo(None, cx)),
+                    .dropdown_caret(true)
+                    .dropdown_menu(move |mut menu, _, _| {
+                        menu = menu.item(
+                            PopupMenuItem::new("Open Repository…")
+                                .icon(IconName::FolderOpen)
+                                .on_click(|_, _, cx| crate::prompt_open_repo(None, cx)),
+                        );
+                        let recent: Vec<_> = Settings::load()
+                            .recent
+                            .into_iter()
+                            .filter(|path| path.display().to_string() != root)
+                            .collect();
+                        if !recent.is_empty() {
+                            menu = menu.separator().label("Recent Repositories");
+                            for path in recent {
+                                let label = recent_label(&path);
+                                menu = menu.item(PopupMenuItem::new(label).on_click(move |_, _, cx| {
+                                    crate::open_path(&path, None, cx)
+                                }));
+                            }
+                        }
+                        menu
+                    }),
             )
             .child(self.render_branch_button(cx))
             .child(div().w(px(1.)).h(px(18.)).mx_1().bg(cx.theme().border))
@@ -261,6 +283,7 @@ impl Workspace {
                     .on_click(move |_, window, cx| {
                         let mode = if is_dark { ThemeMode::Light } else { ThemeMode::Dark };
                         Theme::change(mode, Some(window), cx);
+                        Settings::update(|settings| settings.dark = !is_dark);
                     }),
             )
     }
@@ -318,4 +341,22 @@ impl Render for Workspace {
                     .font_normal(),
             )
     }
+}
+
+/// "name — ~/dir/…/parent" for the recent repositories menu.
+fn recent_label(path: &std::path::Path) -> String {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut dir = path.parent().map(|p| p.display().to_string()).unwrap_or_default();
+    if let Some(home) = std::env::var_os("HOME").map(|h| h.to_string_lossy().into_owned())
+        && let Some(rest) = dir.strip_prefix(&home)
+    {
+        dir = format!("~{rest}");
+    }
+    let chars: Vec<char> = dir.chars().collect();
+    if chars.len() > 48 {
+        let head: String = chars[..16].iter().collect();
+        let tail: String = chars[chars.len() - 28..].iter().collect();
+        dir = format!("{head}…{tail}");
+    }
+    format!("{name} — {dir}")
 }

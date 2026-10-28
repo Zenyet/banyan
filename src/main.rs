@@ -7,6 +7,7 @@ mod history;
 mod log_view;
 mod merge_tool;
 mod model;
+mod settings;
 mod ui;
 mod workspace;
 
@@ -38,6 +39,9 @@ fn main() {
         .run(move |cx| {
             gpui_kit::init(cx);
             log_view::init(cx);
+            if settings::Settings::load().dark {
+                gpui_kit::component::Theme::change(gpui_kit::component::ThemeMode::Dark, None, cx);
+            }
             cx.on_action(|_: &Quit, cx| cx.quit());
             cx.on_action(|_: &OpenRepository, cx| prompt_open_repo(None, cx));
             cx.bind_keys([
@@ -83,6 +87,7 @@ fn window_options(cx: &App) -> WindowOptions {
 }
 
 pub fn open_repo_window(repo: Repo, cx: &mut App) {
+    settings::Settings::add_recent(repo.root().to_path_buf());
     let options = window_options(cx);
     gpui_kit::open_window(options, cx, |window, cx| {
         let model = cx.new(|cx| RepoModel::new(repo, cx));
@@ -108,7 +113,7 @@ pub fn prompt_open_repo(replace: Option<AnyWindowHandle>, cx: &mut App) {
     .detach();
 }
 
-fn open_path(path: &Path, replace: Option<AnyWindowHandle>, cx: &mut App) {
+pub fn open_path(path: &Path, replace: Option<AnyWindowHandle>, cx: &mut App) {
     match Repo::open(path) {
         Ok(repo) => {
             open_repo_window(repo, cx);

@@ -21,6 +21,7 @@ cargo run -- /path/to/repo   # or run inside a repository; with no repository a 
 - **File history** and **Annotate** (git blame with age shading), from the changed-files tree or the Commit tab.
 - Fetch / Pull / Push, stash pop / apply / drop, light / dark theme, auto-refresh when the window regains focus.
 - Log loads 5000 commits at a time ("Load more" at the bottom); Home / End / PageUp / PageDown in the commit list.
+- Remembers the theme and recently opened repositories (`~/Library/Application Support/GitBrains/settings`).
 
 ## Layout
 
@@ -34,5 +35,6 @@ cargo run -- /path/to/repo   # or run inside a repository; with no repository a 
 | `src/diff_pane.rs` | Diff preview |
 | `src/merge_tool.rs` | Conflict resolution dialog |
 | `src/history.rs` | File history and annotate dialogs |
+| `src/settings.rs` | Persisted theme and recent repositories |
 | `src/actions.rs` | Branch / commit context menus |
 | `src/workspace.rs` | Main window, toolbar, tabs |
