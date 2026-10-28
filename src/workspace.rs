@@ -203,6 +203,7 @@ impl Workspace {
     }
 
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let repo_model = self.model.clone();
         let model = self.model.read(cx);
         let busy = model.busy.clone();
         let name = model.repo.name();
@@ -233,6 +234,12 @@ impl Workspace {
                             PopupMenuItem::new("Clone Repository…")
                                 .icon(IconName::Download)
                                 .on_click(|_, window, cx| crate::clone_dialog::open(None, window, cx)),
+                        );
+                        let m = repo_model.clone();
+                        menu = menu.item(
+                            PopupMenuItem::new("Manage Remotes…")
+                                .icon(IconName::Globe)
+                                .on_click(move |_, window, cx| crate::remotes_dialog::open(m.clone(), window, cx)),
                         );
                         let recent: Vec<_> = Settings::load()
                             .recent

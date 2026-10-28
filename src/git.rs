@@ -159,6 +159,13 @@ pub enum RebaseAction {
     Drop,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Remote {
+    pub name: String,
+    pub fetch_url: String,
+    pub push_url: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct PushTarget {
     pub branch: String,
@@ -889,6 +896,48 @@ impl Repo {
         Ok((incoming, outgoing))
     }
 
+    pub fn remotes(&self) -> Result<Vec<Remote>> {
+        let mut remotes: Vec<Remote> = Vec::new();
+        for line in self.git(&["remote", "-v"])?.lines() {
+            // e.g. "origin\thttps://example.com/repo.git (fetch)"
+            let Some((name, rest)) = line.split_once('\t') else { continue };
+            let Some((url, kind)) = rest.rsplit_once(' ') else { continue };
+            let remote = match remotes.iter_mut().find(|r| r.name == name) {
+                Some(remote) => remote,
+                None => {
+                    remotes.push(Remote {
+                        name: name.to_string(),
+                        fetch_url: String::new(),
+                        push_url: String::new(),
+                    });
+                    remotes.last_mut().unwrap()
+                }
+            };
+            match kind {
+                "(fetch)" => remote.fetch_url = url.to_string(),
+                "(push)" => remote.push_url = url.to_string(),
+                _ => {}
+            }
+        }
+        Ok(remotes)
+    }
+
+    pub fn add_remote(&self, name: &str, url: &str) -> Result<String> {
+        self.git(&["remote", "add", "--", name, url])
+    }
+
+    pub fn set_remote_url(&self, name: &str, url: &str) -> Result<String> {
+        self.git(&["remote", "set-url", "--", name, url])
+    }
+
+    pub fn rename_remote(&self, old: &str, new: &str) -> Result<String> {
+        self.git(&["remote", "rename", "--", old, new])
+    }
+
+    pub fn remove_remote(&self, name: &str) -> Result<String> {
+        self.git(&["remote", "remove", "--", name])
+    }
+
     pub fn stashes(&self) -> Result<Vec<Stash>> {
         let format = format!("--format=%gd{FIELD}%H{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%at{FIELD}%s");
         let out = self.git(&["stash", "list", &format])?;
@@ -1290,5 +1339,21 @@ mod tests {
         assert_eq!(repo.current_branch().as_deref(), Some("main"));
         assert!(dest.join("a.txt").exists());
         std::fs::remove_dir_all(&dest).ok();
+    }
+
+    #[test]
+    fn manage_remotes() {
+        let t = TempRepo::new("remotes");
+        assert!(t.repo.remotes().unwrap().is_empty());
+        t.repo.add_remote("origin", "https://example.com/a.git").unwrap();
+        t.repo.add_remote("upstream", "git@example.com:b.git").unwrap();
+        t.repo.set_remote_url("origin", "https://example.com/c.git").unwrap();
+        t.repo.rename_remote("upstream", "fork").unwrap();
+        let remotes = t.repo.remotes().unwrap();
+        let summary: Vec<_> = remotes.iter().map(|r| (r.name.as_str(), r.fetch_url.as_str())).collect();
+        assert_eq!(summary, vec![("fork", "git@example.com:b.git"), ("origin", "https://example.com/c.git")]);
+        assert_eq!(remotes[1].push_url, "https://example.com/c.git");
+        t.repo.remove_remote("fork").unwrap();
+        assert_eq!(t.repo.remotes().unwrap().len(), 1);
     }
 }
