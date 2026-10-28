@@ -19,6 +19,7 @@ mod remotes_dialog;
 mod settings;
 mod stash_viewer;
 mod ui;
+mod update_dialog;
 mod watcher;
 mod workspace;
 

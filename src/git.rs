@@ -881,6 +881,21 @@ impl Repo {
         self.git(&["pull", "--no-edit"])
     }
 
+    /// JetBrains' "Update Project": pull the tracked branch by merging or
+    /// rebasing, stashing local changes around it.
+    pub fn update_project(&self, rebase: bool) -> Result<String> {
+        let branch = self.current_branch().context("cannot update a detached HEAD")?;
+        if self.git(&["config", "--get", &format!("branch.{branch}.merge")]).is_err() {
+            bail!("{branch} has no tracked remote branch; push it first or set an upstream");
+        }
+        self.git(&[
+            "pull",
+            "--autostash",
+            "--no-edit",
+            if rebase { "--rebase" } else { "--no-rebase" },
+        ])
+    }
+
     /// Where the current branch pushes to: its upstream, or a new branch of
     /// the same name on the first remote.
     pub fn push_target(&self) -> Result<PushTarget> {
@@ -1539,5 +1554,34 @@ mod tests {
         t.write("a.txt", "local\n");
         t.repo.force_checkout("topic", false).unwrap();
         assert_eq!(std::fs::read_to_string(t.dir.join("a.txt")).unwrap(), "topic\n");
+    }
+
+    #[test]
+    fn update_project_rebases_onto_incoming_and_keeps_local_changes() {
+        let origin = TempRepo::new("update-origin");
+        origin.commit("a.txt", "a\n", "Base");
+        run(&origin.dir, &["config", "receive.denyCurrentBranch", "ignore"]).unwrap();
+        let local = TempRepo::new("update-local");
+        local.repo.git(&["remote", "add", "origin", &origin.dir.display().to_string()]).unwrap();
+        local.repo.git(&["fetch", "-q", "origin"]).unwrap();
+        local.repo.git(&["reset", "-q", "--hard", "origin/main"]).unwrap();
+        local.repo.git(&["branch", "-q", "--set-upstream-to=origin/main"]).unwrap();
+
+        origin.commit("b.txt", "b\n", "Incoming");
+        local.commit("c.txt", "c\n", "Local commit");
+        local.write("a.txt", "uncommitted\n");
+
+        local.repo.update_project(true).unwrap();
+        assert_eq!(local.subjects(), vec!["Local commit", "Incoming", "Base"]);
+        assert!(local.dir.join("b.txt").exists());
+        assert_eq!(std::fs::read_to_string(local.dir.join("a.txt")).unwrap(), "uncommitted\n");
+    }
+
+    #[test]
+    fn update_project_needs_an_upstream() {
+        let t = TempRepo::new("update-no-upstream");
+        t.commit("a.txt", "a\n", "Base");
+        let err = t.repo.update_project(false).unwrap_err();
+        assert!(format!("{err:#}").contains("no tracked remote branch"));
     }
 }

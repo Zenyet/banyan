@@ -299,10 +299,13 @@ impl Workspace {
             .child(
                 Button::new("pull")
                     .icon(IconName::ArrowDownToLine)
-                    .label("Pull")
+                    .label("Update")
                     .ghost()
                     .small()
-                    .on_click(cx.listener(|this, _, _, cx| this.run("Pull", |repo| repo.pull(), cx))),
+                    .tooltip("Update Project (⌘T)")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        crate::update_dialog::open(this.model.clone(), window, cx)
+                    })),
             )
             .child(
                 Button::new("push")
@@ -360,8 +363,8 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &PushCommits, window, cx| {
                 crate::push_dialog::open(this.model.clone(), window, cx)
             }))
-            .on_action(cx.listener(|this, _: &UpdateProject, _, cx| {
-                this.run("Update Project", |repo| repo.pull(), cx)
+            .on_action(cx.listener(|this, _: &UpdateProject, window, cx| {
+                crate::update_dialog::open(this.model.clone(), window, cx)
             }))
             .on_action(cx.listener(|this, _: &ShowLog, _, cx| this.set_tab(0, cx)))
             .on_action(cx.listener(|this, _: &ShowCommitTab, _, cx| this.set_tab(1, cx)))
