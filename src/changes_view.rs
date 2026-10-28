@@ -571,7 +571,7 @@ impl ChangesView {
         let muted = cx.theme().muted_foreground;
         let rows = self.hunks.iter().enumerate().map(|(ix, hunk)| {
             let header = hunk.header.clone();
-            let line = hunk.new_start();
+            let line = hunk.first_changed_line();
             let context = hunk.context();
             h_flex()
                 .id(("hunk", ix))

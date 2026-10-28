@@ -26,6 +26,16 @@ impl Hunk {
             .unwrap_or_default()
     }
 
+    /// Line of the first change in the new file, skipping leading context.
+    pub fn first_changed_line(&self) -> usize {
+        let leading_context = self
+            .lines
+            .iter()
+            .take_while(|line| line.starts_with(' '))
+            .count();
+        self.new_start() + leading_context
+    }
+
     /// First line of the hunk in the new file.
     pub fn new_start(&self) -> usize {
         self.header
@@ -114,6 +124,8 @@ index 1111111..2222222 100644
         assert_eq!(file.hunks[0].context(), "fn first()");
         assert_eq!((file.hunks[0].additions(), file.hunks[0].deletions()), (1, 1));
         assert_eq!(file.hunks[1].new_start(), 8);
+        assert_eq!(file.hunks[0].first_changed_line(), 1);
+        assert_eq!(file.hunks[1].first_changed_line(), 10);
         assert_eq!((file.hunks[1].additions(), file.hunks[1].deletions()), (1, 0));
     }
 
