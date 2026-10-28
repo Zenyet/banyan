@@ -12,6 +12,7 @@ mod model;
 mod push_dialog;
 mod rebase_dialog;
 mod settings;
+mod stash_viewer;
 mod ui;
 mod workspace;
 

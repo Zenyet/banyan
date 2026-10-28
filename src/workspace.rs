@@ -149,6 +149,12 @@ impl Workspace {
                 if stashes.is_empty() {
                     return menu.label("No stashes");
                 }
+                let m = model.clone();
+                menu = menu
+                    .item(PopupMenuItem::new("Show Stashes…").on_click(move |_, window, cx| {
+                        crate::stash_viewer::open(m.clone(), window, cx)
+                    }))
+                    .separator();
                 for stash in stashes {
                     let m = model.clone();
                     menu = menu.submenu(

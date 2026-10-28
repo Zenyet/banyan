@@ -170,8 +170,11 @@ pub struct PushTarget {
 
 #[derive(Clone, Debug)]
 pub struct Stash {
+    /// e.g. `stash@{0}`.
     pub name: String,
     pub message: String,
+    /// The stash commit; its first parent is the commit it was made on.
+    pub commit: Commit,
 }
 
 impl Repo {
@@ -835,14 +838,31 @@ impl Repo {
     }
 
     pub fn stashes(&self) -> Result<Vec<Stash>> {
-        let out = self.git(&["stash", "list", &format!("--format=%gd{FIELD}%s")])?;
+        let format = format!("--format=%gd{FIELD}%H{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%at{FIELD}%s");
+        let out = self.git(&["stash", "list", &format])?;
         Ok(out
             .lines()
             .filter_map(|line| {
-                let (name, message) = line.split_once(FIELD)?;
+                let mut fields = line.split(FIELD);
+                let name = fields.next()?.to_string();
+                let id = fields.next()?.to_string();
+                let parents = fields.next()?.split_whitespace().map(str::to_string).collect();
+                let author = fields.next()?.to_string();
+                let email = fields.next()?.to_string();
+                let time = fields.next()?.parse().unwrap_or(0);
+                let message = fields.next().unwrap_or_default().to_string();
                 Some(Stash {
-                    name: name.to_string(),
-                    message: message.to_string(),
+                    name,
+                    message: message.clone(),
+                    commit: Commit {
+                        id,
+                        parents,
+                        author,
+                        email,
+                        time,
+                        subject: message,
+                        refs: Vec::new(),
+                    },
                 })
             })
             .collect())
@@ -1152,5 +1172,23 @@ mod tests {
         let subjects = |commits: &[Commit]| commits.iter().map(|c| c.subject.clone()).collect::<Vec<_>>();
         assert_eq!(subjects(&incoming), vec!["Topic two", "Topic one"]);
         assert_eq!(subjects(&outgoing), vec!["Main only"]);
+    }
+
+    #[test]
+    fn stashes_expose_their_commit_and_files() {
+        let t = TempRepo::new("stash");
+        let base = t.commit("a.txt", "a\n", "Base");
+        t.write("a.txt", "changed\n");
+        t.repo.stash("Work in progress").unwrap();
+
+        let stashes = t.repo.stashes().unwrap();
+        assert_eq!(stashes.len(), 1);
+        assert_eq!(stashes[0].name, "stash@{0}");
+        assert!(stashes[0].message.contains("Work in progress"));
+        assert_eq!(stashes[0].commit.parents.first(), Some(&base));
+
+        let details = t.repo.commit_details(&stashes[0].commit.id).unwrap();
+        let files: Vec<_> = details.files.iter().map(|f| (f.status, f.path.as_str())).collect();
+        assert_eq!(files, vec![('M', "a.txt")]);
     }
 }

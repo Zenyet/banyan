@@ -49,6 +49,10 @@ impl CommitBrowser {
         self.select(if self.commits.is_empty() { None } else { Some(0) }, cx);
     }
 
+    pub fn selected_index(&self) -> Option<usize> {
+        self.selected
+    }
+
     fn select(&mut self, ix: Option<usize>, cx: &mut Context<Self>) {
         self.selected = ix;
         self.details = None;
