@@ -14,6 +14,7 @@ pub struct DiffPane {
     title: Option<SharedString>,
     message: Option<SharedString>,
     mode: DiffMode,
+    _relayout: Option<Task<()>>,
 }
 
 impl DiffPane {
@@ -24,6 +25,7 @@ impl DiffPane {
             title: None,
             message: None,
             mode,
+            _relayout: None,
         }
     }
 
@@ -37,6 +39,7 @@ impl DiffPane {
             Ok(files) => {
                 self.message = None;
                 self.state.update(cx, |state, cx| state.set_files(files, cx));
+                self.relayout_after_resize(cx);
             }
             Err(err) => {
                 self.message = Some(format!("Cannot show diff: {err:?}").into());
@@ -44,6 +47,22 @@ impl DiffPane {
             }
         }
         cx.notify();
+    }
+
+    /// The diff sizes its columns from the width it was last painted at. When
+    /// it first appears inside a growing container (a dialog's entrance, a
+    /// window settling at launch) that width is stale, so lay it out again
+    /// once the container has its final size.
+    fn relayout_after_resize(&mut self, cx: &mut Context<Self>) {
+        let state = self.state.downgrade();
+        self._relayout = Some(cx.spawn(async move |_, cx| {
+            for delay in [16, 400] {
+                cx.background_executor().timer(std::time::Duration::from_millis(delay)).await;
+                if state.update(cx, |_, cx| cx.notify()).is_err() {
+                    return;
+                }
+            }
+        }));
     }
 
     pub fn show_message(&mut self, title: Option<SharedString>, message: impl Into<SharedString>, cx: &mut Context<Self>) {
