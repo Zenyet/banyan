@@ -130,7 +130,7 @@ impl Workspace {
                         });
                     }
                 }
-                menu.max_h(px(560.)).scrollable(true)
+                menu
             })
     }
 
@@ -284,8 +284,12 @@ impl Render for Workspace {
                     .underline()
                     .small()
                     .selected_index(self.tab)
-                    .child(Tab::new().label("Log").icon(IconName::GitGraph))
-                    .child(Tab::new().label(format!("Commit ({changes})")).icon(IconName::GitCommitHorizontal))
+                    .child(Tab::new().label("Log").prefix(Icon::new(IconName::GitGraph).small()))
+                    .child(
+                        Tab::new()
+                            .label(format!("Commit ({changes})"))
+                            .prefix(Icon::new(IconName::GitCommitHorizontal).small()),
+                    )
                     .on_click(cx.listener(|this, ix: &usize, _, cx| {
                         this.tab = *ix;
                         cx.notify();

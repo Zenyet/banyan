@@ -19,7 +19,7 @@ use crate::diff_pane::DiffPane;
 use crate::git::{RepoState, StatusEntry};
 use crate::log_view::panel_header;
 use crate::model::{RepoEvent, RepoModel};
-use crate::ui::{confirm, prompt_text, status_color};
+use crate::ui::{selection_bg, confirm, prompt_text, status_color};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Group {
@@ -367,7 +367,7 @@ impl ChangesView {
             .pr_2()
             .gap_1()
             .text_sm()
-            .when(selected, |row| row.bg(cx.theme().list_active))
+            .when(selected, |row| row.bg(selection_bg()))
             .when(!selected, |row| row.hover(|s| s.bg(cx.theme().list_hover)))
             .child(
                 Checkbox::new(SharedString::from(format!("include-{path}")))

@@ -8,7 +8,7 @@ use gpui_kit::component::{
     ActiveTheme as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
-    input::{Input, InputState},
+    input::{Input, InputEvent, InputState},
     tree::TreeItem,
     v_flex,
 };
@@ -25,6 +25,13 @@ pub fn lane_color(ix: usize) -> Hsla {
         0xc78a4a,
     ];
     rgb(COLORS[ix % COLORS.len()]).into()
+}
+
+/// Selected row background, readable in both themes.
+pub fn selection_bg() -> Hsla {
+    let mut color: Hsla = rgb(0x4d8ee8).into();
+    color.a = 0.22;
+    color
 }
 
 pub fn status_color(status: char, cx: &App) -> Hsla {
@@ -136,6 +143,9 @@ fn to_items(node: DirNode, prefix: &str, id_prefix: &str) -> Vec<TreeItem> {
     items
 }
 
+/// Accepts the dialog's value; returns whether it was valid.
+type SubmitFn = dyn Fn(&mut Window, &mut App) -> bool;
+
 /// Ask for a line of text in a dialog.
 pub fn prompt_text(
     title: impl Into<SharedString>,
@@ -149,24 +159,43 @@ pub fn prompt_text(
     let ok_label = ok_label.into();
     let default_value = default_value.into();
     let input = cx.new(|cx| InputState::new(window, cx).default_value(default_value));
-    let on_ok = Rc::new(on_ok);
+    // Returns whether the value was accepted.
+    let submit: Rc<SubmitFn> = Rc::new({
+        let input = input.clone();
+        move |window, cx| {
+            let value = input.read(cx).value().trim().to_string();
+            if value.is_empty() {
+                return false;
+            }
+            on_ok(value, window, cx);
+            true
+        }
+    });
+    // The input swallows Enter, so confirm from its event. The window is busy
+    // dispatching the key at that point, so defer until it is free.
+    let handle = window.window_handle();
+    let on_enter = submit.clone();
+    cx.subscribe(&input, move |_, event: &InputEvent, cx| {
+        if let InputEvent::PressEnter { .. } = event {
+            let on_enter = on_enter.clone();
+            cx.defer(move |cx| {
+                handle
+                    .update(cx, |_, window, cx| {
+                        if on_enter(window, cx) {
+                            window.close_dialog(cx);
+                        }
+                    })
+                    .ok();
+            });
+        }
+    })
+    .detach();
     let needs_focus = std::cell::Cell::new(true);
     window.open_dialog(cx, move |dialog, window, cx| {
         if needs_focus.replace(false) {
             input.focus_handle(cx).focus(window, cx);
         }
-        let submit = {
-            let input = input.clone();
-            let on_ok = on_ok.clone();
-            move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                let value = input.read(cx).value().trim().to_string();
-                if value.is_empty() {
-                    return;
-                }
-                window.close_dialog(cx);
-                on_ok(value, window, cx);
-            }
-        };
+        let on_click = submit.clone();
         dialog
             .title(title.clone())
             .w(px(420.))
@@ -174,7 +203,11 @@ pub fn prompt_text(
                 v_flex()
                     .gap_4()
                     .child(Input::new(&input))
-                    .child(dialog_buttons(ok_label.clone(), false, submit)),
+                    .child(dialog_buttons(ok_label.clone(), false, move |_, window, cx| {
+                        if on_click(window, cx) {
+                            window.close_dialog(cx);
+                        }
+                    })),
             )
     });
 }

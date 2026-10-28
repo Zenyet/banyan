@@ -24,7 +24,7 @@ use crate::diff_pane::DiffPane;
 use crate::git::{Branch, Commit, CommitDetails, FileChange, RefKind};
 use crate::graph::{self, GraphRow, Half};
 use crate::model::{RepoEvent, RepoModel};
-use crate::ui::{FILE_PREFIX, file_tree, format_full_time, format_time, lane_color, path_tree, ref_label, status_color};
+use crate::ui::{selection_bg, FILE_PREFIX, file_tree, format_full_time, format_time, lane_color, path_tree, ref_label, status_color};
 
 const ROW_HEIGHT: Pixels = px(24.);
 const LANE_WIDTH: Pixels = px(14.);
@@ -544,7 +544,7 @@ impl LogView {
             .pr_2()
             .text_sm()
             .text_color(fg)
-            .when(selected, |row| row.bg(cx.theme().list_active))
+            .when(selected, |row| row.bg(selection_bg()))
             .when(!selected, |row| row.hover(|style| style.bg(cx.theme().list_hover)))
             .on_mouse_down(
                 MouseButton::Left,
@@ -566,7 +566,7 @@ impl LogView {
                         cell.child(
                             canvas(
                                 |_, _, _| {},
-                                move |bounds, _, window, _| paint_graph(&graph_row, is_head, bounds, window),
+                                move |bounds, _, window, cx| paint_graph(&graph_row, is_head, bounds, window, cx),
                             )
                             .size_full(),
                         )
@@ -764,7 +764,7 @@ pub fn panel_header(title: impl Into<SharedString>, cx: &App) -> impl IntoElemen
         .child(title.into())
 }
 
-fn paint_graph(row: &GraphRow, is_head: bool, bounds: Bounds<Pixels>, window: &mut Window) {
+fn paint_graph(row: &GraphRow, is_head: bool, bounds: Bounds<Pixels>, window: &mut Window, cx: &App) {
     let x = |lane: usize| bounds.origin.x + GRAPH_PADDING + LANE_WIDTH * (lane as f32 + 0.5);
     let top = bounds.origin.y;
     let mid = top + bounds.size.height / 2.;
@@ -787,7 +787,7 @@ fn paint_graph(row: &GraphRow, is_head: bool, bounds: Bounds<Pixels>, window: &m
     let node = Bounds::new(point(center.x - radius, center.y - radius), size(radius * 2., radius * 2.));
     if is_head {
         window.paint_quad(
-            quad(node, radius, white(), px(2.), color, BorderStyle::default()),
+            quad(node, radius, cx.theme().background, px(2.), color, BorderStyle::default()),
         );
     } else {
         window.paint_quad(fill(node, color).corner_radii(radius));

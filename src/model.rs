@@ -105,7 +105,7 @@ impl RepoModel {
             this.update(cx, |this, cx| {
                 this.busy = None;
                 match result {
-                    Ok(_) => cx.emit(RepoEvent::OpSucceeded(label)),
+                    Ok(_) => cx.emit(RepoEvent::OpSucceeded(format!("{label}: done").into())),
                     Err(err) => cx.emit(RepoEvent::OpFailed(format!("{label} failed\n{err:#}").into())),
                 }
                 this.refresh(cx);
