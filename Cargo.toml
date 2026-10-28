@@ -6,5 +6,5 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.104"
 chrono = "0.4"
-gpui-kit = "0.8.1"
+gpui-kit = { version = "0.8.1", features = ["tree-sitter-languages"] }
 notify = "8.2.1"
