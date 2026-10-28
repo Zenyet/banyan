@@ -49,18 +49,8 @@ pub fn branch_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, branch: &Bran
         let n = name.clone();
         let kind = branch.kind.clone();
         menu = menu.item(item("Checkout", model, move |model, _, cx| {
-            let n = n.clone();
-            let kind = kind.clone();
-            model.update(cx, |m, cx| {
-                m.run(
-                    format!("Checkout {n}"),
-                    move |repo| match kind {
-                        RefKind::Remote => repo.checkout_remote(&n),
-                        _ => repo.checkout(&n),
-                    },
-                    cx,
-                )
-            })
+            let remote = kind == RefKind::Remote;
+            model.update(cx, |m, cx| m.checkout(n.clone(), remote, cx))
         }));
     }
     let n = name.clone();
@@ -168,7 +158,7 @@ pub fn commit_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, id: String, s
     let i = id.clone();
     menu = menu.item(item("Checkout Revision", model, move |model, _, cx| {
         let i = i.clone();
-        model.update(cx, |m, cx| m.run(format!("Checkout {}", short(&i)), move |repo| repo.checkout(&i), cx))
+        model.update(cx, |m, cx| m.checkout(i, false, cx))
     }));
     let i = id.clone();
     menu = menu.item(item("New Branch...", model, move |model, window, cx| {

@@ -60,6 +60,24 @@ pub struct BlameLine {
     pub text: String,
 }
 
+/// Whether a failed checkout was refused because of local changes.
+pub fn is_blocked_by_local_changes(err: &anyhow::Error) -> bool {
+    let message = format!("{err:#}");
+    message.contains("would be overwritten by checkout") || message.contains("would be removed by checkout")
+}
+
+/// The files git lists in a refused checkout's message.
+pub fn blocked_files(message: &str) -> Vec<String> {
+    message
+        .lines()
+        .skip_while(|line| !line.trim_end().ends_with("by checkout:"))
+        .skip(1)
+        .map(str::trim)
+        .take_while(|line| !line.is_empty() && !line.starts_with("Please") && !line.starts_with("Aborting"))
+        .map(str::to_string)
+        .collect()
+}
+
 #[derive(Clone, Debug)]
 pub struct CommitDetails {
     pub id: String,
@@ -712,6 +730,40 @@ impl Repo {
         } else {
             self.git(&["checkout", "-b", local, "--track", remote_branch])
         }
+    }
+
+    /// Check out a local branch, a remote branch (tracking it locally) or a revision.
+    pub fn checkout_any(&self, target: &str, remote: bool) -> Result<String> {
+        if remote { self.checkout_remote(target) } else { self.checkout(target) }
+    }
+
+    /// Stash local changes, check out, and bring the changes back, like
+    /// JetBrains' "Smart Checkout".
+    pub fn smart_checkout(&self, target: &str, remote: bool) -> Result<String> {
+        self.git(&["stash", "push", "--include-untracked", "-m", &format!("GitBrains: smart checkout of {target}")])?;
+        if let Err(err) = self.checkout_any(target, remote) {
+            // Put things back the way they were.
+            self.git(&["stash", "pop", "--index"]).ok();
+            return Err(err);
+        }
+        self.git(&["stash", "pop"]).map_err(|err| {
+            anyhow::anyhow!(
+                "Checked out {target}, but restoring your changes conflicted. Resolve the conflicts \
+                 in the Commit tab; your changes are also kept in the top stash.\n{err:#}"
+            )
+        })
+    }
+
+    /// Check out and discard local changes that would be overwritten.
+    pub fn force_checkout(&self, target: &str, remote: bool) -> Result<String> {
+        if remote {
+            let local = target.split_once('/').map(|(_, name)| name).unwrap_or(target);
+            if self.git(&["rev-parse", "--verify", "-q", &format!("refs/heads/{local}")]).is_ok() {
+                return self.git(&["checkout", "-f", local]);
+            }
+            return self.git(&["checkout", "-f", "-b", local, "--track", target]);
+        }
+        self.git(&["checkout", "-f", target])
     }
 
     pub fn create_branch(&self, name: &str, start: &str, checkout: bool) -> Result<String> {
@@ -1452,5 +1504,40 @@ mod tests {
         assert_eq!(std::fs::read_to_string(t.dir.join("f.txt")).unwrap(), changed);
         let status: Vec<_> = t.repo.status().unwrap().into_iter().map(|e| e.path).collect();
         assert_eq!(status, vec!["f.txt"]);
+    }
+
+    #[test]
+    fn smart_checkout_carries_local_changes() {
+        let t = TempRepo::new("smart-checkout");
+        let lines: String = (1..=10).map(|n| format!("{n}\n")).collect();
+        t.commit("a.txt", &lines, "Base");
+        t.repo.git(&["checkout", "-q", "-b", "topic"]).unwrap();
+        t.commit("a.txt", &lines.replacen("1\n", "one\n", 1), "Topic edits line 1");
+        t.repo.git(&["checkout", "-q", "main"]).unwrap();
+        // A local edit of line 10 blocks a plain checkout.
+        let local = lines.replace("10\n", "ten\n");
+        t.write("a.txt", &local);
+
+        let err = t.repo.checkout_any("topic", false).unwrap_err();
+        assert!(is_blocked_by_local_changes(&err), "{err:#}");
+        assert_eq!(blocked_files(&format!("{err:#}")), vec!["a.txt"]);
+
+        t.repo.smart_checkout("topic", false).unwrap();
+        assert_eq!(t.repo.current_branch().as_deref(), Some("topic"));
+        let content = std::fs::read_to_string(t.dir.join("a.txt")).unwrap();
+        assert!(content.starts_with("one\n") && content.ends_with("ten\n"), "{content}");
+        assert!(t.repo.stashes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn force_checkout_discards_local_changes() {
+        let t = TempRepo::new("force-checkout");
+        t.commit("a.txt", "base\n", "Base");
+        t.repo.git(&["checkout", "-q", "-b", "topic"]).unwrap();
+        t.commit("a.txt", "topic\n", "Topic");
+        t.repo.git(&["checkout", "-q", "main"]).unwrap();
+        t.write("a.txt", "local\n");
+        t.repo.force_checkout("topic", false).unwrap();
+        assert_eq!(std::fs::read_to_string(t.dir.join("a.txt")).unwrap(), "topic\n");
     }
 }

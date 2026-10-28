@@ -55,13 +55,17 @@ impl Workspace {
         let log = cx.new(|cx| LogView::new(model.clone(), window, cx));
         let changes = cx.new(|cx| ChangesView::new(model.clone(), window, cx));
         let console = cx.new(|cx| ConsoleView::new(model.clone(), cx));
+        let model_for_events = model.clone();
         let subscriptions = vec![
-            cx.subscribe_in(&model, window, |_, _, event, window, cx| match event {
+            cx.subscribe_in(&model, window, move |_, _, event, window, cx| match event {
                 RepoEvent::OpFailed(message) => {
                     window.push_notification(Notification::error(message.clone()), cx)
                 }
                 RepoEvent::OpSucceeded(label) => {
                     window.push_notification(Notification::success(label.clone()), cx)
+                }
+                RepoEvent::CheckoutBlocked { target, remote, message } => {
+                    offer_smart_checkout(&model_for_events, target.clone(), *remote, message.clone(), window, cx)
                 }
                 RepoEvent::Changed => cx.notify(),
             }),
@@ -133,9 +137,7 @@ impl Workspace {
                             "Checkout",
                             "",
                             move |rev, _, cx| {
-                                m.update(cx, |m, cx| {
-                                    m.run(format!("Checkout {rev}"), move |repo| repo.checkout(&rev), cx)
-                                });
+                                m.update(cx, |m, cx| m.checkout(rev, false, cx));
                             },
                             window,
                             cx,
@@ -429,4 +431,88 @@ fn recent_label(path: &std::path::Path) -> String {
         dir = format!("{head}…{tail}");
     }
     format!("{name} — {dir}")
+}
+
+/// JetBrains' "Git Checkout Problem" dialog: stash and restore the local
+/// changes, or discard them.
+fn offer_smart_checkout(
+    model: &Entity<RepoModel>,
+    target: String,
+    remote: bool,
+    message: SharedString,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let model = model.clone();
+    let files: Vec<SharedString> = crate::git::blocked_files(&message)
+        .into_iter()
+        .map(SharedString::from)
+        .collect();
+    window.open_dialog(cx, move |dialog, _, cx| {
+        let smart = (model.clone(), target.clone());
+        let force = (model.clone(), target.clone());
+        dialog
+            .title("Git Checkout Problem")
+            .w(px(520.))
+            .child(
+                v_flex()
+                    .gap_3()
+                    .child(div().text_sm().child(format!(
+                        "Your local changes to these files would be overwritten by checking out {}:",
+                        crate::actions::short(&target)
+                    )))
+                    .child(
+                        v_flex()
+                            .id("blocked-files")
+                            .max_h(px(160.))
+                            .overflow_y_scroll()
+                            .px_2()
+                            .text_sm()
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .children(files.iter().cloned()),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Smart Checkout stashes the changes, checks out and restores them."),
+                    )
+                    .child(
+                        h_flex()
+                            .justify_end()
+                            .gap_2()
+                            .child(
+                                Button::new("checkout-cancel")
+                                    .label("Cancel")
+                                    .on_click(|_, window, cx| window.close_dialog(cx)),
+                            )
+                            .child(Button::new("checkout-force").label("Force Checkout").danger().on_click(
+                                move |_, window, cx| {
+                                    window.close_dialog(cx);
+                                    let (model, target) = force.clone();
+                                    model.update(cx, |m, cx| {
+                                        m.run(
+                                            format!("Force checkout {}", crate::actions::short(&target)),
+                                            move |repo| repo.force_checkout(&target, remote),
+                                            cx,
+                                        )
+                                    });
+                                },
+                            ))
+                            .child(Button::new("checkout-smart").label("Smart Checkout").primary().on_click(
+                                move |_, window, cx| {
+                                    window.close_dialog(cx);
+                                    let (model, target) = smart.clone();
+                                    model.update(cx, |m, cx| {
+                                        m.run(
+                                            format!("Smart checkout {}", crate::actions::short(&target)),
+                                            move |repo| repo.smart_checkout(&target, remote),
+                                            cx,
+                                        )
+                                    });
+                                },
+                            )),
+                    ),
+            )
+    });
 }

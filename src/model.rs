@@ -15,6 +15,12 @@ pub enum RepoEvent {
     Changed,
     OpSucceeded(SharedString),
     OpFailed(SharedString),
+    /// A checkout was refused because it would overwrite local changes.
+    CheckoutBlocked {
+        target: String,
+        remote: bool,
+        message: SharedString,
+    },
 }
 
 pub struct RepoModel {
@@ -158,6 +164,48 @@ impl RepoModel {
         cx: &mut Context<Self>,
     ) {
         let label = label.into();
+        let failed = label.clone();
+        self.run_with(
+            label,
+            op,
+            move |err| RepoEvent::OpFailed(format!("{failed} failed\n{err:#}").into()),
+            cx,
+        );
+    }
+
+    /// Check out a branch or revision, offering Smart Checkout when local
+    /// changes are in the way.
+    pub fn checkout(&mut self, target: String, remote: bool, cx: &mut Context<Self>) {
+        let label = format!("Checkout {}", crate::actions::short(&target));
+        let op_target = target.clone();
+        let failed = label.clone();
+        self.run_with(
+            label,
+            move |repo| repo.checkout_any(&op_target, remote),
+            move |err| {
+                if crate::git::is_blocked_by_local_changes(&err) {
+                    RepoEvent::CheckoutBlocked {
+                        target,
+                        remote,
+                        message: format!("{err:#}").into(),
+                    }
+                } else {
+                    RepoEvent::OpFailed(format!("{failed} failed\n{err:#}").into())
+                }
+            },
+            cx,
+        );
+    }
+
+    /// Like [`Self::run`], with a custom event for failures.
+    pub fn run_with<T: Send + 'static>(
+        &mut self,
+        label: impl Into<SharedString>,
+        op: impl FnOnce(&Repo) -> Result<T> + Send + 'static,
+        on_error: impl FnOnce(anyhow::Error) -> RepoEvent + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        let label = label.into();
         if let Some(busy) = &self.busy {
             cx.emit(RepoEvent::OpFailed(format!("Another operation is running: {busy}").into()));
             return;
@@ -174,7 +222,7 @@ impl RepoModel {
                 this.busy = None;
                 match result {
                     Ok(_) => cx.emit(RepoEvent::OpSucceeded(format!("{label}: done").into())),
-                    Err(err) => cx.emit(RepoEvent::OpFailed(format!("{label} failed\n{err:#}").into())),
+                    Err(err) => cx.emit(on_error(err)),
                 }
                 this.refresh(cx);
             })
