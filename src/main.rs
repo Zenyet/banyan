@@ -46,10 +46,7 @@ fn main() {
     if let Ok(socket) = std::env::var(askpass::SOCKET_ENV) {
         std::process::exit(askpass::run_client(&socket));
     }
-    let path = std::env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .or_else(|| std::env::current_dir().ok());
+    let requested = std::env::args().nth(1).map(PathBuf::from);
 
     gpui_kit::application()
         .with_assets(gpui_kit::assets::AllAssets)
@@ -117,11 +114,26 @@ fn main() {
             .detach();
             cx.activate(true);
 
-            match path.as_deref().map(Repo::open) {
-                Some(Ok(repo)) => open_repo_window(repo, cx),
-                _ => open_welcome_window(cx),
+            match initial_repo(requested.as_deref()) {
+                Some(repo) => open_repo_window(repo, cx),
+                None => open_welcome_window(cx),
             }
         });
+}
+
+/// The repository to open at launch: the one named on the command line, the
+/// current directory, or (when launched from Finder) the last one opened.
+fn initial_repo(requested: Option<&Path>) -> Option<Repo> {
+    if let Some(path) = requested {
+        return Repo::open(path).ok();
+    }
+    if let Some(repo) = std::env::current_dir().ok().and_then(|dir| Repo::open(&dir).ok()) {
+        return Some(repo);
+    }
+    settings::Settings::load()
+        .recent
+        .iter()
+        .find_map(|path| Repo::open(path).ok())
 }
 
 fn window_options(cx: &App) -> WindowOptions {

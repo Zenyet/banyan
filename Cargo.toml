@@ -8,3 +8,7 @@ anyhow = "1.0.104"
 chrono = "0.4"
 gpui-kit = { version = "0.8.1", features = ["tree-sitter-languages"] }
 notify = "8.2.1"
+
+[profile.release]
+lto = "thin"
+strip = true

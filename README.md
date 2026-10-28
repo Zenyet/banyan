@@ -61,3 +61,9 @@ cargo run -- /path/to/repo   # or run inside a repository; with no repository a 
 ```sh
 cargo test   # graph layout, ref parsing, and git operations against throwaway repositories
 ```
+
+## Packaging
+
+```sh
+scripts/bundle.sh   # builds target/release/GitBrains.app (icon, Info.plist, ad-hoc signature)
+```
