@@ -74,6 +74,7 @@ pub struct LogView {
     limit: usize,
     /// The model's `refs_version` the log was last loaded for.
     refs_version: u64,
+    load_more_scheduled: bool,
     log_task: Option<Task<()>>,
     details_task: Option<Task<()>>,
     diff_task: Option<Task<()>>,
@@ -143,6 +144,7 @@ impl LogView {
             loading: true,
             limit: LOG_LIMIT,
             refs_version: 0,
+            load_more_scheduled: false,
             log_task: None,
             details_task: None,
             diff_task: None,
@@ -600,7 +602,15 @@ impl LogView {
             )
     }
 
-    fn render_load_more(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_load_more(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        // Scrolling the row into view loads the next page, like JetBrains.
+        if !self.loading && !self.load_more_scheduled {
+            self.load_more_scheduled = true;
+            cx.spawn(async move |this, cx| {
+                this.update(cx, |this, cx| this.load_more(cx)).ok();
+            })
+            .detach();
+        }
         div()
             .id("load-more")
             .h(ROW_HEIGHT)
@@ -616,13 +626,16 @@ impl LogView {
             } else {
                 format!("Showing the first {} commits. Load more…", self.limit)
             })
-            .on_click(cx.listener(|this, _, _, cx| {
-                if !this.loading {
-                    this.limit += LOG_LIMIT;
-                    this.reload(cx);
-                }
-            }))
+            .on_click(cx.listener(|this, _, _, cx| this.load_more(cx)))
             .into_any_element()
+    }
+
+    fn load_more(&mut self, cx: &mut Context<Self>) {
+        self.load_more_scheduled = false;
+        if !self.loading && self.commits.len() >= self.limit {
+            self.limit += LOG_LIMIT;
+            self.reload(cx);
+        }
     }
 
     fn render_commit_row(
