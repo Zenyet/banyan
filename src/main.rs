@@ -22,6 +22,7 @@ mod ui;
 mod update_dialog;
 mod watcher;
 mod workspace;
+mod worktree_diff;
 
 use std::path::{Path, PathBuf};
 

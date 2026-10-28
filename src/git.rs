@@ -60,6 +60,36 @@ pub struct BlameLine {
     pub text: String,
 }
 
+/// Parse `--name-status -z` output.
+fn parse_name_status(out: &str) -> Vec<FileChange> {
+    let mut parts = out.split('\0').filter(|part| !part.is_empty());
+    let mut files = Vec::new();
+    // With --root the first token is the commit id itself.
+    while let Some(status) = parts.next() {
+        let Some(letter) = status.chars().next() else { continue };
+        if status.len() >= 40 && status.chars().all(|c| c.is_ascii_hexdigit()) {
+            continue;
+        }
+        if matches!(letter, 'R' | 'C') {
+            let orig = parts.next().unwrap_or_default().to_string();
+            let path = parts.next().unwrap_or_default().to_string();
+            files.push(FileChange {
+                status: letter,
+                path,
+                orig_path: Some(orig),
+            });
+        } else {
+            let path = parts.next().unwrap_or_default().to_string();
+            files.push(FileChange {
+                status: letter,
+                path,
+                orig_path: None,
+            });
+        }
+    }
+    files
+}
+
 /// Whether a failed checkout was refused because of local changes.
 pub fn is_blocked_by_local_changes(err: &anyhow::Error) -> bool {
     let message = format!("{err:#}");
@@ -450,33 +480,23 @@ impl Repo {
             Some(parent) => self.git(&["diff-tree", "-r", "-M", "--name-status", "-z", parent, id])?,
             None => self.git(&["diff-tree", "-r", "-M", "--name-status", "-z", "--root", id])?,
         };
-        let mut parts = out.split('\0').filter(|part| !part.is_empty());
-        let mut files = Vec::new();
-        // With --root the first token is the commit id itself.
-        while let Some(status) = parts.next() {
-            let Some(letter) = status.chars().next() else { continue };
-            if status.len() >= 40 && status.chars().all(|c| c.is_ascii_hexdigit()) {
-                continue;
-            }
-            if matches!(letter, 'R' | 'C') {
-                let orig = parts.next().unwrap_or_default().to_string();
-                let path = parts.next().unwrap_or_default().to_string();
-                files.push(FileChange {
-                    status: letter,
-                    path,
-                    orig_path: Some(orig),
-                });
-            } else {
-                let path = parts.next().unwrap_or_default().to_string();
-                files.push(FileChange {
-                    status: letter,
-                    path,
-                    orig_path: None,
-                });
-            }
-        }
-        Ok(files)
+        Ok(parse_name_status(&out))
     }
+
+    /// Files that differ between `rev` and the work tree.
+    pub fn worktree_changes_since(&self, rev: &str) -> Result<Vec<FileChange>> {
+        Ok(parse_name_status(&self.git(&["diff", "-M", "--name-status", "-z", rev, "--"])?))
+    }
+
+    /// Patch of one file from `rev` to the work tree.
+    pub fn worktree_diff_since(&self, rev: &str, file: &FileChange) -> Result<String> {
+        let mut args = vec!["diff", "-M", rev, "--", file.path.as_str()];
+        if let Some(orig) = &file.orig_path {
+            args.push(orig);
+        }
+        self.git(&args)
+    }
+
 
     /// Patch of one file in a commit, against its first parent.
     pub fn commit_file_diff(&self, details: &CommitDetails, file: &FileChange) -> Result<String> {
@@ -1583,5 +1603,18 @@ mod tests {
         t.commit("a.txt", "a\n", "Base");
         let err = t.repo.update_project(false).unwrap_err();
         assert!(format!("{err:#}").contains("no tracked remote branch"));
+    }
+
+    #[test]
+    fn diff_with_worktree_since_a_revision() {
+        let t = TempRepo::new("worktree-diff");
+        let base = t.commit("a.txt", "a\n", "Base");
+        t.commit("b.txt", "b\n", "Add b");
+        t.write("a.txt", "changed\n");
+        let files = t.repo.worktree_changes_since(&base).unwrap();
+        let summary: Vec<_> = files.iter().map(|f| (f.status, f.path.as_str())).collect();
+        assert_eq!(summary, vec![('M', "a.txt"), ('A', "b.txt")]);
+        let patch = t.repo.worktree_diff_since(&base, &files[0]).unwrap();
+        assert!(patch.contains("+changed"));
     }
 }

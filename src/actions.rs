@@ -59,6 +59,10 @@ pub fn branch_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, branch: &Bran
     }));
     if !is_current {
         let n = name.clone();
+        let w = name.clone();
+        menu = menu.item(item("Show Diff with Working Tree", model, move |model, window, cx| {
+            crate::worktree_diff::open(model.clone(), w.clone(), window, cx)
+        }));
         menu = menu.item(item(
             format!("Compare with '{current_label}'"),
             model,
@@ -191,6 +195,10 @@ pub fn commit_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, id: String, s
     menu = menu.item(item("Revert Commit", model, move |model, _, cx| {
         let i = i.clone();
         model.update(cx, |m, cx| m.run(format!("Revert {}", short(&i)), move |repo| repo.revert(&i), cx))
+    }));
+    let i = id.clone();
+    menu = menu.item(item("Show Diff with Working Tree", model, move |model, window, cx| {
+        crate::worktree_diff::open(model.clone(), i.clone(), window, cx)
     }));
     let i = id.clone();
     menu = menu.item(item("Interactively Rebase from Here...", model, move |model, window, cx| {
