@@ -52,6 +52,10 @@ pub struct ChangesView {
     model: Entity<RepoModel>,
     included: HashSet<String>,
     known: HashSet<String>,
+    conflicted: HashSet<String>,
+    /// Merge message to put into the editor on the next render.
+    pending_message: Option<String>,
+    prefilled_merge_message: bool,
     collapsed: BTreeSet<Group>,
     selected: Option<String>,
     message: Entity<TextareaState>,
@@ -79,6 +83,9 @@ impl ChangesView {
             model,
             included: HashSet::new(),
             known: HashSet::new(),
+            conflicted: HashSet::new(),
+            pending_message: None,
+            prefilled_merge_message: false,
             collapsed: BTreeSet::new(),
             selected: None,
             message,
@@ -100,11 +107,24 @@ impl ChangesView {
         let status = self.model.read(cx).status.clone();
         let paths: HashSet<String> = status.iter().map(|e| e.path.clone()).collect();
         for entry in &status {
-            if self.known.insert(entry.path.clone()) && !entry.is_untracked() && !entry.is_conflicted() {
+            let is_new = self.known.insert(entry.path.clone());
+            if entry.is_conflicted() {
+                self.conflicted.insert(entry.path.clone());
+            } else if self.conflicted.remove(&entry.path) || (is_new && !entry.is_untracked()) {
+                // Freshly resolved conflicts are ready to commit.
                 self.included.insert(entry.path.clone());
             }
         }
         self.known.retain(|p| paths.contains(p));
+        self.conflicted.retain(|p| paths.contains(p));
+
+        let model = self.model.read(cx);
+        if model.state == RepoState::Clean {
+            self.prefilled_merge_message = false;
+        } else if !self.prefilled_merge_message && self.message.read(cx).value().trim().is_empty() {
+            self.prefilled_merge_message = true;
+            self.pending_message = model.repo.merge_message();
+        }
         self.included.retain(|p| paths.contains(p));
         if self.selected.as_ref().is_some_and(|p| !paths.contains(p)) {
             self.selected = None;
@@ -389,10 +409,22 @@ impl ChangesView {
             )
             .on_click(cx.listener({
                 let path = path.clone();
-                move |this, _, _, cx| this.select(path.clone(), cx)
+                move |this, event: &ClickEvent, window, cx| {
+                    this.select(path.clone(), cx);
+                    if conflicted && event.click_count() >= 2 {
+                        crate::merge_tool::open(this.model.clone(), path.clone(), window, cx);
+                    }
+                }
             }))
             .context_menu(move |mut menu, _, _| {
                 if conflicted {
+                    let merge_model = model.clone();
+                    let merge_path = path.clone();
+                    menu = menu
+                        .item(PopupMenuItem::new("Merge...").on_click(move |_, window, cx| {
+                            crate::merge_tool::open(merge_model.clone(), merge_path.clone(), window, cx)
+                        }))
+                        .separator();
                     for (label, ours) in [("Accept Yours", Some(true)), ("Accept Theirs", Some(false)), ("Mark as Resolved", None)] {
                         let model = model.clone();
                         let path = path.clone();
@@ -494,7 +526,10 @@ impl ChangesView {
 }
 
 impl Render for ChangesView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(message) = self.pending_message.take() {
+            self.message.update(cx, |state, cx| state.set_value(message, window, cx));
+        }
         let entries = self.entries(cx);
         let mut groups: Vec<(Group, Vec<StatusEntry>)> = Vec::new();
         for group in [Group::Conflicts, Group::Changes, Group::Unversioned] {

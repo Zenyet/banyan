@@ -401,6 +401,14 @@ impl Repo {
         }
     }
 
+    /// The prepared message of an in-progress merge, cherry-pick or revert.
+    pub fn merge_message(&self) -> Option<String> {
+        let git_dir = self.git(&["rev-parse", "--absolute-git-dir"]).ok()?;
+        let text = std::fs::read_to_string(PathBuf::from(git_dir.trim()).join("MERGE_MSG")).ok()?;
+        let message: Vec<&str> = text.lines().filter(|line| !line.starts_with('#')).collect();
+        Some(message.join("\n").trim().to_string()).filter(|m| !m.is_empty())
+    }
+
     pub fn last_commit_message(&self) -> Result<String> {
         Ok(self.git(&["log", "-1", "--format=%B"])?.trim_end().to_string())
     }

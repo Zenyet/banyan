@@ -4,6 +4,7 @@ mod diff_pane;
 mod git;
 mod graph;
 mod log_view;
+mod merge_tool;
 mod model;
 mod ui;
 mod workspace;

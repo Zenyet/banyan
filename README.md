@@ -16,6 +16,8 @@ cargo run -- /path/to/repo   # or run inside a repository; with no repository a 
   rebase current onto, rename, delete (local, remote, tag).
 - **Commit tab**: changelist-style checkboxes (Changes / Unversioned Files / Merge Conflicts), commit, amend,
   commit and push, rollback, stash; accept yours / theirs for conflicts; continue / abort merge, rebase, cherry-pick.
+- **Merge tool**: resolve conflicts per hunk (accept yours / theirs / both), apply and mark resolved;
+  the merge message is pre-filled from `MERGE_MSG`.
 - Fetch / Pull / Push, stash pop / apply / drop, light / dark theme, auto-refresh when the window regains focus.
 
 ## Layout
@@ -28,5 +30,6 @@ cargo run -- /path/to/repo   # or run inside a repository; with no repository a 
 | `src/log_view.rs` | Log tab |
 | `src/changes_view.rs` | Commit tab |
 | `src/diff_pane.rs` | Diff preview |
+| `src/merge_tool.rs` | Conflict resolution dialog |
 | `src/actions.rs` | Branch / commit context menus |
 | `src/workspace.rs` | Main window, toolbar, tabs |
