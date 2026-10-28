@@ -58,6 +58,7 @@ pub struct LogView {
     head: Option<String>,
     filter: Entity<InputState>,
     branch_filter: Option<String>,
+    author_filter: Option<String>,
     branch_tree: Entity<TreeState>,
     branches: Rc<HashMap<SharedString, Branch>>,
     selected_branch: Option<SharedString>,
@@ -126,6 +127,7 @@ impl LogView {
             head: None,
             filter,
             branch_filter: None,
+            author_filter: None,
             branch_tree,
             branches: Rc::default(),
             selected_branch: None,
@@ -231,14 +233,17 @@ impl LogView {
 
     fn apply_filter(&mut self, cx: &mut Context<Self>) {
         let query = self.filter.read(cx).value().trim().to_lowercase();
-        let rows: Vec<usize> = if query.is_empty() {
+        let author = self.author_filter.as_deref();
+        let rows: Vec<usize> = if query.is_empty() && author.is_none() {
             (0..self.commits.len()).collect()
         } else {
             self.commits
                 .iter()
                 .enumerate()
+                .filter(|(_, c)| author.is_none_or(|author| c.author == author))
                 .filter(|(_, c)| {
-                    c.id.starts_with(&query)
+                    query.is_empty()
+                        || c.id.starts_with(&query)
                         || c.subject.to_lowercase().contains(&query)
                         || c.author.to_lowercase().contains(&query)
                         || c.refs.iter().any(|r| r.name.to_lowercase().contains(&query))
@@ -251,7 +256,23 @@ impl LogView {
     }
 
     fn is_filtered(&self, cx: &App) -> bool {
-        !self.filter.read(cx).value().trim().is_empty()
+        self.author_filter.is_some() || !self.filter.read(cx).value().trim().is_empty()
+    }
+
+    fn set_author_filter(&mut self, author: Option<String>, cx: &mut Context<Self>) {
+        self.author_filter = author;
+        self.apply_filter(cx);
+    }
+
+    /// Authors of the loaded commits, most active first.
+    fn authors(&self) -> Vec<String> {
+        let mut counts: HashMap<&str, usize> = HashMap::new();
+        for commit in self.commits.iter() {
+            *counts.entry(commit.author.as_str()).or_default() += 1;
+        }
+        let mut authors: Vec<(&str, usize)> = counts.into_iter().collect();
+        authors.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+        authors.into_iter().map(|(name, _)| name.to_string()).collect()
     }
 
     fn set_branch_filter(&mut self, branch: Option<String>, cx: &mut Context<Self>) {
@@ -474,6 +495,35 @@ impl LogView {
                         menu.max_h(px(480.)).scrollable(true)
                     }),
             )
+            .child({
+                let view = cx.entity().downgrade();
+                let authors = self.authors();
+                Button::new("author-filter")
+                    .label(match &self.author_filter {
+                        Some(author) => format!("User: {author}"),
+                        None => "User: All".into(),
+                    })
+                    .ghost()
+                    .xsmall()
+                    .dropdown_caret(true)
+                    .dropdown_menu(move |mut menu, _, _| {
+                        let all = view.clone();
+                        menu = menu
+                            .item(PopupMenuItem::new("All").on_click(move |_, _, cx| {
+                                all.update(cx, |this, cx| this.set_author_filter(None, cx)).ok();
+                            }))
+                            .separator();
+                        for author in &authors {
+                            let view = view.clone();
+                            let name = author.clone();
+                            menu = menu.item(PopupMenuItem::new(author.clone()).on_click(move |_, _, cx| {
+                                let name = name.clone();
+                                view.update(cx, |this, cx| this.set_author_filter(Some(name), cx)).ok();
+                            }));
+                        }
+                        menu.max_h(px(480.)).scrollable(true)
+                    })
+            })
             .child(div().flex_1())
             .when(self.loading, |row| {
                 row.child(div().text_xs().text_color(cx.theme().muted_foreground).child("Loading…"))
