@@ -1,5 +1,6 @@
 mod actions;
 mod askpass;
+mod assets;
 mod changes_view;
 mod clone_dialog;
 mod commit_browser;
@@ -50,7 +51,7 @@ fn main() {
     let requested = std::env::args().nth(1).map(PathBuf::from);
 
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::AllAssets)
+        .with_assets(assets::AppAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
             log_view::init(cx);

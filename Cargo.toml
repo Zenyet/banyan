@@ -6,9 +6,50 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.104"
 chrono = "0.4"
-gpui-kit = { version = "0.8.1", features = ["tree-sitter-languages"] }
+gpui-kit = "0.8.1"
 notify = "8.2.1"
 
+[features]
+default = ["common-languages"]
+# Syntax highlighting in diffs. Each grammar adds to the binary, the largest
+# (Kotlin, Swift, C#) about 5 MB each, so by default only common languages
+# are built in; `--features all-languages` adds the rest.
+common-languages = [
+    "gpui-kit/tree-sitter-astro",
+    "gpui-kit/tree-sitter-bash",
+    "gpui-kit/tree-sitter-c",
+    "gpui-kit/tree-sitter-cmake",
+    "gpui-kit/tree-sitter-cpp",
+    "gpui-kit/tree-sitter-css",
+    "gpui-kit/tree-sitter-diff",
+    "gpui-kit/tree-sitter-ejs",
+    "gpui-kit/tree-sitter-erb",
+    "gpui-kit/tree-sitter-go",
+    "gpui-kit/tree-sitter-graphql",
+    "gpui-kit/tree-sitter-html",
+    "gpui-kit/tree-sitter-java",
+    "gpui-kit/tree-sitter-javascript",
+    "gpui-kit/tree-sitter-jsdoc",
+    "gpui-kit/tree-sitter-lua",
+    "gpui-kit/tree-sitter-make",
+    "gpui-kit/tree-sitter-markdown",
+    "gpui-kit/tree-sitter-markdown-inline",
+    "gpui-kit/tree-sitter-proto",
+    "gpui-kit/tree-sitter-python",
+    "gpui-kit/tree-sitter-rust",
+    "gpui-kit/tree-sitter-svelte",
+    "gpui-kit/tree-sitter-toml",
+    "gpui-kit/tree-sitter-tsx",
+    "gpui-kit/tree-sitter-typescript",
+    "gpui-kit/tree-sitter-yaml",
+    "gpui-kit/tree-sitter-zig",
+]
+all-languages = ["gpui-kit/tree-sitter-languages"]
+
 [profile.release]
-lto = "thin"
+# Smaller binary: whole-program optimization across all crates, and no
+# unwinding tables (a panic ends the app either way).
+lto = "fat"
+codegen-units = 1
+panic = "abort"
 strip = true
