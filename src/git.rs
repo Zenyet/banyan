@@ -272,10 +272,11 @@ impl Repo {
     }
 
     /// Commits of `refs` (all branches, remotes and tags by default), newest
-    /// first, optionally only those since a git date such as `7.days.ago`
-    /// or touching `path`.
+    /// first, optionally only those committed since a git date such as
+    /// `7.days.ago` or touching `path`. Unlike `--since`, the date filter
+    /// looks past old commits that sit above newer ones.
     pub fn log(&self, refs: Option<&str>, since: Option<&str>, path: Option<&str>, limit: usize) -> Result<Vec<Commit>> {
-        let since = since.map(|since| format!("--since={since}"));
+        let since = since.map(|since| format!("--since-as-filter={since}"));
         let mut revs: Vec<&str> = match refs {
             Some(refs) => vec![refs],
             None => vec!["--branches", "--remotes", "--tags", "HEAD"],
@@ -1613,6 +1614,14 @@ mod tests {
         let subjects = |commits: Vec<Commit>| commits.into_iter().map(|c| c.subject).collect::<Vec<_>>();
         assert_eq!(subjects(t.repo.log(None, None, Some("a.txt"), 10).unwrap()), vec!["Change a", "Add a"]);
         assert_eq!(subjects(t.repo.log(None, None, Some("dir"), 10).unwrap()), vec!["Add b"]);
+        // An old commit on top must not hide the newer ones below it.
+        let old = std::process::Command::new("git")
+            .current_dir(&t.dir)
+            .env("GIT_COMMITTER_DATE", "2020-01-01T00:00:00")
+            .args(["commit", "-q", "--allow-empty", "-m", "Old"])
+            .status()
+            .unwrap();
+        assert!(old.success());
         assert_eq!(t.repo.log(None, Some("1.day.ago"), None, 10).unwrap().len(), 3);
         assert!(t.repo.log(None, Some("2099-01-01"), None, 10).unwrap().is_empty());
     }
