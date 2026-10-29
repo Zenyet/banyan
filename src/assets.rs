@@ -14,6 +14,7 @@ macro_rules! icon {
 }
 
 const EXTRA: &[(&str, &[u8])] = &[
+    ("images/banyan.png", include_bytes!("../packaging/linux/banyan.png")),
     icon!("archive.svg"),
     icon!("arrow-down-to-line.svg"),
     icon!("arrow-up-from-line.svg"),

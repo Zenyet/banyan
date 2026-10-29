@@ -31,12 +31,12 @@ actions!(
 /// JetBrains' macOS keymap where it has an equivalent.
 pub fn init(cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new("secondary-k", CommitChanges, Some("Workspace")),
-        KeyBinding::new("secondary-shift-k", PushCommits, Some("Workspace")),
-        KeyBinding::new("secondary-t", UpdateProject, Some("Workspace")),
-        KeyBinding::new("secondary-9", ShowLog, Some("Workspace")),
-        KeyBinding::new("secondary-0", ShowCommitTab, Some("Workspace")),
-        KeyBinding::new("secondary-r", RefreshRepository, Some("Workspace")),
+        KeyBinding::new(secondary!("k"), CommitChanges, Some("Workspace")),
+        KeyBinding::new(secondary!("shift-k"), PushCommits, Some("Workspace")),
+        KeyBinding::new(secondary!("t"), UpdateProject, Some("Workspace")),
+        KeyBinding::new(secondary!("9"), ShowLog, Some("Workspace")),
+        KeyBinding::new(secondary!("0"), ShowCommitTab, Some("Workspace")),
+        KeyBinding::new(secondary!("r"), RefreshRepository, Some("Workspace")),
     ]);
 }
 
@@ -448,6 +448,17 @@ impl Render for Workspace {
                 this.model.update(cx, |model, cx| model.refresh(cx));
                 this.log.update(cx, |log, cx| log.reload(cx));
             }))
+            // A folder dropped on the window opens in a window of its own.
+            .on_drop({
+                let root = self.model.read(cx).repo.root().to_path_buf();
+                move |paths: &ExternalPaths, window, cx| {
+                    let Some(path) = paths.paths().first() else { return };
+                    if crate::git::Repo::open(path).is_ok_and(|repo| repo.root() == root) {
+                        return;
+                    }
+                    crate::welcome::open_path(path, None, window, cx);
+                }
+            })
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)

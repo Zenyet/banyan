@@ -140,9 +140,10 @@ cargo run -- /path/to/repo   # open a repository
 cargo run                    # open the repository you're in
 ```
 
-Launched from Finder, Banyan reopens the last repository you used. If there isn't one, a welcome window
-offers **Open Repository…** and **Clone Repository…**. Recent repositories are listed in the repository
-menu in the toolbar.
+Launched from Finder, Banyan reopens the last repository you used. Otherwise, and whenever you close the last
+repository window, the **welcome window** offers **Open Repository…**, **Clone Repository…** and your recent
+repositories. Drop a folder on the welcome window, or on any repository window, to open it; a folder that isn't
+a Git repository yet can be made one. Recent repositories are also listed in the repository menu in the toolbar.
 
 ### Keyboard shortcuts
 

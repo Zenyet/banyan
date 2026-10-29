@@ -1,6 +1,14 @@
 // No console window next to the app on Windows.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+/// A key binding with ⌘ on macOS and Ctrl elsewhere: `secondary!("shift-k")`.
+/// `KeyBinding::new` can't resolve GPUI's own `secondary-` prefix.
+macro_rules! secondary {
+    ($keys:literal) => {
+        if cfg!(target_os = "macos") { concat!("cmd-", $keys) } else { concat!("ctrl-", $keys) }
+    };
+}
+
 mod actions;
 mod askpass;
 mod assets;
@@ -28,18 +36,13 @@ mod stash_viewer;
 mod ui;
 mod update_dialog;
 mod watcher;
+mod welcome;
 mod workspace;
 mod worktree_diff;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use gpui_kit::component::{
-    ActiveTheme as _, WindowExt as _,
-    notification::Notification,
-    button::{Button, ButtonVariants as _},
-    v_flex,
-};
-use gpui_kit::assets::IconName;
 use gpui_kit::*;
 
 use crate::git::Repo;
@@ -47,6 +50,10 @@ use crate::model::RepoModel;
 use crate::workspace::Workspace;
 
 actions!(banyan, [Quit, OpenRepository, CloseWindow, OpenSettings]);
+
+/// Set by Quit, so that windows closing on the way out don't bring back the
+/// welcome window.
+static QUITTING: AtomicBool = AtomicBool::new(false);
 
 fn main() {
     // Git runs this executable to ask for credentials; answer and exit.
@@ -66,7 +73,10 @@ fn main() {
                 Err(err) => eprintln!("credential prompts unavailable: {err}"),
             }
             settings_window::apply_appearance(cx);
-            cx.on_action(|_: &Quit, cx| cx.quit());
+            cx.on_action(|_: &Quit, cx| {
+                QUITTING.store(true, Ordering::Relaxed);
+                cx.quit();
+            });
             cx.on_action(|_: &CloseWindow, cx| {
                 // The action is dispatched from inside the window, so close it afterwards.
                 if let Some(window) = cx.active_window() {
@@ -78,10 +88,10 @@ fn main() {
             cx.on_action(|_: &OpenRepository, cx| prompt_open_repo(None, cx));
             cx.on_action(|_: &OpenSettings, cx| settings_window::open(cx));
             cx.bind_keys([
-                KeyBinding::new("secondary-q", Quit, None),
-                KeyBinding::new("secondary-o", OpenRepository, None),
-                KeyBinding::new("secondary-w", CloseWindow, None),
-                KeyBinding::new("secondary-,", OpenSettings, None),
+                KeyBinding::new(secondary!("q"), Quit, None),
+                KeyBinding::new(secondary!("o"), OpenRepository, None),
+                KeyBinding::new(secondary!("w"), CloseWindow, None),
+                KeyBinding::new(secondary!(","), OpenSettings, None),
             ]);
             cx.set_menus(vec![
                 Menu {
@@ -117,9 +127,15 @@ fn main() {
                     disabled: false,
                 },
             ]);
-            cx.on_window_closed(|cx, _| {
+            // Closing the last repository goes back to the welcome window;
+            // closing that quits.
+            cx.on_window_closed(|cx, closed| {
                 if cx.windows().is_empty() {
-                    cx.quit();
+                    if welcome::is_welcome(closed) || QUITTING.load(Ordering::Relaxed) {
+                        cx.quit();
+                    } else {
+                        welcome::open(cx);
+                    }
                 }
             })
             .detach();
@@ -127,7 +143,13 @@ fn main() {
 
             match initial_repo(requested.as_deref()) {
                 Some(repo) => open_repo_window(repo, cx),
-                None => open_welcome_window(cx),
+                None => {
+                    welcome::open(cx);
+                    // A folder named on the command line that isn't a repository yet.
+                    if let Some(path) = requested.filter(|path| path.is_dir()) {
+                        open_path(&path, welcome::window(), cx);
+                    }
+                }
             }
         });
 }
@@ -185,75 +207,31 @@ pub fn prompt_open_repo(replace: Option<AnyWindowHandle>, cx: &mut App) {
     .detach();
 }
 
+/// Open the repository at `path` in a new window, from `replace` or the
+/// active window, which shows any problem; see [`welcome::open_path`].
 pub fn open_path(path: &Path, replace: Option<AnyWindowHandle>, cx: &mut App) {
-    match Repo::open(path) {
-        Ok(repo) => {
+    let path = path.to_path_buf();
+    let Some(window) = replace.or_else(|| cx.active_window()).or_else(|| cx.windows().into_iter().next()) else {
+        if let Ok(repo) = Repo::open(&path) {
             open_repo_window(repo, cx);
-            if let Some(window) = replace {
-                window.update(cx, |_, window, _| window.remove_window()).ok();
-            }
         }
-        Err(err) => {
-            let message = format!("{err:#}");
-            if let Some(window) = cx.active_window() {
-                window
-                    .update(cx, |_, window, cx| {
-                        window.push_notification(Notification::error(message), cx);
-                    })
-                    .ok();
-            }
-        }
-    }
-}
-
-fn open_welcome_window(cx: &mut App) {
-    let options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-            None,
-            size(px(560.), px(380.)),
-            cx,
-        ))),
-        ..Default::default()
+        return;
     };
-    gpui_kit::open_window(options, cx, |window, cx| {
-        window.set_window_title("Welcome to Banyan");
-        cx.new(|_| Welcome)
-    })
-    .expect("failed to open window");
+    window
+        .update(cx, |_, window, cx| welcome::open_path(&path, replace, window, cx))
+        .ok();
 }
 
-struct Welcome;
-
-impl Render for Welcome {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
-            .size_full()
-            .items_center()
-            .justify_center()
-            .gap_4()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
-            .child(div().text_2xl().child("Banyan"))
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("A JetBrains-style Git client"),
-            )
-            .child(
-                Button::new("open")
-                    .primary()
-                    .icon(IconName::FolderOpen)
-                    .label("Open Repository…")
-                    .on_click(|_, window, cx| prompt_open_repo(Some(window.window_handle()), cx)),
-            )
-            .child(
-                Button::new("clone")
-                    .icon(IconName::Download)
-                    .label("Clone Repository…")
-                    .on_click(|_, window, cx| {
-                        clone_dialog::open(Some(window.window_handle()), window, cx)
-                    }),
-            )
+#[cfg(test)]
+mod tests {
+    /// `KeyBinding::new` panics on keystrokes it can't parse, at launch.
+    #[test]
+    fn key_bindings_parse() {
+        for keys in [
+            secondary!("q"), secondary!("o"), secondary!("w"), secondary!(","), secondary!("k"),
+            secondary!("shift-k"), secondary!("t"), secondary!("9"), secondary!("0"), secondary!("r"),
+        ] {
+            assert!(gpui_kit::Keystroke::parse(keys).is_ok(), "{keys}");
+        }
     }
 }

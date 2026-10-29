@@ -217,6 +217,10 @@ impl Settings {
         });
     }
 
+    pub fn remove_recent(repo: &Path) {
+        Settings::update(|settings| settings.recent.retain(|path| path != repo));
+    }
+
     pub fn add_message(message: String) {
         Settings::update(|settings| {
             settings.messages.retain(|m| m != &message);

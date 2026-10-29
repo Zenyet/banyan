@@ -333,6 +333,12 @@ impl Repo {
         })
     }
 
+    /// Create a repository in `dir`.
+    pub fn init(dir: &Path) -> Result<Self> {
+        run(dir, &["init"])?;
+        Repo::open(dir)
+    }
+
     /// Clone `url` into `dest`, which must not exist or be empty.
     pub fn clone_from(url: &str, dest: &Path) -> Result<Self> {
         let parent = dest.parent().context("invalid destination")?;
@@ -1706,6 +1712,17 @@ mod tests {
         assert_eq!(operation.title, "Rebasing main onto feature (commit 1 of 1)");
         assert_eq!(operation.ours, "feature");
         assert!(operation.theirs.ends_with(" Ours"), "{}", operation.theirs);
+    }
+
+    #[test]
+    fn init_makes_a_folder_a_repository() {
+        let dir = std::env::temp_dir().join(format!("banyan-test-init-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        let repo = Repo::init(&dir).unwrap();
+        assert_eq!(repo.root().canonicalize().unwrap(), dir.canonicalize().unwrap());
+        // Opening a folder inside it finds the repository.
+        assert_eq!(Repo::open(&dir.join("sub")).unwrap().root(), repo.root());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
