@@ -1,25 +1,25 @@
 #!/bin/sh
-# Build target/release/Banyan.app for this Mac, or with --universal for
-# both Apple silicon and Intel. Usage: scripts/bundle.sh [--universal]
+# Build target/release/Banyan.app for this Mac, or with --target for
+# another architecture, e.g. --target x86_64-apple-darwin, in
+# target/<target>/release/Banyan.app.
+# Usage: scripts/bundle.sh [--target <target>]
 set -e
 cd "$(dirname "$0")/.."
 
 VERSION=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f 2)
-APP=target/release/Banyan.app
 
-if [ "$1" = "--universal" ]; then
-    cargo build --release --target aarch64-apple-darwin
-    cargo build --release --target x86_64-apple-darwin
-    mkdir -p target/release
-    lipo -create -output target/release/banyan \
-        target/aarch64-apple-darwin/release/banyan target/x86_64-apple-darwin/release/banyan
+if [ "$1" = "--target" ]; then
+    cargo build --release --target "$2"
+    OUT="target/$2/release"
 else
     cargo build --release
+    OUT=target/release
 fi
+APP="$OUT/Banyan.app"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp target/release/banyan "$APP/Contents/MacOS/banyan"
+cp "$OUT/banyan" "$APP/Contents/MacOS/banyan"
 
 # Icon: render once, then every size the icns needs.
 WORK=$(mktemp -d)

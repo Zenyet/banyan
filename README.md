@@ -99,7 +99,8 @@ Every platform needs `git` installed.
 
 | System | Package |
 | --- | --- |
-| macOS 11+ (Apple silicon and Intel) | `Banyan-<version>-macos-universal.dmg`: open it and drag Banyan to Applications |
+| macOS 11+, Apple silicon (M1 and later) | `Banyan-<version>-macos-arm64.dmg`: open it and drag Banyan to Applications |
+| macOS 11+, Intel | `Banyan-<version>-macos-x86_64.dmg` |
 | Debian, Ubuntu | `banyan_<version>_amd64.deb`: `sudo apt install ./banyan_<version>_amd64.deb` |
 | Other Linux | `Banyan-<version>-linux-x86_64.tar.gz`: unpack and run `banyan` |
 | Windows 10+ | `Banyan-<version>-windows-x64-setup.exe` (installer) or `…-windows-x64.zip` (portable) |
