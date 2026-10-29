@@ -17,6 +17,7 @@ mod push_dialog;
 mod rebase_dialog;
 mod remotes_dialog;
 mod settings;
+mod settings_window;
 mod stash_viewer;
 mod ui;
 mod update_dialog;
@@ -39,7 +40,7 @@ use crate::git::Repo;
 use crate::model::RepoModel;
 use crate::workspace::Workspace;
 
-actions!(gitbrains, [Quit, OpenRepository, CloseWindow]);
+actions!(gitbrains, [Quit, OpenRepository, CloseWindow, OpenSettings]);
 
 fn main() {
     // Git runs this executable to ask for credentials; answer and exit.
@@ -58,9 +59,7 @@ fn main() {
                 Ok(requests) => askpass::spawn_prompt_loop(requests, cx),
                 Err(err) => eprintln!("credential prompts unavailable: {err}"),
             }
-            if settings::Settings::load().dark {
-                gpui_kit::component::Theme::change(gpui_kit::component::ThemeMode::Dark, None, cx);
-            }
+            settings_window::apply_appearance(cx);
             cx.on_action(|_: &Quit, cx| cx.quit());
             cx.on_action(|_: &CloseWindow, cx| {
                 // The action is dispatched from inside the window, so close it afterwards.
@@ -71,15 +70,21 @@ fn main() {
                 }
             });
             cx.on_action(|_: &OpenRepository, cx| prompt_open_repo(None, cx));
+            cx.on_action(|_: &OpenSettings, cx| settings_window::open(cx));
             cx.bind_keys([
                 KeyBinding::new("cmd-q", Quit, None),
                 KeyBinding::new("cmd-o", OpenRepository, None),
                 KeyBinding::new("cmd-w", CloseWindow, None),
+                KeyBinding::new("cmd-,", OpenSettings, None),
             ]);
             cx.set_menus(vec![
                 Menu {
                     name: "GitBrains".into(),
-                    items: vec![MenuItem::action("Quit GitBrains", Quit)],
+                    items: vec![
+                        MenuItem::action("Settings…", OpenSettings),
+                        MenuItem::separator(),
+                        MenuItem::action("Quit GitBrains", Quit),
+                    ],
                     disabled: false,
                 },
                 Menu {
@@ -130,7 +135,7 @@ fn initial_repo(requested: Option<&Path>) -> Option<Repo> {
     if let Some(repo) = std::env::current_dir().ok().and_then(|dir| Repo::open(&dir).ok()) {
         return Some(repo);
     }
-    settings::Settings::load()
+    settings::Settings::get()
         .recent
         .iter()
         .find_map(|path| Repo::open(path).ok())

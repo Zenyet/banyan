@@ -13,7 +13,7 @@ use crate::settings::Settings;
 pub fn open(model: Entity<RepoModel>, window: &mut Window, cx: &mut App) {
     let view = cx.new(|_| UpdateDialog {
         model,
-        rebase: Settings::load().update_rebase,
+        rebase: Settings::get().update_rebase,
     });
     window.open_dialog(cx, move |dialog, _, _| dialog.title("Update Project").w(px(440.)).child(view.clone()));
 }

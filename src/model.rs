@@ -2,12 +2,13 @@
 //! views refresh together afterwards.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use gpui_kit::*;
 
 use crate::git::{Branch, RefKind, Repo, RepoState, StatusEntry, Stash};
+use crate::settings::Settings;
 use crate::watcher::RepoWatcher;
 
 pub enum RepoEvent {
@@ -37,6 +38,7 @@ pub struct RepoModel {
     refs_key: Option<RefsKey>,
     refresh_task: Option<Task<()>>,
     _watch_task: Option<Task<()>>,
+    _auto_fetch_task: Task<()>,
 }
 
 /// HEAD and every ref with its target.
@@ -67,10 +69,35 @@ impl RepoModel {
             refs_key: None,
             refresh_task: None,
             _watch_task: None,
+            _auto_fetch_task: Self::auto_fetch(cx),
         };
         this.refresh(cx);
         this.watch(cx);
         this
+    }
+
+    /// Fetch in the background as often as the settings ask.
+    fn auto_fetch(cx: &mut Context<Self>) -> Task<()> {
+        cx.spawn(async move |this, cx| {
+            let mut last = Instant::now();
+            loop {
+                cx.background_executor().timer(Duration::from_secs(30)).await;
+                let minutes = Settings::read(|s| s.auto_fetch_minutes);
+                if minutes == 0 || last.elapsed() < Duration::from_secs(u64::from(minutes) * 60) {
+                    continue;
+                }
+                // Leave the repository alone while an operation runs.
+                let Ok(repo) = this.update(cx, |this, _| this.busy.is_none().then(|| this.repo.clone())) else {
+                    return;
+                };
+                let Some(repo) = repo else { continue };
+                last = Instant::now();
+                let fetched = cx.background_executor().spawn(async move { repo.fetch_quietly() }).await;
+                if fetched.is_ok() {
+                    this.update(cx, |this, cx| this.refresh(cx)).ok();
+                }
+            }
+        })
     }
 
     /// Refresh when files, the index or refs change outside the app.

@@ -741,7 +741,7 @@ impl ChangesView {
             .xsmall()
             .tooltip("Commit Message History")
             .dropdown_menu(move |mut menu, _, _| {
-                let messages = Settings::load().messages;
+                let messages = Settings::get().messages;
                 if messages.is_empty() {
                     return menu.item(PopupMenuItem::new("No recent messages").disabled(true));
                 }

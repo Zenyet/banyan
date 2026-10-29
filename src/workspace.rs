@@ -2,7 +2,7 @@
 //! Log / Commit tabs.
 
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, Sizable as _, StyledExt as _, Theme, ThemeMode, WindowExt as _,
+    ActiveTheme as _, Icon, Sizable as _, StyledExt as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     menu::{DropdownMenu as _, PopupMenuItem},
@@ -20,7 +20,7 @@ use crate::console::ConsoleView;
 use crate::git::{RefKind, RepoState};
 use crate::log_view::LogView;
 use crate::model::{RepoEvent, RepoModel};
-use crate::settings::Settings;
+use crate::settings::{Settings, ThemeChoice};
 use crate::ui::{SubView, cached, confirm, prompt_text};
 
 actions!(
@@ -84,6 +84,11 @@ impl Workspace {
             }),
             cx.observe(&model, |_, _, cx| cx.notify()),
             // Pick up changes made outside the app, like JetBrains does on frame activation.
+            cx.observe_window_appearance(window, |_, _, cx| {
+                if Settings::read(|s| s.theme) == ThemeChoice::System {
+                    crate::settings_window::apply_appearance(cx);
+                }
+            }),
             cx.observe_window_activation(window, |this, window, cx| {
                 if window.is_window_active() {
                     this.model.update(cx, |model, cx| model.refresh(cx));
@@ -323,7 +328,7 @@ impl Workspace {
                                 .icon(IconName::Globe)
                                 .on_click(move |_, window, cx| crate::remotes_dialog::open(m.clone(), window, cx)),
                         );
-                        let recent: Vec<_> = Settings::load()
+                        let recent: Vec<_> = Settings::get()
                             .recent
                             .into_iter()
                             .filter(|path| path.display().to_string() != root)
@@ -389,10 +394,9 @@ impl Workspace {
                     .ghost()
                     .small()
                     .tooltip("Toggle Theme")
-                    .on_click(move |_, window, cx| {
-                        let mode = if is_dark { ThemeMode::Light } else { ThemeMode::Dark };
-                        Theme::change(mode, Some(window), cx);
-                        Settings::update(|settings| settings.dark = !is_dark);
+                    .on_click(move |_, _, cx| {
+                        let theme = if is_dark { ThemeChoice::Light } else { ThemeChoice::Dark };
+                        crate::settings_window::change(cx, |settings| settings.theme = theme);
                     }),
             )
     }

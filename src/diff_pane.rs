@@ -9,6 +9,8 @@ use gpui_kit::component::{
 use gpui_kit::assets::IconName;
 use gpui_kit::*;
 
+use crate::settings::Settings;
+
 pub struct DiffPane {
     state: Entity<DiffState>,
     title: Option<SharedString>,
@@ -20,7 +22,7 @@ pub struct DiffPane {
 
 impl DiffPane {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let mode = DiffMode::Split;
+        let mode = preferred_mode();
         let state = cx.new(|cx| DiffState::new(Vec::new(), cx).with_mode(mode));
         Self {
             // The pane is shown as a cached view, so repaint it whenever the
@@ -89,16 +91,23 @@ impl DiffPane {
         self.show_message(None, "Select a file to see its changes", cx);
     }
 
+    /// Remember `mode` for every diff, as the setting it is.
     fn set_mode(&mut self, mode: DiffMode, cx: &mut Context<Self>) {
-        self.mode = mode;
-        self.state.update(cx, |state, cx| state.set_mode(mode, cx));
-        cx.notify();
+        crate::settings_window::change(cx, |settings| settings.unified_diff = mode == DiffMode::Unified);
     }
+}
+
+fn preferred_mode() -> DiffMode {
+    if Settings::read(|s| s.unified_diff) { DiffMode::Unified } else { DiffMode::Split }
 }
 
 impl Render for DiffPane {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let mode = self.mode;
+        let mode = preferred_mode();
+        if mode != self.mode {
+            self.mode = mode;
+            self.state.update(cx, |state, cx| state.set_mode(mode, cx));
+        }
         let toolbar = h_flex()
             .flex_none()
             .h(px(32.))

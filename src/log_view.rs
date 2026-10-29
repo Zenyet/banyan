@@ -24,12 +24,12 @@ use crate::diff_pane::DiffPane;
 use crate::git::{Branch, Commit, CommitDetails, FileChange, RefKind};
 use crate::graph::{self, GraphRow, Half};
 use crate::model::{RepoEvent, RepoModel};
+use crate::settings::Settings;
 use crate::ui::{cached, SubView, selection_bg, FILE_PREFIX, file_tree, format_full_time, format_time, lane_color, path_tree, ref_colors, status_color};
 
 const ROW_HEIGHT: Pixels = px(24.);
 const LANE_WIDTH: Pixels = px(14.);
 const GRAPH_PADDING: Pixels = px(6.);
-const LOG_LIMIT: usize = 5000;
 const BRANCH_PREFIX: &str = "b:";
 
 actions!(
@@ -167,7 +167,7 @@ impl LogView {
             scroll: UniformListScrollHandle::new(),
             focus: cx.focus_handle(),
             loading: true,
-            limit: LOG_LIMIT,
+            limit: Settings::read(|s| s.log_page_size),
             refs_version: 0,
             load_more_scheduled: false,
             log_task: None,
@@ -829,7 +829,7 @@ impl LogView {
     fn load_more(&mut self, cx: &mut Context<Self>) {
         self.load_more_scheduled = false;
         if !self.loading && self.commits.len() >= self.limit {
-            self.limit += LOG_LIMIT;
+            self.limit += Settings::read(|s| s.log_page_size);
             self.reload(cx);
         }
     }

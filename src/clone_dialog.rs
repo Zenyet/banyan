@@ -43,7 +43,7 @@ struct CloneDialog {
 
 /// Where new clones go: next to the most recently opened repository.
 fn default_parent() -> PathBuf {
-    Settings::load()
+    Settings::get()
         .recent
         .first()
         .and_then(|repo| repo.parent().map(PathBuf::from))

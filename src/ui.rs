@@ -15,6 +15,7 @@ use gpui_kit::component::{
 use gpui_kit::*;
 
 use crate::git::RefKind;
+use crate::settings::Settings;
 
 pub const FILE_PREFIX: &str = "f:";
 
@@ -61,7 +62,7 @@ pub fn format_time(timestamp: i64) -> String {
     };
     let now = Local::now();
     let delta = now.signed_duration_since(time);
-    if delta.num_seconds() < 0 {
+    if delta.num_seconds() < 0 || !Settings::read(|s| s.relative_dates) {
         time.format("%Y/%m/%d %H:%M").to_string()
     } else if delta.num_minutes() < 1 {
         "Moments ago".into()

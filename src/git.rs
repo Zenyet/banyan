@@ -929,6 +929,21 @@ impl Repo {
         self.git(&["fetch", "--all", "--prune"])
     }
 
+    /// Fetch in the background: never asks for credentials, as a prompt
+    /// nobody asked for would be confusing. Stored credentials still work.
+    pub fn fetch_quietly(&self) -> Result<()> {
+        let output = command(&self.root, &["fetch", "--all", "--prune", "--quiet"])
+            .env_remove("GIT_ASKPASS")
+            .env_remove("SSH_ASKPASS")
+            .env_remove("SSH_ASKPASS_REQUIRE")
+            .output()
+            .context("failed to run git")?;
+        if !output.status.success() {
+            bail!("git fetch: {}", String::from_utf8_lossy(&output.stderr).trim());
+        }
+        Ok(())
+    }
+
     pub fn pull(&self) -> Result<String> {
         self.git(&["pull", "--no-edit"])
     }
@@ -1182,8 +1197,20 @@ impl Repo {
     }
 }
 
+/// The version of the git at `program`, e.g. "git version 2.50.1".
+pub fn git_version(program: &str) -> Result<String> {
+    let output = Command::new(program)
+        .arg("--version")
+        .output()
+        .with_context(|| format!("cannot run {program}"))?;
+    if !output.status.success() {
+        bail!("{program} --version failed");
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 fn command(dir: &Path, args: &[&str]) -> Command {
-    let mut cmd = Command::new("git");
+    let mut cmd = Command::new(crate::settings::Settings::read(|s| s.git_program().to_string()));
     cmd.arg("-C")
         .arg(dir)
         .args(["-c", "color.ui=false", "-c", "core.quotepath=false"])
@@ -1204,7 +1231,7 @@ fn run(dir: &Path, args: &[&str]) -> Result<String> {
     let started = std::time::Instant::now();
     let output = command(dir, args)
         .output()
-        .context("failed to run git; is it installed?")?;
+        .context("failed to run git; is it installed? (Settings › Git)")?;
     if crate::console::is_recording() {
         crate::console::record(
             dir,
