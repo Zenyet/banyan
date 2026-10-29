@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Banyan
+GenericName=Git Client
+Comment=A Git client in the spirit of JetBrains' Git tooling
+Exec=banyan %f
+Icon=banyan
+Terminal=false
+Categories=Development;RevisionControl;
+Keywords=git;vcs;merge;commit;
+StartupWMClass=banyan

@@ -1,3 +1,6 @@
+// No console window next to the app on Windows.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod actions;
 mod askpass;
 mod assets;
@@ -75,10 +78,10 @@ fn main() {
             cx.on_action(|_: &OpenRepository, cx| prompt_open_repo(None, cx));
             cx.on_action(|_: &OpenSettings, cx| settings_window::open(cx));
             cx.bind_keys([
-                KeyBinding::new("cmd-q", Quit, None),
-                KeyBinding::new("cmd-o", OpenRepository, None),
-                KeyBinding::new("cmd-w", CloseWindow, None),
-                KeyBinding::new("cmd-,", OpenSettings, None),
+                KeyBinding::new("secondary-q", Quit, None),
+                KeyBinding::new("secondary-o", OpenRepository, None),
+                KeyBinding::new("secondary-w", CloseWindow, None),
+                KeyBinding::new("secondary-,", OpenSettings, None),
             ]);
             cx.set_menus(vec![
                 Menu {

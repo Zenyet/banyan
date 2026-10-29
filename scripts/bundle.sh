@@ -1,12 +1,21 @@
 #!/bin/sh
-# Build target/release/Banyan.app. Usage: scripts/bundle.sh
+# Build target/release/Banyan.app for this Mac, or with --universal for
+# both Apple silicon and Intel. Usage: scripts/bundle.sh [--universal]
 set -e
 cd "$(dirname "$0")/.."
 
 VERSION=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f 2)
 APP=target/release/Banyan.app
 
-cargo build --release
+if [ "$1" = "--universal" ]; then
+    cargo build --release --target aarch64-apple-darwin
+    cargo build --release --target x86_64-apple-darwin
+    mkdir -p target/release
+    lipo -create -output target/release/banyan \
+        target/aarch64-apple-darwin/release/banyan target/x86_64-apple-darwin/release/banyan
+else
+    cargo build --release
+fi
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

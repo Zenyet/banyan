@@ -617,7 +617,7 @@ impl ChangesView {
                     .item(PopupMenuItem::new("Copy Path").on_click(move |_, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(copy_path.to_string_lossy().into_owned()))
                     }))
-                    .item(PopupMenuItem::new("Reveal in Finder").on_click(move |_, _, cx| {
+                    .item(PopupMenuItem::new(REVEAL_LABEL).on_click(move |_, _, cx| {
                         cx.reveal_path(&reveal_path)
                     }))
             })
@@ -932,6 +932,15 @@ impl Render for ChangesView {
             )
     }
 }
+
+/// The file manager's name for showing a file in its folder.
+const REVEAL_LABEL: &str = if cfg!(target_os = "macos") {
+    "Reveal in Finder"
+} else if cfg!(windows) {
+    "Show in Explorer"
+} else {
+    "Open Containing Folder"
+};
 
 /// Every changed line of `hunks`.
 fn changed_lines(hunks: &[Hunk]) -> HashSet<ChangedLine> {

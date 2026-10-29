@@ -2,14 +2,11 @@
 //! dialog.
 //!
 //! Git runs this same executable as `GIT_ASKPASS` / `SSH_ASKPASS`. In that
-//! mode it forwards the prompt over a Unix socket to the running app, which
-//! asks the user and sends the answer back.
+//! mode it forwards the prompt to the running app, over a Unix socket or on
+//! Windows a loopback port, and the app asks the user and sends the answer back.
 
 use std::cell::RefCell;
 use std::io::{BufRead as _, BufReader, Write as _};
-use std::os::unix::fs::PermissionsExt as _;
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::OnceLock;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -36,11 +33,12 @@ pub struct Request {
     reply: Sender<Option<String>>,
 }
 
-static SOCKET: OnceLock<PathBuf> = OnceLock::new();
+/// Where the server listens, as the client is told in [`SOCKET_ENV`].
+static ADDRESS: OnceLock<String> = OnceLock::new();
 
 /// Environment for git commands, once the server runs.
 pub fn env() -> Option<[(&'static str, std::ffi::OsString); 5]> {
-    let socket = SOCKET.get()?;
+    let socket = ADDRESS.get()?;
     let exe = std::env::current_exe().ok()?;
     Some([
         ("GIT_ASKPASS", exe.clone().into()),
@@ -54,7 +52,7 @@ pub fn env() -> Option<[(&'static str, std::ffi::OsString); 5]> {
 /// Client mode: forward the prompt and print the answer for git.
 pub fn run_client(socket: &str) -> i32 {
     let prompt = std::env::args().nth(1).unwrap_or_default();
-    match ask(Path::new(socket), &prompt) {
+    match ask(socket, &prompt) {
         Some(answer) => {
             println!("{answer}");
             0
@@ -63,8 +61,8 @@ pub fn run_client(socket: &str) -> i32 {
     }
 }
 
-fn ask(socket: &Path, prompt: &str) -> Option<String> {
-    let mut stream = UnixStream::connect(socket).ok()?;
+fn ask(address: &str, prompt: &str) -> Option<String> {
+    let mut stream = transport::connect(address)?;
     writeln!(stream, "{}", prompt.replace('\n', " ")).ok()?;
     let mut line = String::new();
     BufReader::new(stream).read_line(&mut line).ok()?;
@@ -73,29 +71,22 @@ fn ask(socket: &Path, prompt: &str) -> Option<String> {
 
 /// Listen for prompts; each arrives on the returned channel.
 pub fn start_server() -> std::io::Result<Receiver<Request>> {
-    let path = std::env::temp_dir().join(format!("banyan-askpass-{}.sock", std::process::id()));
     let (tx, rx) = mpsc::channel();
-    serve(&path, tx)?;
-    SOCKET.set(path).ok();
+    let address = transport::serve(move |stream| {
+        let requests = tx.clone();
+        std::thread::spawn(move || handle(stream, requests));
+    })?;
+    ADDRESS.set(address).ok();
     Ok(rx)
 }
 
-fn serve(path: &Path, requests: Sender<Request>) -> std::io::Result<()> {
-    std::fs::remove_file(path).ok();
-    let listener = UnixListener::bind(path)?;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    std::thread::spawn(move || {
-        for stream in listener.incoming().flatten() {
-            let requests = requests.clone();
-            std::thread::spawn(move || handle(stream, requests));
-        }
-    });
-    Ok(())
-}
-
-fn handle(stream: UnixStream, requests: Sender<Request>) {
+fn handle(stream: transport::Stream, requests: Sender<Request>) {
+    let mut reader = BufReader::new(&stream);
+    if !transport::accepts(&mut reader) {
+        return;
+    }
     let mut prompt = String::new();
-    if BufReader::new(&stream).read_line(&mut prompt).is_err() {
+    if reader.read_line(&mut prompt).is_err() {
         return;
     }
     let (reply, answer) = mpsc::channel();
@@ -108,6 +99,80 @@ fn handle(stream: UnixStream, requests: Sender<Request>) {
         Ok(Some(value)) => writeln!(stream, "OK {value}").ok(),
         _ => writeln!(stream, "CANCEL").ok(),
     };
+}
+
+/// A socket file only this user can open.
+#[cfg(unix)]
+mod transport {
+    use std::io::BufRead;
+    use std::os::unix::fs::PermissionsExt as _;
+    use std::os::unix::net::{UnixListener, UnixStream};
+
+    pub type Stream = UnixStream;
+
+    pub fn serve(on_connect: impl Fn(Stream) + Send + 'static) -> std::io::Result<String> {
+        let path = std::env::temp_dir().join(format!("banyan-askpass-{}.sock", std::process::id()));
+        std::fs::remove_file(&path).ok();
+        let listener = UnixListener::bind(&path)?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        std::thread::spawn(move || listener.incoming().flatten().for_each(on_connect));
+        Ok(path.to_string_lossy().into_owned())
+    }
+
+    pub fn connect(address: &str) -> Option<Stream> {
+        UnixStream::connect(address).ok()
+    }
+
+    /// The file's permissions already keep other users out.
+    pub fn accepts(_: &mut impl BufRead) -> bool {
+        true
+    }
+}
+
+/// A loopback port; clients prove they were started by this app with a
+/// random token, passed as `port:token`.
+#[cfg(windows)]
+mod transport {
+    use std::io::{BufRead, Write as _};
+    use std::net::{Ipv4Addr, TcpListener, TcpStream};
+    use std::sync::OnceLock;
+
+    pub type Stream = TcpStream;
+
+    static TOKEN: OnceLock<String> = OnceLock::new();
+
+    fn token() -> &'static str {
+        use std::hash::{BuildHasher as _, Hasher as _};
+        TOKEN.get_or_init(|| {
+            // RandomState is seeded from the OS's random source.
+            (0..4)
+                .map(|ix| {
+                    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+                    hasher.write_usize(ix);
+                    format!("{:016x}", hasher.finish())
+                })
+                .collect()
+        })
+    }
+
+    pub fn serve(on_connect: impl Fn(Stream) + Send + 'static) -> std::io::Result<String> {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
+        let port = listener.local_addr()?.port();
+        std::thread::spawn(move || listener.incoming().flatten().for_each(on_connect));
+        Ok(format!("{port}:{}", token()))
+    }
+
+    pub fn connect(address: &str) -> Option<Stream> {
+        let (port, token) = address.split_once(':')?;
+        let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port.parse().ok()?)).ok()?;
+        writeln!(stream, "{token}").ok()?;
+        Some(stream)
+    }
+
+    pub fn accepts(reader: &mut impl BufRead) -> bool {
+        let mut line = String::new();
+        reader.read_line(&mut line).is_ok() && line.trim_end() == token()
+    }
 }
 
 /// Show prompts from git in the active window as they arrive.
@@ -214,14 +279,17 @@ fn show_prompt(request: Request, window: &mut Window, cx: &mut App) {
 
 #[cfg(test)]
 mod tests {
-    use super::{ask, is_secret, serve};
+    use super::{ask, handle, is_secret, transport};
     use std::sync::mpsc;
 
     #[test]
     fn prompt_round_trip() {
-        let path = std::env::temp_dir().join(format!("banyan-askpass-test-{}.sock", std::process::id()));
         let (tx, rx) = mpsc::channel();
-        serve(&path, tx).unwrap();
+        let address = transport::serve(move |stream| {
+            let requests = tx.clone();
+            std::thread::spawn(move || handle(stream, requests));
+        })
+        .unwrap();
         std::thread::spawn(move || {
             let first = rx.recv().unwrap();
             assert_eq!(first.prompt, "Username for 'https://example.com': ");
@@ -229,9 +297,8 @@ mod tests {
             let second = rx.recv().unwrap();
             drop(second); // Dropping the request cancels it.
         });
-        assert_eq!(ask(&path, "Username for 'https://example.com': ").as_deref(), Some("alice"));
-        assert_eq!(ask(&path, "Password for 'https://alice@example.com': "), None);
-        std::fs::remove_file(&path).ok();
+        assert_eq!(ask(&address, "Username for 'https://example.com': ").as_deref(), Some("alice"));
+        assert_eq!(ask(&address, "Password for 'https://alice@example.com': "), None);
     }
 
     #[test]

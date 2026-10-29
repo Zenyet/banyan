@@ -1,4 +1,5 @@
 //! Git asks for credentials through the banyan executable in askpass mode.
+#![cfg(unix)]
 
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::os::unix::net::UnixListener;

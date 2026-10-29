@@ -47,7 +47,7 @@ fn default_parent() -> PathBuf {
         .recent
         .first()
         .and_then(|repo| repo.parent().map(PathBuf::from))
-        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+        .or_else(std::env::home_dir)
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
