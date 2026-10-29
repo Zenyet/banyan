@@ -37,6 +37,14 @@ actions!(
     [SelectPrevCommit, SelectNextCommit, SelectFirstCommit, SelectLastCommit, PageUpCommits, PageDownCommits]
 );
 
+/// Labels and `git log --since` values of the Date filter.
+const DATE_FILTERS: [(&str, &str); 4] = [
+    ("Last 24 Hours", "24.hours.ago"),
+    ("Last 7 Days", "7.days.ago"),
+    ("Last 30 Days", "30.days.ago"),
+    ("Last Year", "1.year.ago"),
+];
+
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("up", SelectPrevCommit, Some("CommitList")),
@@ -63,6 +71,10 @@ pub struct LogView {
     filter: Entity<InputState>,
     branch_filter: Option<String>,
     author_filter: Option<String>,
+    /// Index into `DATE_FILTERS`.
+    date_filter: Option<usize>,
+    /// A file or folder relative to the repository root.
+    path_filter: Option<String>,
     branch_tree: Entity<TreeState>,
     branches: Rc<HashMap<SharedString, Branch>>,
     selected_branch: Option<SharedString>,
@@ -136,6 +148,8 @@ impl LogView {
             head: None,
             filter,
             branch_filter: None,
+            date_filter: None,
+            path_filter: None,
             author_filter: None,
             branch_tree,
             branches: Rc::default(),
@@ -178,6 +192,8 @@ impl LogView {
     pub fn reload(&mut self, cx: &mut Context<Self>) {
         let repo = self.model.read(cx).repo.clone();
         let refs = self.branch_filter.clone();
+        let since = self.date_filter.map(|ix| DATE_FILTERS[ix].1);
+        let path = self.path_filter.clone();
         let limit = self.limit;
         self.loading = true;
         cx.notify();
@@ -185,7 +201,7 @@ impl LogView {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    let commits = repo.log(refs.as_deref(), limit)?;
+                    let commits = repo.log(refs.as_deref(), since, path.as_deref(), limit)?;
                     let graph = graph::layout(&commits);
                     let head = repo.git(&["rev-parse", "HEAD"]).ok().map(|s| s.trim().to_string());
                     anyhow::Ok((commits, graph, head))
@@ -282,6 +298,44 @@ impl LogView {
 
     fn is_filtered(&self, cx: &App) -> bool {
         self.author_filter.is_some() || !self.filter.read(cx).value().trim().is_empty()
+    }
+
+    /// Filters git applies, which leave gaps in the history.
+    fn is_history_filtered(&self) -> bool {
+        self.date_filter.is_some() || self.path_filter.is_some()
+    }
+
+    fn set_date_filter(&mut self, filter: Option<usize>, cx: &mut Context<Self>) {
+        self.date_filter = filter;
+        self.reload(cx);
+    }
+
+    fn set_path_filter(&mut self, path: Option<String>, cx: &mut Context<Self>) {
+        self.path_filter = path;
+        self.reload(cx);
+    }
+
+    fn choose_path_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let root = self.model.read(cx).repo.root().to_path_buf();
+        let paths = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: true,
+            multiple: false,
+            prompt: Some("Filter".into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = paths.await else { return };
+            let Some(path) = paths.into_iter().next() else { return };
+            let root = std::fs::canonicalize(&root).unwrap_or(root);
+            let path = std::fs::canonicalize(&path).unwrap_or(path);
+            this.update(cx, |this, cx| match path.strip_prefix(&root) {
+                Ok(relative) if relative.as_os_str().is_empty() => this.set_path_filter(None, cx),
+                Ok(relative) => this.set_path_filter(Some(relative.to_string_lossy().into_owned()), cx),
+                Err(_) => this.report(anyhow::anyhow!("{} is not inside the repository", path.display()), cx),
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn set_author_filter(&mut self, author: Option<String>, cx: &mut Context<Self>) {
@@ -611,6 +665,53 @@ impl LogView {
                         menu.max_h(px(480.)).scrollable(true)
                     })
             })
+            .child({
+                let view = cx.entity().downgrade();
+                Button::new("date-filter")
+                    .label(match self.date_filter {
+                        Some(ix) => format!("Date: {}", DATE_FILTERS[ix].0),
+                        None => "Date: All".into(),
+                    })
+                    .ghost()
+                    .xsmall()
+                    .dropdown_caret(true)
+                    .dropdown_menu(move |mut menu, _, _| {
+                        let all = view.clone();
+                        menu = menu
+                            .item(PopupMenuItem::new("All").on_click(move |_, _, cx| {
+                                all.update(cx, |this, cx| this.set_date_filter(None, cx)).ok();
+                            }))
+                            .separator();
+                        for (ix, (label, _)) in DATE_FILTERS.iter().enumerate() {
+                            let view = view.clone();
+                            menu = menu.item(PopupMenuItem::new(*label).on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| this.set_date_filter(Some(ix), cx)).ok();
+                            }));
+                        }
+                        menu
+                    })
+            })
+            .child({
+                let view = cx.entity().downgrade();
+                Button::new("path-filter")
+                    .label(match &self.path_filter {
+                        Some(path) => format!("Paths: {path}"),
+                        None => "Paths: All".into(),
+                    })
+                    .ghost()
+                    .xsmall()
+                    .dropdown_caret(true)
+                    .dropdown_menu(move |menu, _, _| {
+                        let all = view.clone();
+                        let choose = view.clone();
+                        menu.item(PopupMenuItem::new("All").on_click(move |_, _, cx| {
+                            all.update(cx, |this, cx| this.set_path_filter(None, cx)).ok();
+                        }))
+                        .item(PopupMenuItem::new("Select File or Folder…").on_click(move |_, window, cx| {
+                            choose.update(cx, |this, cx| this.choose_path_filter(window, cx)).ok();
+                        }))
+                    })
+            })
             .child(div().flex_1())
             .when(self.loading, |row| {
                 row.child(div().text_xs().text_color(cx.theme().muted_foreground).child("Loading…"))
@@ -635,8 +736,8 @@ impl LogView {
     }
 
     fn render_commits(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let show_graph = !self.is_filtered(cx);
-        let has_more = show_graph && self.commits.len() >= self.limit;
+        let show_graph = !self.is_filtered(cx) && !self.is_history_filtered();
+        let has_more = !self.is_filtered(cx) && self.commits.len() >= self.limit;
         v_flex()
             .size_full()
             .child(self.render_toolbar(cx))

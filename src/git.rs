@@ -271,20 +271,31 @@ impl Repo {
         run(&self.root, args)
     }
 
-    pub fn log(&self, refs: Option<&str>, limit: usize) -> Result<Vec<Commit>> {
-        match refs {
-            Some(refs) => self.log_revs(&[refs], limit),
-            None => self.log_revs(&["--branches", "--remotes", "--tags", "HEAD"], limit),
-        }
+    /// Commits of `refs` (all branches, remotes and tags by default), newest
+    /// first, optionally only those since a git date such as `7.days.ago`
+    /// or touching `path`.
+    pub fn log(&self, refs: Option<&str>, since: Option<&str>, path: Option<&str>, limit: usize) -> Result<Vec<Commit>> {
+        let since = since.map(|since| format!("--since={since}"));
+        let mut revs: Vec<&str> = match refs {
+            Some(refs) => vec![refs],
+            None => vec!["--branches", "--remotes", "--tags", "HEAD"],
+        };
+        revs.extend(since.as_deref());
+        self.log_paths(&revs, path.as_slice(), limit)
     }
 
     /// `git log` over arbitrary revision arguments, newest first.
     pub fn log_revs(&self, revs: &[&str], limit: usize) -> Result<Vec<Commit>> {
+        self.log_paths(revs, &[], limit)
+    }
+
+    fn log_paths(&self, revs: &[&str], paths: &[&str], limit: usize) -> Result<Vec<Commit>> {
         let format = format!("--format=%H{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%at{FIELD}%D{FIELD}%s{RECORD}");
         let limit = format!("-n{limit}");
         let mut args = vec!["log", "--date-order", "--decorate=full", &format, &limit];
         args.extend(revs);
         args.push("--");
+        args.extend(paths);
         let out = match self.git(&args) {
             Ok(out) => out,
             // A fresh repository has no HEAD yet.
@@ -1591,6 +1602,19 @@ mod tests {
         let ids: Vec<String> = head.lines().map(str::to_string).collect();
         t.repo.revert(&ids).unwrap();
         assert!(!t.dir.join("one.txt").exists() && !t.dir.join("two.txt").exists());
+    }
+
+    #[test]
+    fn log_filters_by_path_and_date() {
+        let t = TempRepo::new("log-filters");
+        t.commit("a.txt", "a\n", "Add a");
+        t.commit("dir/b.txt", "b\n", "Add b");
+        t.commit("a.txt", "a2\n", "Change a");
+        let subjects = |commits: Vec<Commit>| commits.into_iter().map(|c| c.subject).collect::<Vec<_>>();
+        assert_eq!(subjects(t.repo.log(None, None, Some("a.txt"), 10).unwrap()), vec!["Change a", "Add a"]);
+        assert_eq!(subjects(t.repo.log(None, None, Some("dir"), 10).unwrap()), vec!["Add b"]);
+        assert_eq!(t.repo.log(None, Some("1.day.ago"), None, 10).unwrap().len(), 3);
+        assert!(t.repo.log(None, Some("2099-01-01"), None, 10).unwrap().is_empty());
     }
 
     #[test]

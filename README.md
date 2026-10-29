@@ -9,7 +9,7 @@ cargo run -- /path/to/repo   # or run inside a repository; with no repository a 
 ## Features
 
 - **Log tab**: branches tree (HEAD / Local / Remote / Tags), commit graph with colored lanes and ref labels,
-  text/hash, branch and author filters, commit details (message, author, "in N branches"), changed files tree,
+  text/hash, branch, author, date and path filters, commit details (message, author, "in N branches"), changed files tree,
   and a side-by-side / unified diff preview.
 - **Commit context menu**: copy hash, checkout revision, new branch / tag, cherry-pick, revert, reset (soft / mixed / hard).
   Cmd-click or Shift-click selects several commits to cherry-pick or revert together.
