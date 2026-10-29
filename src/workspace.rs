@@ -26,7 +26,7 @@ use crate::ui::{SubView, cached, confirm, prompt_text};
 
 actions!(
     workspace,
-    [CommitChanges, PushCommits, UpdateProject, ShowLog, ShowCommitTab, ShowConsole, RefreshRepository]
+    [CommitChanges, PushCommits, UpdateProject, ApplyPatch, ShowLog, ShowCommitTab, ShowConsole, RefreshRepository]
 );
 
 /// JetBrains' macOS keymap where it has an equivalent.
@@ -453,6 +453,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &PushCommits, window, cx| {
                 crate::push_dialog::open(this.model.clone(), window, cx)
             }))
+            .on_action(cx.listener(|this, _: &ApplyPatch, _, cx| crate::actions::apply_patch(&this.model, cx)))
             .on_action(cx.listener(|this, _: &UpdateProject, window, cx| {
                 crate::update_dialog::open(this.model.clone(), window, cx)
             }))

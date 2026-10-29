@@ -449,6 +449,14 @@ impl ChangesView {
                     }),
             )
             .child(
+                Button::new("changes-apply-patch")
+                    .icon(IconName::FileText)
+                    .ghost()
+                    .xsmall()
+                    .tooltip("Apply Patch...")
+                    .on_click(cx.listener(|this, _, _, cx| crate::actions::apply_patch(&this.model, cx))),
+            )
+            .child(
                 Button::new("changes-shelve")
                     .icon(IconName::Inbox)
                     .ghost()

@@ -86,6 +86,10 @@ the way git branches grow apart and merge back.
 
 - Branch popup in the toolbar: checkout (with Smart Checkout when local changes are in the way),
   new branch from, merge into current, rebase current onto, rename, and delete local, remote and tag refs.
+  Any local branch can be pushed on its own, fast-forwarded to its upstream (**Update**) without checking
+  it out, or set to track another remote branch (**Set Upstream**).
+- **Create Patch** from one or more commits, **Apply Patch** from a file (Git menu or the Commit tab), and
+  **Get from Revision** to bring a file back to its version in any commit.
 - **Interactive rebase** from any commit: reorder, pick, reword, squash, fixup, drop.
 - **File history** and **Annotate** (git blame shaded by age).
 - **Compare with Current** for any branch, and a **stash viewer** showing each stash's files and diff.

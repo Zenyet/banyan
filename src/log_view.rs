@@ -953,6 +953,27 @@ impl LogView {
                 let menu = menu.item(PopupMenuItem::new("Compare with Local").on_click(move |_, window, cx| {
                     crate::worktree_diff::open_between(m.clone(), r.clone(), None, Some(p.clone()), window, cx)
                 }));
+                let (m, p, r) = (model.clone(), path.clone(), rev.clone());
+                let menu = menu.item(PopupMenuItem::new("Get from Revision").on_click(move |_, window, cx| {
+                    let (model, path, rev) = (m.clone(), p.clone(), r.clone());
+                    let run = move |_: &mut Window, cx: &mut App| {
+                        let (path, rev) = (path.clone(), rev.clone());
+                        let label = format!("Get {path} from {}", crate::actions::short(&rev));
+                        model.update(cx, |m, cx| m.run(label, move |repo| repo.get_from_revision(&rev, &path), cx));
+                    };
+                    if m.read(cx).status.iter().any(|e| e.path == p) {
+                        crate::ui::confirm(
+                            "Get from Revision",
+                            format!("{p} has local changes. Replace it with its version in {}?", crate::actions::short(&r)),
+                            "Replace",
+                            run,
+                            window,
+                            cx,
+                        );
+                    } else {
+                        run(window, cx);
+                    }
+                }));
                 if change.status == 'D' {
                     return menu;
                 }

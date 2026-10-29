@@ -1304,6 +1304,12 @@ impl Repo {
     /// the same name on the first remote.
     pub fn push_target(&self) -> Result<PushTarget> {
         let branch = self.current_branch().context("cannot push a detached HEAD")?;
+        self.push_target_for(&branch)
+    }
+
+    /// Where local branch `branch` pushes to, as [`Self::push_target`] says.
+    pub fn push_target_for(&self, branch: &str) -> Result<PushTarget> {
+        let branch = branch.to_string();
         let config = |key: String| {
             self.git(&["config", "--get", &key])
                 .ok()
@@ -1365,6 +1371,69 @@ impl Repo {
 
     pub fn push(&self) -> Result<String> {
         self.push_to(&self.push_target()?, false, false)
+    }
+
+    /// Push local branch `branch`, current or not.
+    pub fn push_branch(&self, branch: &str) -> Result<String> {
+        self.push_to(&self.push_target_for(branch)?, false, false)
+    }
+
+    /// Fast-forward a local branch that is not checked out to its upstream.
+    pub fn update_branch(&self, branch: &str) -> Result<String> {
+        if self.current_branch().as_deref() == Some(branch) {
+            bail!("{branch} is checked out; use Update Project");
+        }
+        let target = self.push_target_for(branch)?;
+        if target.is_new {
+            bail!("{branch} has no tracked remote branch");
+        }
+        // Without a leading +, fetch refuses anything but a fast-forward.
+        let refspec = format!("{}:{}", target.remote_branch, branch);
+        self.git(&["fetch", &target.remote, &refspec])
+    }
+
+    /// Make `branch` track remote branch `upstream` (e.g. `origin/main`), or
+    /// track nothing with `None`.
+    pub fn set_upstream(&self, branch: &str, upstream: Option<&str>) -> Result<String> {
+        match upstream {
+            Some(upstream) => self.git(&["branch", &format!("--set-upstream-to={upstream}"), branch]),
+            None => self.git(&["branch", "--unset-upstream", branch]),
+        }
+    }
+
+    /// `ids` (oldest first) as one patch file, with their messages and
+    /// authors, as `git format-patch` writes them.
+    pub fn create_patch(&self, ids: &[String], dest: &Path) -> Result<()> {
+        let mut patch = String::new();
+        for id in ids {
+            patch.push_str(&self.git(&["format-patch", "--stdout", "--binary", "-1", id])?);
+        }
+        std::fs::write(dest, patch).with_context(|| format!("cannot write {}", dest.display()))
+    }
+
+    /// Apply a patch file to the work tree; hunks that no longer fit are
+    /// merged three-way and left with conflict markers.
+    pub fn apply_patch(&self, file: &Path) -> Result<String> {
+        let file = file.to_string_lossy().into_owned();
+        if let Ok(out) = self.git(&["apply", "--binary", &file]) {
+            return Ok(out);
+        }
+        match self.git(&["apply", "--3way", "--binary", &file]) {
+            Err(err) if format!("{err:#}").contains("with conflicts") => Ok(String::new()),
+            result => result,
+        }
+    }
+
+    /// Replace `path` in the work tree with its version in `rev`; a file
+    /// `rev` doesn't have is deleted.
+    pub fn get_from_revision(&self, rev: &str, path: &str) -> Result<String> {
+        if self.git(&["cat-file", "-e", &format!("{rev}:{path}")]).is_ok() {
+            self.git(&["checkout", rev, "--", path])
+        } else {
+            let out = self.git(&["rm", "-q", "-f", "--ignore-unmatch", "--", path])?;
+            std::fs::remove_file(self.root.join(path)).ok();
+            Ok(out)
+        }
     }
 
     /// Commits from `from` up to HEAD, oldest first, for an interactive rebase.
@@ -2292,6 +2361,54 @@ mod tests {
         let text = std::fs::read_to_string(t.dir.join("a.txt")).unwrap();
         assert!(text.contains("shelved") && text.contains("committed meanwhile"), "{text}");
         assert!(t.repo.status().unwrap().iter().any(|e| e.is_conflicted()));
+    }
+
+    #[test]
+    fn patches_round_trip_and_files_come_back_from_revisions() {
+        let (t, ids) = four_commits("patches");
+        let patch = t.dir.join("../banyan-test-patch-{}.patch".replace("{}", &std::process::id().to_string()));
+        t.repo.create_patch(&ids[2..], &patch).unwrap();
+        let text = std::fs::read_to_string(&patch).unwrap();
+        assert!(text.contains("Subject: [PATCH] Two") && text.contains("Subject: [PATCH] Three"), "{text}");
+
+        t.repo.reset(&ids[1], ResetMode::Hard).unwrap();
+        t.repo.apply_patch(&patch).unwrap();
+        assert!(t.dir.join("Two.txt").exists() && t.dir.join("Three.txt").exists());
+        std::fs::remove_file(&patch).ok();
+
+        t.write("One.txt", "changed");
+        t.repo.get_from_revision(&ids[1], "One.txt").unwrap();
+        assert_eq!(std::fs::read_to_string(t.dir.join("One.txt")).unwrap(), "One");
+        t.repo.get_from_revision(&ids[0], "One.txt").unwrap();
+        assert!(!t.dir.join("One.txt").exists());
+    }
+
+    #[test]
+    fn other_branches_push_update_and_track() {
+        let t = TempRepo::new("branch-ops");
+        let remote = TempRepo::new("branch-ops-remote");
+        run(&remote.dir, &["config", "receive.denyCurrentBranch", "ignore"]).unwrap();
+        t.repo.git(&["remote", "add", "origin", &remote.dir.display().to_string()]).unwrap();
+        t.commit("a.txt", "a\n", "First");
+        t.repo.git(&["branch", "side"]).unwrap();
+        t.repo.push_branch("side").unwrap();
+        assert_eq!(t.repo.push_target_for("side").unwrap().is_new, false);
+
+        // Someone else moves the remote side branch on.
+        let other = TempRepo::new("branch-ops-other");
+        other.repo.git(&["fetch", "-q", &remote.dir.display().to_string(), "side:side"]).unwrap();
+        other.repo.git(&["checkout", "-q", "side"]).unwrap();
+        other.commit("b.txt", "b\n", "On side");
+        other.repo.git(&["push", "-q", &remote.dir.display().to_string(), "side:side"]).unwrap();
+
+        t.repo.update_branch("side").unwrap();
+        assert_eq!(t.repo.git(&["log", "-1", "--format=%s", "side"]).unwrap().trim(), "On side");
+        assert!(t.repo.update_branch("main").is_err());
+
+        t.repo.set_upstream("side", None).unwrap();
+        assert!(t.repo.push_target_for("side").unwrap().is_new);
+        t.repo.set_upstream("side", Some("origin/side")).unwrap();
+        assert!(!t.repo.push_target_for("side").unwrap().is_new);
     }
 
     #[test]

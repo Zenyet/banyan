@@ -112,6 +112,7 @@ fn main() {
                         MenuItem::action("Commit…", workspace::CommitChanges),
                         MenuItem::action("Push…", workspace::PushCommits),
                         MenuItem::action("Update Project", workspace::UpdateProject),
+                        MenuItem::action("Apply Patch…", workspace::ApplyPatch),
                         MenuItem::separator(),
                         MenuItem::action("Show Log", workspace::ShowLog),
                         MenuItem::action("Show Commit", workspace::ShowCommitTab),
