@@ -731,6 +731,17 @@ impl Repo {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     }
 
+    /// Append `path` to the top-level `.gitignore`, anchored to the root.
+    pub fn add_to_gitignore(&self, path: &str) -> Result<()> {
+        let file = self.root.join(".gitignore");
+        let mut text = std::fs::read_to_string(&file).unwrap_or_default();
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str(&format!("/{}\n", path.trim_end_matches('/')));
+        std::fs::write(&file, text).with_context(|| format!("failed to write {}", file.display()))
+    }
+
     pub fn rollback(&self, entries: &[StatusEntry]) -> Result<()> {
         for entry in entries {
             if entry.is_untracked() {
@@ -1632,6 +1643,19 @@ mod tests {
         assert!(old.success());
         assert_eq!(t.repo.log(None, Some("1.day.ago"), None, 10).unwrap().len(), 3);
         assert!(t.repo.log(None, Some("2099-01-01"), None, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn adds_untracked_files_to_gitignore() {
+        let t = TempRepo::new("gitignore");
+        t.commit(".gitignore", "*.log", "Ignore logs");
+        t.write("build/out.bin", "x");
+        t.write("notes.txt", "x");
+        t.repo.add_to_gitignore("build/").unwrap();
+        t.repo.add_to_gitignore("notes.txt").unwrap();
+        assert_eq!(std::fs::read_to_string(t.dir.join(".gitignore")).unwrap(), "*.log\n/build\n/notes.txt\n");
+        let status: Vec<_> = t.repo.status().unwrap().into_iter().map(|e| e.path).collect();
+        assert_eq!(status, vec![".gitignore"]);
     }
 
     #[test]

@@ -497,6 +497,7 @@ impl ChangesView {
         let conflicted = entry.is_conflicted();
         let untracked = entry.is_untracked();
         let model = self.model.clone();
+        let root = self.model.read(cx).repo.root().to_path_buf();
         let view = cx.entity().downgrade();
 
         h_flex()
@@ -548,6 +549,7 @@ impl ChangesView {
                 }
             }))
             .context_menu(move |mut menu, _, _| {
+                let full_path = root.join(&path);
                 if conflicted {
                     let merge_model = model.clone();
                     let merge_path = path.clone();
@@ -588,12 +590,28 @@ impl ChangesView {
                 } else {
                     let model = model.clone();
                     let path = path.clone();
+                    let ignore_model = model.clone();
+                    let ignore_path = path.clone();
                     menu = menu.item(PopupMenuItem::new("Add to VCS").on_click(move |_, _, cx| {
                         let path = path.clone();
                         model.update(cx, |m, cx| m.run(format!("Add {path}"), move |repo| repo.git(&["add", "--", &path]), cx));
                     }));
+                    menu = menu.item(PopupMenuItem::new("Add to .gitignore").on_click(move |_, _, cx| {
+                        let path = ignore_path.clone();
+                        ignore_model.update(cx, |m, cx| {
+                            m.run(format!("Ignore {path}"), move |repo| repo.add_to_gitignore(&path), cx)
+                        });
+                    }));
                 }
-                menu
+                let copy_path = full_path.clone();
+                let reveal_path = full_path.clone();
+                menu.separator()
+                    .item(PopupMenuItem::new("Copy Path").on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(copy_path.to_string_lossy().into_owned()))
+                    }))
+                    .item(PopupMenuItem::new("Reveal in Finder").on_click(move |_, _, cx| {
+                        cx.reveal_path(&reveal_path)
+                    }))
             })
         .into_any_element()
     }
