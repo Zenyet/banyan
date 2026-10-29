@@ -4,11 +4,13 @@
 
 # Banyan
 
-**A fast, native Git client for macOS, in the spirit of JetBrains' Git tooling.**
+**A fast, native Git client in the spirit of JetBrains' Git tooling.**
 
 Built in Rust with [GPUI](https://gpui.rs) and [GPUI Kit](https://gpui-kit.com).
 
 ![macOS 11+](https://img.shields.io/badge/macOS-11%2B-black?logo=apple)
+![Linux](https://img.shields.io/badge/Linux-preview-black?logo=linux)
+![Windows](https://img.shields.io/badge/Windows-preview-black?logo=windows)
 ![Rust](https://img.shields.io/badge/Rust-2024_edition-orange?logo=rust)
 ![GPUI](https://img.shields.io/badge/UI-GPUI-blue)
 
@@ -92,17 +94,38 @@ the way git branches grow apart and merge back.
 
 ## Installation
 
-Banyan is not distributed as a prebuilt binary yet. To build it from source you need:
+Download the package for your system from the [latest release](https://github.com/Zenyet/banyan/releases/latest).
+Every platform needs `git` installed.
 
-- macOS 11 or later, with the Xcode command line tools (`xcode-select --install`)
-- [Rust](https://rustup.rs) 1.85 or later
-- `git`
+| System | Package |
+| --- | --- |
+| macOS 11+ (Apple silicon and Intel) | `Banyan-<version>-macos-universal.dmg`: open it and drag Banyan to Applications |
+| Debian, Ubuntu | `banyan_<version>_amd64.deb`: `sudo apt install ./banyan_<version>_amd64.deb` |
+| Other Linux | `Banyan-<version>-linux-x86_64.tar.gz`: unpack and run `banyan` |
+| Windows 10+ | `Banyan-<version>-windows-x64-setup.exe` (installer) or `…-windows-x64.zip` (portable) |
+
+The builds are not signed by Apple or Microsoft yet:
+
+- **macOS** says Banyan "is damaged" or "cannot be opened". After copying it to Applications, run
+  `xattr -dr com.apple.quarantine /Applications/Banyan.app` once.
+- **Windows** SmartScreen warns about an unknown publisher: choose **More info › Run anyway**.
+
+Banyan is developed on macOS; the Linux and Windows builds are new and less tested, so please
+[report problems](https://github.com/Zenyet/banyan/issues).
+
+### Building from source
+
+You need [Rust](https://rustup.rs) 1.85 or later and `git`, plus on macOS the Xcode command line tools
+(`xcode-select --install`). On Linux, install the development packages the
+[release workflow](.github/workflows/release.yml) lists.
 
 ```sh
 git clone https://github.com/Zenyet/banyan.git
 cd banyan
-scripts/bundle.sh            # builds target/release/Banyan.app
-cp -r target/release/Banyan.app /Applications/
+cargo run --release -- /path/to/repo
+scripts/bundle.sh                  # macOS: builds target/release/Banyan.app
+scripts/package-linux.sh           # Linux: tarball and .deb in dist/
+scripts/package-windows.ps1        # Windows: zip and installer in dist/ (needs Inno Setup)
 ```
 
 The app is about 27 MB. Diffs are highlighted for common languages by default. To also highlight Kotlin, Swift,
@@ -122,6 +145,8 @@ menu in the toolbar.
 
 ### Keyboard shortcuts
 
+On Linux and Windows, use <kbd>Ctrl</kbd> where these show <kbd>⌘</kbd>.
+
 | Shortcut | Action |
 | --- | --- |
 | <kbd>⌘</kbd> <kbd>K</kbd> | Commit (<kbd>⌘</kbd> <kbd>↩</kbd> in the message box) |
@@ -138,8 +163,8 @@ Under <kbd>⌘</kbd> <kbd>,</kbd> you can set the theme (light, dark, or follow 
 relative or absolute dates, the git executable, the default Update Project method, background fetch,
 side-by-side or unified diffs, and how many commits the log loads at a time.
 
-Settings, recent repositories and recent commit messages are stored in
-`~/Library/Application Support/Banyan/settings`. Settings from GitBrains, Banyan's earlier name,
+Settings, recent repositories and recent commit messages are stored in `Banyan/settings` under
+`~/Library/Application Support` on macOS, `%APPDATA%` on Windows and `~/.config` on Linux. Settings from GitBrains, Banyan's earlier name,
 are carried over on first launch.
 
 ## Development
