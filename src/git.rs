@@ -828,12 +828,18 @@ impl Repo {
         self.git(&["rebase", onto])
     }
 
-    pub fn cherry_pick(&self, id: &str) -> Result<String> {
-        self.git(&["cherry-pick", id])
+    /// Apply `ids` in order, oldest first.
+    pub fn cherry_pick(&self, ids: &[String]) -> Result<String> {
+        let mut args = vec!["cherry-pick"];
+        args.extend(ids.iter().map(String::as_str));
+        self.git(&args)
     }
 
-    pub fn revert(&self, id: &str) -> Result<String> {
-        self.git(&["revert", "--no-edit", id])
+    /// Revert `ids` in order, newest first.
+    pub fn revert(&self, ids: &[String]) -> Result<String> {
+        let mut args = vec!["revert", "--no-edit"];
+        args.extend(ids.iter().map(String::as_str));
+        self.git(&args)
     }
 
     pub fn reset(&self, id: &str, mode: ResetMode) -> Result<String> {
@@ -1566,6 +1572,25 @@ mod tests {
         t.repo.commit_partial("Add B", &[], &[("f.txt".into(), excluded)], false).unwrap();
         assert_eq!(t.repo.git(&["show", "HEAD:f.txt"]).unwrap(), "a\nb\nB\nc\n");
         assert_eq!(std::fs::read_to_string(t.dir.join("f.txt")).unwrap(), changed);
+    }
+
+    #[test]
+    fn cherry_picks_and_reverts_several_commits() {
+        let t = TempRepo::new("multi-pick");
+        t.commit("base.txt", "base\n", "Base");
+        t.repo.git(&["checkout", "-q", "-b", "topic"]).unwrap();
+        let one = t.commit("one.txt", "1\n", "One");
+        let two = t.commit("two.txt", "2\n", "Two");
+        t.repo.git(&["checkout", "-q", "main"]).unwrap();
+
+        t.repo.cherry_pick(&[one, two]).unwrap();
+        let subjects = t.repo.git(&["log", "--format=%s"]).unwrap();
+        assert_eq!(subjects, "Two\nOne\nBase\n");
+
+        let head = t.repo.git(&["rev-parse", "HEAD", "HEAD~1"]).unwrap();
+        let ids: Vec<String> = head.lines().map(str::to_string).collect();
+        t.repo.revert(&ids).unwrap();
+        assert!(!t.dir.join("one.txt").exists() && !t.dir.join("two.txt").exists());
     }
 
     #[test]

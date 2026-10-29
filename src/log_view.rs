@@ -1,6 +1,6 @@
 //! The Git "Log" tab: branches, commit graph, commit details and diff preview.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -19,7 +19,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::actions::{branch_menu, commit_menu, short};
+use crate::actions::{branch_menu, commit_menu, commits_menu, short};
 use crate::diff_pane::DiffPane;
 use crate::git::{Branch, Commit, CommitDetails, FileChange, RefKind};
 use crate::graph::{self, GraphRow, Half};
@@ -55,6 +55,10 @@ pub struct LogView {
     /// Indices into `commits` that pass the text filter.
     rows: Rc<Vec<usize>>,
     selected: Option<String>,
+    /// Commits selected along with `selected` by Cmd- or Shift-click.
+    marked: HashSet<String>,
+    /// Where a Shift-click range starts.
+    anchor: Option<String>,
     head: Option<String>,
     filter: Entity<InputState>,
     branch_filter: Option<String>,
@@ -127,6 +131,8 @@ impl LogView {
             graph: Arc::default(),
             rows: Rc::default(),
             selected: None,
+            marked: HashSet::new(),
+            anchor: None,
             head: None,
             filter,
             branch_filter: None,
@@ -266,6 +272,11 @@ impl LogView {
                 .collect()
         };
         self.rows = Rc::new(rows);
+        let visible: HashSet<&str> = self.rows.iter().map(|&ix| self.commits[ix].id.as_str()).collect();
+        self.marked.retain(|id| visible.contains(id.as_str()));
+        if self.marked.len() < 2 {
+            self.marked.clear();
+        }
         cx.notify();
     }
 
@@ -302,12 +313,74 @@ impl LogView {
     }
 
     fn select(&mut self, id: Option<String>, cx: &mut Context<Self>) {
+        self.marked.clear();
+        self.anchor = id.clone();
         if self.selected == id && self.details.is_some() {
+            cx.notify();
             return;
         }
         self.selected = id;
         self.load_details(cx);
         cx.notify();
+    }
+
+    fn is_selected(&self, id: &str) -> bool {
+        self.selected.as_deref() == Some(id) || self.marked.contains(id)
+    }
+
+    /// Cmd-click toggles a commit in the selection; Shift-click selects the
+    /// range from the last plain click.
+    fn click_commit(&mut self, ix: usize, modifiers: Modifiers, cx: &mut Context<Self>) {
+        let id = self.commits[ix].id.clone();
+        let row_of = |id: &str| self.rows.iter().position(|&ix| self.commits[ix].id == id);
+        if modifiers.shift
+            && let Some((from, to)) = self.anchor.as_deref().and_then(row_of).zip(row_of(&id))
+        {
+            let anchor = self.anchor.clone();
+            let range = from.min(to)..=from.max(to);
+            let marked = self.rows[range].iter().map(|&ix| self.commits[ix].id.clone()).collect();
+            self.select(Some(id), cx);
+            self.marked = marked;
+            self.anchor = anchor;
+        } else if modifiers.secondary(cx) {
+            let mut marked = self.marked.clone();
+            marked.extend(self.selected.clone());
+            let primary = if marked.remove(&id) {
+                // Show the details of another selected commit.
+                if marked.is_empty() {
+                    return;
+                }
+                self.rows
+                    .iter()
+                    .map(|&ix| &self.commits[ix].id)
+                    .find(|id| marked.contains(*id))
+                    .cloned()
+            } else {
+                marked.insert(id.clone());
+                Some(id)
+            };
+            self.select(primary, cx);
+            if marked.len() > 1 {
+                self.marked = marked;
+            }
+        } else {
+            self.select(Some(id), cx);
+        }
+        cx.notify();
+    }
+
+    /// The selected commits, newest first, when the menu opens on one of
+    /// several of them.
+    fn selection_for_menu(&self, id: &str) -> Vec<String> {
+        if self.marked.len() < 2 || !self.marked.contains(id) {
+            return Vec::new();
+        }
+        self.rows
+            .iter()
+            .map(|&ix| &self.commits[ix].id)
+            .filter(|id| self.marked.contains(*id))
+            .cloned()
+            .collect()
     }
 
     fn select_offset(&mut self, delta: isize, cx: &mut Context<Self>) {
@@ -647,7 +720,7 @@ impl LogView {
     ) -> AnyElement {
         let ix = self.rows[row];
         let commit = &self.commits[ix];
-        let selected = self.selected.as_deref() == Some(commit.id.as_str());
+        let selected = self.is_selected(&commit.id);
         let is_head = self.head.as_deref() == Some(commit.id.as_str());
         let graph_row = self.graph.get(ix).cloned().unwrap_or_default();
         let graph_width = if show_graph {
@@ -658,6 +731,7 @@ impl LogView {
         let id = commit.id.clone();
         let subject = commit.subject.clone();
         let model = self.model.clone();
+        let view = cx.entity().downgrade();
         let muted = cx.theme().muted_foreground;
         let fg = cx.theme().foreground;
 
@@ -674,14 +748,18 @@ impl LogView {
             .when(!selected, |row| row.hover(|style| style.bg(cx.theme().list_hover)))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _, window, cx| {
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     this.focus.focus(window, cx);
-                    this.select(Some(this.commits[ix].id.clone()), cx);
+                    this.click_commit(ix, event.modifiers, cx);
                 }),
             )
             .on_mouse_down(
                 MouseButton::Right,
-                cx.listener(move |this, _, _, cx| this.select(Some(this.commits[ix].id.clone()), cx)),
+                cx.listener(move |this, _, _, cx| {
+                    if !this.is_selected(&this.commits[ix].id) {
+                        this.select(Some(this.commits[ix].id.clone()), cx)
+                    }
+                }),
             )
             .child(
                 div()
@@ -725,7 +803,17 @@ impl LogView {
                     .text_color(if selected { fg } else { muted })
                     .child(format_time(commit.time)),
             )
-            .context_menu(move |menu, _, _| commit_menu(menu, &model, id.clone(), subject.clone()))
+            .context_menu(move |menu, _, cx| {
+                let selection = view
+                    .upgrade()
+                    .map(|view| view.read(cx).selection_for_menu(&id))
+                    .unwrap_or_default();
+                if selection.is_empty() {
+                    commit_menu(menu, &model, id.clone(), subject.clone())
+                } else {
+                    commits_menu(menu, &model, selection)
+                }
+            })
             .into_any_element()
     }
 

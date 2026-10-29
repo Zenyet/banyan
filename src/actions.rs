@@ -189,12 +189,12 @@ pub fn commit_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, id: String, s
     let i = id.clone();
     menu = menu.item(item("Cherry-Pick", model, move |model, _, cx| {
         let i = i.clone();
-        model.update(cx, |m, cx| m.run(format!("Cherry-pick {}", short(&i)), move |repo| repo.cherry_pick(&i), cx))
+        model.update(cx, |m, cx| m.run(format!("Cherry-pick {}", short(&i)), move |repo| repo.cherry_pick(&[i]), cx))
     }));
     let i = id.clone();
     menu = menu.item(item("Revert Commit", model, move |model, _, cx| {
         let i = i.clone();
-        model.update(cx, |m, cx| m.run(format!("Revert {}", short(&i)), move |repo| repo.revert(&i), cx))
+        model.update(cx, |m, cx| m.run(format!("Revert {}", short(&i)), move |repo| repo.revert(&[i]), cx))
     }));
     let i = id.clone();
     menu = menu.item(item("Show Diff with Working Tree", model, move |model, window, cx| {
@@ -238,6 +238,25 @@ pub fn commit_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, id: String, s
         }));
     }
     menu
+}
+
+/// The menu for several selected commits, `ids` newest first.
+pub fn commits_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, ids: Vec<String>) -> PopupMenu {
+    let count = ids.len();
+    let copy_ids = ids.join("\n");
+    menu = menu.item(PopupMenuItem::new("Copy Revision Numbers").on_click(move |_, _, cx| {
+        cx.write_to_clipboard(ClipboardItem::new_string(copy_ids.clone()))
+    }));
+    menu = menu.separator();
+    let oldest_first: Vec<String> = ids.iter().rev().cloned().collect();
+    menu = menu.item(item(format!("Cherry-Pick {count} Commits"), model, move |model, _, cx| {
+        let ids = oldest_first.clone();
+        model.update(cx, |m, cx| m.run(format!("Cherry-pick {count} commits"), move |repo| repo.cherry_pick(&ids), cx))
+    }));
+    menu.item(item(format!("Revert {count} Commits"), model, move |model, _, cx| {
+        let ids = ids.clone();
+        model.update(cx, |m, cx| m.run(format!("Revert {count} commits"), move |repo| repo.revert(&ids), cx))
+    }))
 }
 
 pub fn short(rev: &str) -> &str {

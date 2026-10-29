@@ -12,6 +12,7 @@ cargo run -- /path/to/repo   # or run inside a repository; with no repository a 
   text/hash, branch and author filters, commit details (message, author, "in N branches"), changed files tree,
   and a side-by-side / unified diff preview.
 - **Commit context menu**: copy hash, checkout revision, new branch / tag, cherry-pick, revert, reset (soft / mixed / hard).
+  Cmd-click or Shift-click selects several commits to cherry-pick or revert together.
 - **Branch popup** (toolbar) and branches-tree context menu: checkout, new branch from, merge into current,
   rebase current onto, rename, delete (local, remote, tag).
 - **Commit tab**: changelist-style checkboxes (Changes / Unversioned Files / Merge Conflicts), commit, amend,
