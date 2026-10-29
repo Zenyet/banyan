@@ -31,12 +31,12 @@ actions!(
 /// JetBrains' macOS keymap where it has an equivalent.
 pub fn init(cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new("cmd-k", CommitChanges, Some("Workspace")),
-        KeyBinding::new("cmd-shift-k", PushCommits, Some("Workspace")),
-        KeyBinding::new("cmd-t", UpdateProject, Some("Workspace")),
-        KeyBinding::new("cmd-9", ShowLog, Some("Workspace")),
-        KeyBinding::new("cmd-0", ShowCommitTab, Some("Workspace")),
-        KeyBinding::new("cmd-r", RefreshRepository, Some("Workspace")),
+        KeyBinding::new("secondary-k", CommitChanges, Some("Workspace")),
+        KeyBinding::new("secondary-shift-k", PushCommits, Some("Workspace")),
+        KeyBinding::new("secondary-t", UpdateProject, Some("Workspace")),
+        KeyBinding::new("secondary-9", ShowLog, Some("Workspace")),
+        KeyBinding::new("secondary-0", ShowCommitTab, Some("Workspace")),
+        KeyBinding::new("secondary-r", RefreshRepository, Some("Workspace")),
     ]);
 }
 
@@ -463,7 +463,7 @@ impl Render for Workspace {
 fn recent_label(path: &std::path::Path) -> String {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let mut dir = path.parent().map(|p| p.display().to_string()).unwrap_or_default();
-    if let Some(home) = std::env::var_os("HOME").map(|h| h.to_string_lossy().into_owned())
+    if let Some(home) = std::env::home_dir().map(|h| h.to_string_lossy().into_owned())
         && let Some(rest) = dir.strip_prefix(&home)
     {
         dir = format!("~{rest}");

@@ -1,6 +1,6 @@
 //! Persisted settings: the preferences in the Settings dialog, recently
 //! opened repositories and recent commit messages.
-//! Stored as `key=value` lines in ~/Library/Application Support/Banyan/settings,
+//! Stored as `key=value` lines in Banyan/settings under the user's application data folder,
 //! and kept in memory so that views can read them while rendering.
 
 use std::path::{Path, PathBuf};
@@ -98,9 +98,19 @@ fn unescape(value: &str) -> String {
     out
 }
 
+/// `Banyan/settings` in the platform's per-user application data folder.
 fn file() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join("Library/Application Support/Banyan/settings"))
+    let dir = if cfg!(target_os = "macos") {
+        std::env::home_dir()?.join("Library/Application Support")
+    } else if cfg!(windows) {
+        PathBuf::from(std::env::var_os("APPDATA")?)
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .filter(|dir| dir.is_absolute())
+            .or_else(|| Some(std::env::home_dir()?.join(".config")))?
+    };
+    Some(dir.join("Banyan/settings"))
 }
 
 /// The app was called GitBrains; read its settings if Banyan has none yet.

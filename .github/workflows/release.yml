@@ -1,0 +1,94 @@
+# Builds the macOS, Linux and Windows packages. Pushing a v* tag also
+# publishes them as a GitHub release; pushes to ci/** branches only build.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+    branches: ["ci/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-14
+          - name: Linux
+            os: ubuntu-22.04
+          - name: Windows
+            os: windows-2022
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.name == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux build dependencies
+        if: matrix.name == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev libasound2-dev
+
+      - name: Install cargo-deb
+        if: matrix.name == 'Linux'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb
+
+      - name: Install Inno Setup
+        if: matrix.name == 'Windows'
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            choco install innosetup -y --no-progress
+          }
+          "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Test
+        if: matrix.name != 'Windows'
+        run: cargo test --bins
+
+      - name: Package (macOS)
+        if: matrix.name == 'macOS'
+        run: scripts/package-macos.sh
+
+      - name: Package (Linux)
+        if: matrix.name == 'Linux'
+        run: scripts/package-linux.sh
+
+      - name: Package (Windows)
+        if: matrix.name == 'Windows'
+        run: scripts/package-windows.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: banyan-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

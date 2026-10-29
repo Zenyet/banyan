@@ -2,12 +2,17 @@
 name = "banyan"
 version = "0.1.0"
 edition = "2024"
+description = "A Git client in the spirit of JetBrains' Git tooling"
+repository = "https://github.com/Zenyet/banyan"
 
 [dependencies]
 anyhow = "1.0.104"
 chrono = "0.4"
 gpui-kit = "0.8.1"
 notify = "8.2.1"
+
+[build-dependencies]
+winresource = "0.1"
 
 [features]
 default = ["common-languages"]
@@ -53,3 +58,14 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# `cargo deb` packaging for Debian and Ubuntu (scripts/package-linux.sh).
+[package.metadata.deb]
+maintainer = "Banyan <noreply@github.com>"
+section = "devel"
+depends = "$auto, git, libvulkan1"
+assets = [
+    ["target/release/banyan", "usr/bin/", "755"],
+    ["packaging/linux/banyan.desktop", "usr/share/applications/", "644"],
+    ["packaging/linux/banyan.png", "usr/share/icons/hicolor/512x512/apps/", "644"],
+]
