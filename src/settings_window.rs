@@ -207,6 +207,37 @@ impl SettingsWindow {
         ])
     }
 
+    fn keymap_page() -> SettingPage {
+        SettingPage::new(tr!("Keyboard Shortcuts")).icon(IconName::Keyboard).groups([
+            SettingGroup::new().title(tr!("General")).items([
+                shortcut_item(tr!("Open Repository…"), &["secondary-o"]),
+                shortcut_item(tr!("Settings…"), &["secondary-,"]),
+                shortcut_item(tr!("Close Window"), &["secondary-w"]),
+                shortcut_item(tr!("Quit Banyan"), &["secondary-q"]),
+                shortcut_item(tr!("Refresh"), &["secondary-r"]),
+            ]),
+            SettingGroup::new().title(tr!("Git")).items([
+                shortcut_item(tr!("Commit…"), &["secondary-k"]),
+                shortcut_item(tr!("Commit from the message box"), &["secondary-enter"]),
+                shortcut_item(tr!("Push…"), &["secondary-shift-k"]),
+                shortcut_item(tr!("Update Project"), &["secondary-t"]),
+                shortcut_item(tr!("Show Log"), &["secondary-9"]),
+                shortcut_item(tr!("Show Commit"), &["secondary-0"]),
+            ]),
+            SettingGroup::new().title(tr!("Log")).items([
+                shortcut_item(tr!("Search the Log"), &["secondary-f"]),
+                shortcut_item(tr!("From the search box to the commits"), &["enter"]),
+                shortcut_item(tr!("Previous / next commit"), &["up", "down"]),
+                shortcut_item(tr!("First / last commit"), &["home", "end"]),
+                shortcut_item(tr!("Page up / down"), &["pageup", "pagedown"]),
+            ]),
+            SettingGroup::new().title(tr!("Merge tool")).items([
+                shortcut_item(tr!("Undo a choice"), &["secondary-z"]),
+                shortcut_item(tr!("Redo a choice"), &["secondary-shift-z"]),
+            ]),
+        ])
+    }
+
     fn diff_log_page() -> SettingPage {
         SettingPage::new(tr!("Diff and Log")).icon(IconName::GitCompare).groups([
             SettingGroup::new().title(tr!("Diff")).items([
@@ -244,6 +275,57 @@ impl SettingsWindow {
     }
 }
 
+/// A shortcut as the platform writes it: `secondary-shift-k` is ⇧⌘K on
+/// macOS and Ctrl+Shift+K elsewhere.
+fn shortcut(keys: &str) -> String {
+    let mac = cfg!(target_os = "macos");
+    let mut modifiers = Vec::new();
+    let mut key = String::new();
+    for part in keys.split('-') {
+        match part {
+            "secondary" => modifiers.push(if mac { "⌘" } else { "Ctrl" }),
+            "shift" => modifiers.push(if mac { "⇧" } else { "Shift" }),
+            "alt" => modifiers.push(if mac { "⌥" } else { "Alt" }),
+            "enter" => key = if mac { "↩".into() } else { "Enter".into() },
+            "up" => key = "↑".into(),
+            "down" => key = "↓".into(),
+            "pageup" => key = "PgUp".into(),
+            "pagedown" => key = "PgDn".into(),
+            "home" => key = "Home".into(),
+            "end" => key = "End".into(),
+            other => key = other.to_uppercase(),
+        }
+    }
+    if mac {
+        // macOS lists ⇧ before ⌘.
+        modifiers.sort_by_key(|m| match *m { "⌥" => 0, "⇧" => 1, _ => 2 });
+        format!("{}{key}", modifiers.concat())
+    } else {
+        modifiers.push(&key);
+        modifiers.join("+")
+    }
+}
+
+/// A read-only row showing what `keys` do.
+fn shortcut_item(label: &'static str, keys: &[&str]) -> SettingItem {
+    let text = keys.iter().map(|k| shortcut(k)).collect::<Vec<_>>().join("  /  ");
+    SettingItem::new(
+        label,
+        SettingField::render(move |_, _, cx| {
+            div()
+                .px_2()
+                .py_0p5()
+                .rounded(px(4.))
+                .border_1()
+                .border_color(cx.theme().border)
+                .bg(cx.theme().secondary)
+                .text_sm()
+                .font_family(cx.theme().mono_font_family.clone())
+                .child(text.clone())
+        }),
+    )
+}
+
 /// A dropdown over `options` (key, label) bound to one setting.
 fn choice(
     options: impl IntoIterator<Item = (String, String)>,
@@ -265,7 +347,25 @@ impl Render for SettingsWindow {
                 Self::appearance_page(),
                 self.git_page(),
                 Self::diff_log_page(),
+                Self::keymap_page(),
             ]),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shortcut;
+
+    #[test]
+    fn shortcuts_read_as_the_platform_writes_them() {
+        if cfg!(target_os = "macos") {
+            assert_eq!(shortcut("secondary-shift-k"), "⇧⌘K");
+            assert_eq!(shortcut("secondary-enter"), "⌘↩");
+        } else {
+            assert_eq!(shortcut("secondary-shift-k"), "Ctrl+Shift+K");
+            assert_eq!(shortcut("secondary-enter"), "Ctrl+Enter");
+        }
+        assert_eq!(shortcut("pagedown"), "PgDn");
     }
 }

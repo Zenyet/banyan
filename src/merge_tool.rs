@@ -22,6 +22,17 @@ use crate::conflict::{self, Conflict, Resolution, Segment};
 use crate::model::{RepoEvent, RepoModel};
 use crate::i18n::tr;
 
+actions!(merge_tool, [UndoResolution, RedoResolution]);
+
+/// ⌘Z / Ctrl+Z undoes a choice in the merge tool, ⌘⇧Z redoes it. While a
+/// result is being typed the text box gets the keys first.
+pub fn init(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new(secondary!("z"), UndoResolution, Some("MergeTool")),
+        KeyBinding::new(secondary!("shift-z"), RedoResolution, Some("MergeTool")),
+    ]);
+}
+
 const LINE_HEIGHT: Pixels = px(20.);
 const GUTTER: Pixels = px(30.);
 /// Clean runs longer than this are folded down to their edges.
@@ -45,13 +56,15 @@ pub fn open(model: Entity<RepoModel>, path: String, window: &mut Window, cx: &mu
         .unwrap_or_else(|| ("yours".into(), "theirs".into()));
     let segments = conflict::parse(&text);
     let theme = cx.theme().highlight_theme.clone();
-    let tool = cx.new(|_| MergeTool::new(model, path.clone(), ours, theirs, segments, theme));
+    let tool = cx.new(|cx| MergeTool::new(model, path.clone(), ours, theirs, segments, theme, cx));
+    let focus = tool.read(cx).focus.clone();
     window.open_dialog(cx, move |dialog, _, _| {
         dialog
             .title(tr!("Merge Revisions for {}", path))
             .w(px(1280.))
             .child(tool.clone())
     });
+    focus.focus(window, cx);
 }
 
 struct MergeTool {
@@ -73,6 +86,10 @@ struct MergeTool {
     theme: std::sync::Arc<HighlightTheme>,
     /// Syntax styles of each line shown, by its text.
     styles: HashMap<String, Styles>,
+    focus: FocusHandle,
+    /// Earlier choices to go back to, the latest last, and undone ones.
+    undo: Vec<Vec<Option<Resolution>>>,
+    redo: Vec<Vec<Option<Resolution>>>,
 }
 
 type Styles = Vec<(Range<usize>, HighlightStyle)>;
@@ -90,6 +107,7 @@ impl MergeTool {
         theirs: String,
         segments: Vec<Segment>,
         theme: std::sync::Arc<HighlightTheme>,
+        cx: &mut Context<Self>,
     ) -> Self {
         let conflicts = segments.iter().filter(|s| matches!(s, Segment::Conflict(_))).count();
         let language = DiffFile::parse_conflicts(path.clone(), "").map(|f| f.language()).unwrap_or_else(|_| "text".into());
@@ -107,6 +125,9 @@ impl MergeTool {
             highlighter: SyntaxHighlighter::new(&language),
             theme,
             styles: HashMap::new(),
+            focus: cx.focus_handle(),
+            undo: Vec::new(),
+            redo: Vec::new(),
         };
         let blocks: Vec<Vec<String>> = this
             .segments
@@ -158,18 +179,46 @@ impl MergeTool {
         self.set(conflict, Some(resolution), cx);
     }
 
+    /// Remember the choices before changing them, for undo.
+    fn record(&mut self) {
+        self.undo.push(self.resolutions.clone());
+        self.redo.clear();
+    }
+
+    fn undo(&mut self, cx: &mut Context<Self>) {
+        if let Some(previous) = self.undo.pop() {
+            self.redo.push(std::mem::replace(&mut self.resolutions, previous));
+            self.editing = None;
+            cx.notify();
+        }
+    }
+
+    fn redo(&mut self, cx: &mut Context<Self>) {
+        if let Some(next) = self.redo.pop() {
+            self.undo.push(std::mem::replace(&mut self.resolutions, next));
+            self.editing = None;
+            cx.notify();
+        }
+    }
+
     fn set(&mut self, conflict: usize, resolution: Option<Resolution>, cx: &mut Context<Self>) {
         if self.editing.as_ref().is_some_and(|(ix, _)| *ix == conflict) {
             self.editing = None;
         }
-        self.resolutions[conflict] = resolution;
+        if self.resolutions[conflict] != resolution {
+            self.record();
+            self.resolutions[conflict] = resolution;
+        }
         cx.notify();
     }
 
     fn accept_all(&mut self, ours: bool, cx: &mut Context<Self>) {
         self.editing = None;
         let resolution = if ours { Resolution::Ours } else { Resolution::Theirs };
-        self.resolutions.fill(Some(resolution));
+        if self.resolutions.iter().any(|r| r.as_ref() != Some(&resolution)) {
+            self.record();
+            self.resolutions.fill(Some(resolution));
+        }
         cx.notify();
     }
 
@@ -191,6 +240,7 @@ impl MergeTool {
         if let Some((conflict, state)) = self.editing.take() {
             let text = state.read(cx).value().to_string();
             self.highlight(&conflict::split_lines(&text));
+            self.record();
             self.resolutions[conflict] = Some(Resolution::Custom(text));
         }
         cx.notify();
@@ -558,6 +608,19 @@ impl Render for MergeTool {
             tr!("{} of {} conflicts resolved", resolved, total)
         };
         v_flex()
+            .key_context("MergeTool")
+            .track_focus(&self.focus)
+            .on_action(cx.listener(|this, _: &UndoResolution, _, cx| this.undo(cx)))
+            .on_action(cx.listener(|this, _: &RedoResolution, _, cx| this.redo(cx)))
+            // Keep the keys coming here after a click, unless a result is being typed.
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    if this.editing.is_none() {
+                        this.focus.focus(window, cx);
+                    }
+                }),
+            )
             .gap_2()
             .child(self.render_header(cx))
             .child(
@@ -589,6 +652,24 @@ impl Render for MergeTool {
                             .small()
                             .tooltip(tr!("Take their side for every conflict"))
                             .on_click(cx.listener(|this, _, _, cx| this.accept_all(false, cx))),
+                    )
+                    .child(
+                        Button::new("merge-undo")
+                            .icon(IconName::Undo2)
+                            .ghost()
+                            .small()
+                            .tooltip(tr!("Undo ({})", if cfg!(target_os = "macos") { "⌘Z" } else { "Ctrl+Z" }))
+                            .disabled(self.undo.is_empty())
+                            .on_click(cx.listener(|this, _, _, cx| this.undo(cx))),
+                    )
+                    .child(
+                        Button::new("merge-redo")
+                            .icon(IconName::Redo2)
+                            .ghost()
+                            .small()
+                            .tooltip(tr!("Redo ({})", if cfg!(target_os = "macos") { "⇧⌘Z" } else { "Ctrl+Shift+Z" }))
+                            .disabled(self.redo.is_empty())
+                            .on_click(cx.listener(|this, _, _, cx| this.redo(cx))),
                     )
                     .child(
                         div()

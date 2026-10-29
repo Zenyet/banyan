@@ -76,6 +76,7 @@ fn main() {
             gpui_kit::init(cx);
             log_view::init(cx);
             workspace::init(cx);
+            merge_tool::init(cx);
             match askpass::start_server() {
                 Ok(requests) => askpass::spawn_prompt_loop(requests, cx),
                 Err(err) => eprintln!("credential prompts unavailable: {err}"),
@@ -122,6 +123,7 @@ fn main() {
                         MenuItem::action(tr!("Submodules…"), workspace::ShowSubmodules),
                         MenuItem::separator(),
                         MenuItem::action(tr!("Show Log"), workspace::ShowLog),
+                        MenuItem::action(tr!("Search the Log"), workspace::FindInLog),
                         MenuItem::action(tr!("Show Commit"), workspace::ShowCommitTab),
                         MenuItem::action(tr!("Show Console"), workspace::ShowConsole),
                         MenuItem::action(tr!("Refresh"), workspace::RefreshRepository),

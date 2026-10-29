@@ -178,10 +178,14 @@ On Linux and Windows, use <kbd>Ctrl</kbd> where these show <kbd>⌘</kbd>.
 | <kbd>⌘</kbd> <kbd>K</kbd> | Commit (<kbd>⌘</kbd> <kbd>↩</kbd> in the message box) |
 | <kbd>⇧</kbd> <kbd>⌘</kbd> <kbd>K</kbd> | Push |
 | <kbd>⌘</kbd> <kbd>T</kbd> | Update Project |
+| <kbd>⌘</kbd> <kbd>F</kbd> | Search the log (<kbd>↩</kbd> moves to the commits) |
 | <kbd>⌘</kbd> <kbd>9</kbd> / <kbd>⌘</kbd> <kbd>0</kbd> | Log / Commit tab |
 | <kbd>⌘</kbd> <kbd>R</kbd> | Refresh |
 | <kbd>⌘</kbd> <kbd>,</kbd> | Settings |
-| <kbd>Home</kbd> <kbd>End</kbd> <kbd>PgUp</kbd> <kbd>PgDn</kbd> | Move through the commit list |
+| <kbd>↑</kbd> <kbd>↓</kbd> <kbd>Home</kbd> <kbd>End</kbd> <kbd>PgUp</kbd> <kbd>PgDn</kbd> | Move through the commit list |
+| <kbd>⌘</kbd> <kbd>Z</kbd> / <kbd>⇧</kbd> <kbd>⌘</kbd> <kbd>Z</kbd> | Undo / redo a choice in the merge tool |
+
+Settings › Keyboard Shortcuts lists them all.
 
 ### Settings
 

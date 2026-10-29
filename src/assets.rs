@@ -28,6 +28,7 @@ const EXTRA: &[(&str, &[u8])] = &[
     icon!("git-compare.svg"),
     icon!("git-graph.svg"),
     icon!("git-merge.svg"),
+    icon!("keyboard.svg"),
     icon!("pencil.svg"),
     icon!("refresh-ccw.svg"),
     icon!("tag.svg"),

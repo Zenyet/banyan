@@ -27,7 +27,7 @@ use crate::i18n::tr;
 
 actions!(
     workspace,
-    [CommitChanges, PushCommits, UpdateProject, ApplyPatch, ManageWorktrees, ShowSubmodules, ShowLog, ShowCommitTab, ShowConsole, RefreshRepository]
+    [CommitChanges, PushCommits, UpdateProject, ApplyPatch, ManageWorktrees, ShowSubmodules, FindInLog, ShowLog, ShowCommitTab, ShowConsole, RefreshRepository]
 );
 
 /// JetBrains' macOS keymap where it has an equivalent.
@@ -39,6 +39,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new(secondary!("9"), ShowLog, Some("Workspace")),
         KeyBinding::new(secondary!("0"), ShowCommitTab, Some("Workspace")),
         KeyBinding::new(secondary!("r"), RefreshRepository, Some("Workspace")),
+        KeyBinding::new(secondary!("f"), FindInLog, Some("Workspace")),
     ]);
 }
 
@@ -475,6 +476,11 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|this, _: &UpdateProject, window, cx| {
                 crate::update_dialog::open(this.model.clone(), window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &FindInLog, window, cx| {
+                this.set_tab(0, cx);
+                let search = this.log.read(cx).search_focus(cx);
+                search.focus(window, cx);
             }))
             .on_action(cx.listener(|this, _: &ShowLog, _, cx| this.set_tab(0, cx)))
             .on_action(cx.listener(|this, _: &ShowCommitTab, _, cx| this.set_tab(1, cx)))

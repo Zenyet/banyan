@@ -121,10 +121,11 @@ impl LogView {
                     this.reload_if_refs_moved(cx);
                 }
             }),
-            cx.subscribe(&filter, |this, _, event, cx| {
-                if let InputEvent::Change = event {
-                    this.apply_filter(cx);
-                }
+            cx.subscribe_in(&filter, window, |this, _, event, window, cx| match event {
+                InputEvent::Change => this.apply_filter(cx),
+                // Enter goes to the matching commits, for the arrow keys.
+                InputEvent::PressEnter { .. } => this.focus.focus(window, cx),
+                _ => {}
             }),
             cx.observe(&branch_tree, |this, tree, cx| {
                 let id = tree.read(cx).selected_item().map(|item| item.id.clone());
@@ -195,6 +196,11 @@ impl LogView {
     fn report(&self, err: anyhow::Error, cx: &mut Context<Self>) {
         let message: SharedString = format!("{err:#}").into();
         self.model.update(cx, |_, cx| cx.emit(RepoEvent::OpFailed(message)));
+    }
+
+    /// The search box, which ⌘F / Ctrl+F focuses.
+    pub fn search_focus(&self, cx: &App) -> FocusHandle {
+        self.filter.focus_handle(cx)
     }
 
     pub fn reload(&mut self, cx: &mut Context<Self>) {
