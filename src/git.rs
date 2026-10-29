@@ -299,6 +299,27 @@ pub enum RebaseAction {
     Drop,
 }
 
+/// A change to the current branch's history, as the Log's commit menu offers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Rewrite {
+    Reword { id: String, message: String },
+    /// Meld `ids` into the oldest of them, with `message`.
+    Squash { ids: Vec<String>, message: String },
+    /// Meld a commit into its parent, keeping the parent's message.
+    FixupIntoParent { id: String },
+    Drop { ids: Vec<String> },
+}
+
+impl Rewrite {
+    /// The oldest commit whose content or message changes.
+    fn ids(&self) -> Vec<String> {
+        match self {
+            Rewrite::Reword { id, .. } | Rewrite::FixupIntoParent { id } => vec![id.clone()],
+            Rewrite::Squash { ids, .. } | Rewrite::Drop { ids } => ids.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Remote {
     pub name: String,
@@ -739,6 +760,11 @@ impl Repo {
         let text = std::fs::read_to_string(PathBuf::from(git_dir.trim()).join("MERGE_MSG")).ok()?;
         let message: Vec<&str> = text.lines().filter(|line| !line.starts_with('#')).collect();
         Some(message.join("\n").trim().to_string()).filter(|m| !m.is_empty())
+    }
+
+    /// The full message of a commit.
+    pub fn commit_message(&self, id: &str) -> Result<String> {
+        Ok(self.git(&["log", "-1", "--format=%B", id])?.trim_end().to_string())
     }
 
     pub fn last_commit_message(&self) -> Result<String> {
@@ -1248,7 +1274,7 @@ impl Repo {
             .git(&["merge-base", "--is-ancestor", from, "HEAD"])
             .is_err()
         {
-            bail!("the selected commit is not an ancestor of HEAD");
+            bail!("the commit is not on the current branch");
         }
         let is_root = self.git(&["rev-parse", "--verify", "-q", &format!("{from}^")]).is_err();
         let range = format!("{from}^..HEAD");
@@ -1258,10 +1284,130 @@ impl Repo {
             self.log_revs(&["--topo-order", &range], 100_000)?
         };
         if commits.iter().any(|c| c.parents.len() > 1) {
-            bail!("interactive rebase over merge commits is not supported");
+            bail!("there are merge commits between this commit and HEAD; editing history across merges is not supported");
         }
         commits.reverse();
         Ok(commits)
+    }
+
+    /// The oldest of `ids`, which must all be on the current branch with no
+    /// merge commits between them and HEAD; history before it stays.
+    fn oldest_of(&self, ids: &[String]) -> Result<String> {
+        let mut args = vec!["merge-base", "--octopus"];
+        args.extend(ids.iter().map(String::as_str));
+        let base = self.git(&args).context("the commits are not on the current branch")?;
+        let base = base.trim().to_string();
+        if !ids.contains(&base) {
+            bail!("the commits are not on one line of history");
+        }
+        Ok(base)
+    }
+
+    /// Where `rewrite` starts: the commit rebased from. Checks that the
+    /// rewrite is possible, before anything changes.
+    pub fn rewrite_base(&self, rewrite: &Rewrite) -> Result<String> {
+        if self.repo_state() != RepoState::Clean {
+            bail!("finish or abort the current merge, rebase or cherry-pick first");
+        }
+        let ids = rewrite.ids();
+        if ids.is_empty() {
+            bail!("no commits selected");
+        }
+        let oldest = self.oldest_of(&ids)?;
+        let base = match rewrite {
+            Rewrite::FixupIntoParent { id } => {
+                let parent = self.git(&["rev-parse", "--verify", "-q", &format!("{id}^")]);
+                parent.map(|p| p.trim().to_string()).context("the first commit has no parent to meld into")?
+            }
+            _ => oldest,
+        };
+        // Checks ancestry and merges in the range.
+        self.rebase_commits(&base)?;
+        Ok(base)
+    }
+
+    /// The upstream branch that already has `id`, if any: rewriting it then
+    /// needs a force push.
+    pub fn pushed_to(&self, id: &str) -> Option<String> {
+        let upstream = self.git(&["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]).ok()?;
+        self.git(&["merge-base", "--is-ancestor", id, "@{u}"])
+            .ok()
+            .map(|_| upstream.trim().to_string())
+    }
+
+    /// Change the current branch's history; see [`Rewrite`].
+    pub fn rewrite(&self, rewrite: &Rewrite) -> Result<String> {
+        let base = self.rewrite_base(rewrite)?;
+        if let Rewrite::Reword { id, message } = rewrite
+            && self.head().as_deref() == Some(id.as_str())
+        {
+            // Only the message changes: no rebase, and staged changes stay staged.
+            return self.git_with_input(&["commit", "--amend", "--only", "--allow-empty", "-q", "-F", "-"], message);
+        }
+        let commits = self.rebase_commits(&base)?;
+        let plan: Vec<(String, RebaseAction)> = match rewrite {
+            Rewrite::Reword { id, message } => commits
+                .iter()
+                .map(|c| {
+                    let action = if &c.id == id { RebaseAction::Reword(message.clone()) } else { RebaseAction::Pick };
+                    (c.id.clone(), action)
+                })
+                .collect(),
+            Rewrite::Drop { ids } => {
+                if commits.iter().all(|c| ids.contains(&c.id)) {
+                    bail!("dropping every commit of the branch is not possible this way; delete the branch instead");
+                }
+                commits
+                    .iter()
+                    .map(|c| {
+                        let action = if ids.contains(&c.id) { RebaseAction::Drop } else { RebaseAction::Pick };
+                        (c.id.clone(), action)
+                    })
+                    .collect()
+            }
+            Rewrite::FixupIntoParent { id } => commits
+                .iter()
+                .map(|c| {
+                    let action = if &c.id == id { RebaseAction::Fixup } else { RebaseAction::Pick };
+                    (c.id.clone(), action)
+                })
+                .collect(),
+            Rewrite::Squash { ids, message } => {
+                // The oldest takes the new message; the others follow it as
+                // fixups, keeping that message, and leave their old places.
+                let mut plan = vec![(base.clone(), RebaseAction::Reword(message.clone()))];
+                plan.extend(
+                    commits
+                        .iter()
+                        .filter(|c| c.id != base && ids.contains(&c.id))
+                        .map(|c| (c.id.clone(), RebaseAction::Fixup)),
+                );
+                plan.extend(
+                    commits
+                        .iter()
+                        .filter(|c| !ids.contains(&c.id))
+                        .map(|c| (c.id.clone(), RebaseAction::Pick)),
+                );
+                plan
+            }
+        };
+        self.interactive_rebase(&base, &plan)
+    }
+
+    /// Undo the last commit, keeping its changes staged; returns its message
+    /// for the next commit.
+    pub fn undo_commit(&self) -> Result<String> {
+        if self.repo_state() != RepoState::Clean {
+            bail!("finish or abort the current merge, rebase or cherry-pick first");
+        }
+        let message = self.commit_message("HEAD")?;
+        if self.git(&["rev-parse", "--verify", "-q", "HEAD^"]).is_ok() {
+            self.git(&["reset", "--soft", "HEAD^"])?;
+        } else {
+            // The first commit: the branch goes back to having none.
+            self.git(&["update-ref", "-d", "HEAD"])?;
+        }
+        Ok(message)
     }
 
     /// Run `git rebase -i` with a prepared todo list instead of an editor.
@@ -1294,7 +1440,7 @@ impl Repo {
         let sequence_editor = format!("sequence.editor=cp '{}'", todo_file.display());
         let is_root = self.git(&["rev-parse", "--verify", "-q", &format!("{from}^")]).is_err();
         let base = format!("{from}^");
-        let mut args = vec!["-c", &sequence_editor, "-c", "core.editor=true", "rebase", "-i"];
+        let mut args = vec!["-c", &sequence_editor, "-c", "core.editor=true", "rebase", "-i", "--autostash"];
         if is_root {
             args.push("--root");
         } else {
@@ -1712,6 +1858,95 @@ mod tests {
         assert_eq!(operation.title, "Rebasing main onto feature (commit 1 of 1)");
         assert_eq!(operation.ours, "feature");
         assert!(operation.theirs.ends_with(" Ours"), "{}", operation.theirs);
+    }
+
+    /// Base, One, Two, Three on main, each adding a file.
+    fn four_commits(name: &str) -> (TempRepo, Vec<String>) {
+        let t = TempRepo::new(name);
+        let ids = ["Base", "One", "Two", "Three"]
+            .iter()
+            .map(|subject| t.commit(&format!("{subject}.txt"), subject, subject))
+            .collect();
+        (t, ids)
+    }
+
+    #[test]
+    fn reword_changes_only_the_message() {
+        let (t, ids) = four_commits("reword");
+        // HEAD, with a staged change that must stay out of the commit.
+        t.write("staged.txt", "x");
+        t.repo.git(&["add", "staged.txt"]).unwrap();
+        t.repo.rewrite(&Rewrite::Reword { id: ids[3].clone(), message: "Three, reworded".into() }).unwrap();
+        assert_eq!(t.subjects()[0], "Three, reworded");
+        assert!(t.repo.status().unwrap().iter().any(|e| e.path == "staged.txt"));
+        // An older commit, through a rebase.
+        t.repo.rewrite(&Rewrite::Reword { id: ids[1].clone(), message: "One, reworded\n\nBody".into() }).unwrap();
+        assert_eq!(t.subjects(), vec!["Three, reworded", "Two", "One, reworded", "Base"]);
+        assert!(t.repo.status().unwrap().iter().any(|e| e.path == "staged.txt"));
+    }
+
+    #[test]
+    fn squash_melds_commits_into_the_oldest() {
+        let (t, ids) = four_commits("squash");
+        // Not next to each other: Three moves down onto One.
+        t.repo
+            .rewrite(&Rewrite::Squash { ids: vec![ids[3].clone(), ids[1].clone()], message: "One and Three".into() })
+            .unwrap();
+        assert_eq!(t.subjects(), vec!["Two", "One and Three", "Base"]);
+        let files = t.repo.git(&["show", "--name-only", "--format=", "HEAD~1"]).unwrap();
+        assert_eq!(files.lines().collect::<Vec<_>>(), vec!["One.txt", "Three.txt"]);
+    }
+
+    #[test]
+    fn fixup_into_parent_keeps_the_parent_message() {
+        let (t, ids) = four_commits("fixup");
+        t.repo.rewrite(&Rewrite::FixupIntoParent { id: ids[2].clone() }).unwrap();
+        assert_eq!(t.subjects(), vec!["Three", "One", "Base"]);
+        assert!(t.dir.join("Two.txt").exists());
+        assert!(t.repo.rewrite_base(&Rewrite::FixupIntoParent { id: ids[0].clone() }).is_err());
+    }
+
+    #[test]
+    fn drop_removes_commits_and_keeps_local_changes() {
+        let (t, ids) = four_commits("drop");
+        t.write("Base.txt", "edited");
+        t.repo.rewrite(&Rewrite::Drop { ids: vec![ids[1].clone(), ids[3].clone()] }).unwrap();
+        assert_eq!(t.subjects(), vec!["Two", "Base"]);
+        assert!(!t.dir.join("One.txt").exists());
+        assert_eq!(std::fs::read_to_string(t.dir.join("Base.txt")).unwrap(), "edited");
+    }
+
+    #[test]
+    fn rewrites_stay_on_the_current_branch() {
+        let (t, ids) = four_commits("rewrite-branch");
+        t.repo.git(&["checkout", "-q", "-b", "side", &ids[1]]).unwrap();
+        let side = t.commit("side.txt", "side", "Side");
+        t.repo.git(&["checkout", "-q", "main"]).unwrap();
+        assert!(t.repo.rewrite_base(&Rewrite::Drop { ids: vec![side] }).is_err());
+        assert!(t.repo.rewrite_base(&Rewrite::Drop { ids: ids.clone() }).is_ok());
+        assert!(t.repo.rewrite(&Rewrite::Drop { ids }).is_err());
+    }
+
+    #[test]
+    fn undo_commit_keeps_the_changes_and_returns_the_message() {
+        let (t, _) = four_commits("undo");
+        assert_eq!(t.repo.undo_commit().unwrap(), "Three");
+        assert_eq!(t.subjects(), vec!["Two", "One", "Base"]);
+        let staged = t.repo.status().unwrap();
+        assert!(staged.iter().any(|e| e.path == "Three.txt" && e.index == 'A'));
+    }
+
+    #[test]
+    fn pushed_commits_are_reported() {
+        let (t, ids) = four_commits("pushed");
+        let remote = TempRepo::new("pushed-remote");
+        run(&remote.dir, &["config", "receive.denyCurrentBranch", "ignore"]).unwrap();
+        t.repo.git(&["remote", "add", "origin", &remote.dir.display().to_string()]).unwrap();
+        t.repo.git(&["push", "-q", "origin", &format!("{}:refs/heads/main", ids[1])]).unwrap();
+        t.repo.git(&["fetch", "-q", "origin"]).unwrap();
+        t.repo.git(&["branch", "-q", "--set-upstream-to=origin/main"]).unwrap();
+        assert_eq!(t.repo.pushed_to(&ids[1]).as_deref(), Some("origin/main"));
+        assert_eq!(t.repo.pushed_to(&ids[2]), None);
     }
 
     #[test]

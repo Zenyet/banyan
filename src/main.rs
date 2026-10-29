@@ -20,6 +20,7 @@ mod conflict;
 mod conflicts_dialog;
 mod console;
 mod diff_pane;
+mod edit_history;
 mod git;
 mod graph;
 mod history;

@@ -148,7 +148,8 @@ pub fn branch_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, branch: &Bran
     menu
 }
 
-pub fn commit_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, id: String, subject: String) -> PopupMenu {
+/// The menu for one commit; `is_head` adds Undo Commit.
+pub fn commit_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, id: String, subject: String, is_head: bool) -> PopupMenu {
     let short_id = short(&id).to_string();
     let copy_id = id.clone();
     menu = menu.item(PopupMenuItem::new("Copy Revision Number").on_click(move |_, _, cx| {
@@ -206,6 +207,30 @@ pub fn commit_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, id: String, s
     }));
     menu = menu.separator();
 
+    let i = id.clone();
+    menu = menu.item(item("Edit Commit Message...", model, move |model, window, cx| {
+        crate::edit_history::reword(model, i.clone(), window, cx)
+    }));
+    let i = id.clone();
+    menu = menu.item(item("Fixup into Parent", model, move |model, window, cx| {
+        crate::edit_history::fixup_into_parent(model, i.clone(), window, cx)
+    }));
+    let i = id.clone();
+    menu = menu.item(item("Squash into Parent...", model, move |model, window, cx| {
+        crate::edit_history::squash_into_parent(model, i.clone(), window, cx)
+    }));
+    let i = id.clone();
+    menu = menu.item(item("Drop Commit", model, move |model, window, cx| {
+        crate::edit_history::drop(model, vec![i.clone()], window, cx)
+    }));
+    if is_head {
+        let i = id.clone();
+        menu = menu.item(item("Undo Commit", model, move |model, window, cx| {
+            crate::edit_history::undo_commit(model, i.clone(), window, cx)
+        }));
+    }
+    menu = menu.separator();
+
     for (label, mode) in [
         ("Reset Current Branch to Here (Soft)", ResetMode::Soft),
         ("Reset Current Branch to Here (Mixed)", ResetMode::Mixed),
@@ -253,9 +278,18 @@ pub fn commits_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, ids: Vec<Str
         let ids = oldest_first.clone();
         model.update(cx, |m, cx| m.run(format!("Cherry-pick {count} commits"), move |repo| repo.cherry_pick(&ids), cx))
     }));
-    menu.item(item(format!("Revert {count} Commits"), model, move |model, _, cx| {
-        let ids = ids.clone();
+    let revert_ids = ids.clone();
+    menu = menu.item(item(format!("Revert {count} Commits"), model, move |model, _, cx| {
+        let ids = revert_ids.clone();
         model.update(cx, |m, cx| m.run(format!("Revert {count} commits"), move |repo| repo.revert(&ids), cx))
+    }));
+    menu = menu.separator();
+    let squash_ids = ids.clone();
+    menu = menu.item(item(format!("Squash {count} Commits..."), model, move |model, window, cx| {
+        crate::edit_history::squash(model, squash_ids.clone(), window, cx)
+    }));
+    menu.item(item(format!("Drop {count} Commits"), model, move |model, window, cx| {
+        crate::edit_history::drop(model, ids.clone(), window, cx)
     }))
 }
 

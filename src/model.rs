@@ -18,6 +18,8 @@ pub enum RepoEvent {
     OpFailed(SharedString),
     /// The operation with this label stopped with merge conflicts.
     Conflicts(SharedString),
+    /// An undone commit's message, for the next commit.
+    MessageRestored(String),
     /// A checkout was refused because it would overwrite local changes.
     CheckoutBlocked {
         target: String,
@@ -212,6 +214,17 @@ impl RepoModel {
         );
     }
 
+    /// Undo the last commit, keeping its changes and offering its message again.
+    pub fn undo_commit(&mut self, cx: &mut Context<Self>) {
+        self.run_then(
+            "Undo commit",
+            |repo| repo.undo_commit(),
+            |message, cx| cx.emit(RepoEvent::MessageRestored(message)),
+            |err| RepoEvent::OpFailed(format!("Undo commit failed\n{err:#}").into()),
+            cx,
+        );
+    }
+
     /// Check out a branch or revision, offering Smart Checkout when local
     /// changes are in the way.
     pub fn checkout(&mut self, target: String, remote: bool, cx: &mut Context<Self>) {
@@ -244,6 +257,18 @@ impl RepoModel {
         on_error: impl FnOnce(anyhow::Error) -> RepoEvent + 'static,
         cx: &mut Context<Self>,
     ) {
+        self.run_then(label, op, |_, _| {}, on_error, cx);
+    }
+
+    /// Like [`Self::run_with`], also handing the operation's result to `on_ok`.
+    pub fn run_then<T: Send + 'static>(
+        &mut self,
+        label: impl Into<SharedString>,
+        op: impl FnOnce(&Repo) -> Result<T> + Send + 'static,
+        on_ok: impl FnOnce(T, &mut Context<Self>) + 'static,
+        on_error: impl FnOnce(anyhow::Error) -> RepoEvent + 'static,
+        cx: &mut Context<Self>,
+    ) {
         let label = label.into();
         if let Some(busy) = &self.busy {
             cx.emit(RepoEvent::OpFailed(format!("Another operation is running: {busy}").into()));
@@ -265,7 +290,10 @@ impl RepoModel {
             this.update(cx, |this, cx| {
                 this.busy = None;
                 match result {
-                    Ok(_) => cx.emit(RepoEvent::OpSucceeded(format!("{label}: done").into())),
+                    Ok(value) => {
+                        cx.emit(RepoEvent::OpSucceeded(format!("{label}: done").into()));
+                        on_ok(value, cx);
+                    }
                     Err(_) if conflicted => cx.emit(RepoEvent::Conflicts(label)),
                     Err(err) => cx.emit(on_error(err)),
                 }

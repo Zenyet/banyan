@@ -90,6 +90,7 @@ impl Workspace {
                     offer_smart_checkout(&model_for_events, target.clone(), *remote, message.clone(), window, cx)
                 }
                 RepoEvent::Changed => cx.notify(),
+                RepoEvent::MessageRestored(_) => {}
             }),
             cx.observe(&model, |_, _, cx| cx.notify()),
             // Pick up changes made outside the app, like JetBrains does on frame activation.
@@ -263,6 +264,7 @@ impl Workspace {
         TabBar::new("main-tabs")
             .underline()
             .small()
+            .px_2()
             .selected_index(self.tab)
             .child(Tab::new().label("Log").prefix(Icon::new(IconName::GitGraph).small()))
             .child(

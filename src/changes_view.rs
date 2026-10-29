@@ -85,10 +85,14 @@ impl ChangesView {
         let diff = cx.new(DiffPane::new);
         diff.update(cx, |diff, cx| diff.clear(cx));
         let subscriptions = vec![
-            cx.subscribe(&model, |this, _, event, cx| {
-                if let RepoEvent::Changed = event {
-                    this.sync_status(cx);
+            cx.subscribe(&model, |this, _, event, cx| match event {
+                RepoEvent::Changed => this.sync_status(cx),
+                // An undone commit's message, unless a new one is being written.
+                RepoEvent::MessageRestored(message) if this.message.read(cx).value().trim().is_empty() => {
+                    this.pending_message = Some(message.clone());
+                    cx.notify();
                 }
+                _ => {}
             }),
             // Cmd-Enter in the message commits, as in JetBrains.
             cx.subscribe_in(&message, window, |this, _, event, window, cx| {

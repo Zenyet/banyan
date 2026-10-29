@@ -41,6 +41,10 @@ the way git branches grow apart and merge back.
 - Commit context menu: copy hash, checkout, new branch / tag, cherry-pick, revert,
   reset (soft / mixed / hard), and "Show Diff with Working Tree".
   Cmd-click or Shift-click selects several commits to cherry-pick or revert together.
+- Edit the current branch's history from the same menu: **Edit Commit Message**, **Fixup into Parent**,
+  **Squash into Parent**, **Squash Commits** (several selected, also apart), **Drop Commit(s)** and, on the last
+  commit, **Undo Commit**, which keeps its changes and puts its message back in the Commit tab. Local changes are
+  stashed around the rebase, and rewriting commits that are already pushed asks first.
 - Loads 5000 commits at a time (configurable), and more when you scroll to the end.
 
 ### Commit

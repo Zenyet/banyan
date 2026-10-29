@@ -8,10 +8,11 @@ use gpui_kit::component::{
     ActiveTheme as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
-    input::{Input, InputEvent, InputState},
+    input::{Input, InputEvent, InputState, Textarea, TextareaState},
     tree::TreeItem,
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::git::RefKind;
@@ -196,6 +197,75 @@ pub fn prompt_text(
                 v_flex()
                     .gap_4()
                     .child(Input::new(&input))
+                    .child(dialog_buttons(ok_label.clone(), false, move |_, window, cx| {
+                        if on_click(window, cx) {
+                            window.close_dialog(cx);
+                        }
+                    })),
+            )
+    });
+}
+
+/// Ask for a commit message, with `note` above it. Cmd-Enter confirms too.
+pub fn prompt_message(
+    title: impl Into<SharedString>,
+    note: impl Into<SharedString>,
+    ok_label: impl Into<SharedString>,
+    default_value: impl Into<SharedString>,
+    on_ok: impl Fn(String, &mut Window, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let title = title.into();
+    let note = note.into();
+    let ok_label = ok_label.into();
+    let default_value: SharedString = default_value.into();
+    let input = cx.new(|cx| TextareaState::new(window, cx).auto_grow(6, 16));
+    input.update(cx, |input, cx| input.set_value(default_value, window, cx));
+    let submit: Rc<SubmitFn> = Rc::new({
+        let input = input.clone();
+        move |window, cx| {
+            let value = input.read(cx).value().trim().to_string();
+            if value.is_empty() {
+                return false;
+            }
+            on_ok(value, window, cx);
+            true
+        }
+    });
+    let handle = window.window_handle();
+    let on_enter = submit.clone();
+    cx.subscribe(&input, move |_, event: &InputEvent, cx| {
+        if let InputEvent::PressEnter { secondary: true, .. } = event {
+            let on_enter = on_enter.clone();
+            cx.defer(move |cx| {
+                handle
+                    .update(cx, |_, window, cx| {
+                        if on_enter(window, cx) {
+                            window.close_dialog(cx);
+                        }
+                    })
+                    .ok();
+            });
+        }
+    })
+    .detach();
+    let needs_focus = std::cell::Cell::new(true);
+    window.open_dialog(cx, move |dialog, window, cx| {
+        if needs_focus.replace(false) {
+            input.focus_handle(cx).focus(window, cx);
+        }
+        let on_click = submit.clone();
+        dialog
+            .title(title.clone())
+            .w(px(560.))
+            .child(
+                v_flex()
+                    .gap_3()
+                    .when(!note.is_empty(), |col| {
+                        col.child(div().text_sm().text_color(cx.theme().muted_foreground).child(note.clone()))
+                    })
+                    .child(Textarea::new(&input))
                     .child(dialog_buttons(ok_label.clone(), false, move |_, window, cx| {
                         if on_click(window, cx) {
                             window.close_dialog(cx);

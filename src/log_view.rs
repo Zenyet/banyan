@@ -909,13 +909,10 @@ impl LogView {
         if !selection.is_empty() {
             return commits_menu(menu, &self.model, selection);
         }
-        let subject = self
-            .commits
-            .iter()
-            .find(|c| c.id == id)
-            .map(|c| c.subject.clone())
-            .unwrap_or_default();
-        commit_menu(menu, &self.model, id, subject)
+        let commit = self.commits.iter().find(|c| c.id == id);
+        let subject = commit.map(|c| c.subject.clone()).unwrap_or_default();
+        let is_head = commit.is_some_and(|c| c.refs.iter().any(|r| r.kind == crate::git::RefKind::Head));
+        commit_menu(menu, &self.model, id, subject, is_head)
     }
 
     fn render_details(&self, cx: &mut Context<Self>) -> impl IntoElement {
