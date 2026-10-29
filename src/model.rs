@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use gpui_kit::*;
 
-use crate::git::{Branch, Operation, RefKind, Repo, RepoState, StatusEntry, Stash};
+use crate::changelists::Changelists;
+use crate::git::{Branch, Operation, RefKind, Repo, RepoState, Shelf, StatusEntry, Stash};
 use crate::settings::Settings;
 use crate::watcher::RepoWatcher;
 
@@ -37,6 +38,9 @@ pub struct RepoModel {
     pub operation: Option<Operation>,
     pub status: Vec<StatusEntry>,
     pub stashes: Vec<Stash>,
+    /// Local changes sorted into named lists, kept in the git directory.
+    pub changelists: Changelists,
+    pub shelves: Vec<Shelf>,
     /// Label of the operation that is running, if any.
     pub busy: Option<SharedString>,
     /// Bumped whenever HEAD or any ref moves, so views know to reload the log.
@@ -60,10 +64,12 @@ struct Snapshot {
     operation: Option<Operation>,
     status: Vec<StatusEntry>,
     stashes: Vec<Stash>,
+    shelves: Vec<Shelf>,
 }
 
 impl RepoModel {
     pub fn new(repo: Repo, cx: &mut Context<Self>) -> Self {
+        let changelists = repo.git_dir().map(|dir| Changelists::load(&dir)).unwrap_or_default();
         let mut this = Self {
             repo: Arc::new(repo),
             branches: Vec::new(),
@@ -72,6 +78,8 @@ impl RepoModel {
             operation: None,
             status: Vec::new(),
             stashes: Vec::new(),
+            changelists,
+            shelves: Vec::new(),
             busy: None,
             refs_version: 0,
             refs_key: None,
@@ -168,6 +176,7 @@ impl RepoModel {
                         operation: repo.operation(),
                         status: repo.status().unwrap_or_default(),
                         stashes: repo.stashes().unwrap_or_default(),
+                        shelves: repo.shelves(),
                     }
                 })
                 .await;
@@ -190,6 +199,11 @@ impl RepoModel {
                 this.operation = snapshot.operation;
                 this.status = snapshot.status;
                 this.stashes = snapshot.stashes;
+                this.shelves = snapshot.shelves;
+                let tracked = this.status.iter().filter(|e| !e.is_untracked()).map(|e| e.path.as_str());
+                if this.changelists.sync(tracked) {
+                    this.save_changelists();
+                }
                 cx.emit(RepoEvent::Changed);
                 cx.notify();
             })
@@ -214,12 +228,52 @@ impl RepoModel {
         );
     }
 
+    /// Change the changelists and keep them; a refused change is reported.
+    pub fn change_lists(&mut self, change: impl FnOnce(&mut Changelists) -> Result<()>, cx: &mut Context<Self>) {
+        match change(&mut self.changelists) {
+            Ok(()) => {
+                self.save_changelists();
+                cx.emit(RepoEvent::Changed);
+                cx.notify();
+            }
+            Err(err) => cx.emit(RepoEvent::OpFailed(format!("{err:#}").into())),
+        }
+    }
+
+    fn save_changelists(&self) {
+        if let Ok(dir) = self.repo.git_dir() {
+            self.changelists.save(&dir).ok();
+        }
+    }
+
+    /// Shelve the changes of `paths`, remembering their changelist.
+    pub fn shelve(&mut self, name: String, paths: Vec<String>, cx: &mut Context<Self>) {
+        let changelist = match paths.first() {
+            Some(first) if paths.iter().all(|p| self.changelists.list_of(p) == self.changelists.list_of(first)) => {
+                self.changelists.list_of(first).to_string()
+            }
+            _ => self.changelists.active().to_string(),
+        };
+        self.run(format!("Shelve {name}"), move |repo| repo.shelve(&name, &changelist, &paths), cx);
+    }
+
+    /// Unshelve all of shelf `id`, or `paths` of it, back into its changelist.
+    pub fn unshelve(&mut self, id: String, paths: Option<Vec<String>>, cx: &mut Context<Self>) {
+        self.run_then(
+            "Unshelve",
+            move |repo| repo.unshelve(&id, paths.as_deref()),
+            |this, (shelf, files), cx| this.change_lists(|lists| lists.move_to(&files, &shelf.changelist), cx),
+            |err| RepoEvent::OpFailed(format!("Unshelve failed\n{err:#}").into()),
+            cx,
+        );
+    }
+
     /// Undo the last commit, keeping its changes and offering its message again.
     pub fn undo_commit(&mut self, cx: &mut Context<Self>) {
         self.run_then(
             "Undo commit",
             |repo| repo.undo_commit(),
-            |message, cx| cx.emit(RepoEvent::MessageRestored(message)),
+            |_, message, cx| cx.emit(RepoEvent::MessageRestored(message)),
             |err| RepoEvent::OpFailed(format!("Undo commit failed\n{err:#}").into()),
             cx,
         );
@@ -257,7 +311,7 @@ impl RepoModel {
         on_error: impl FnOnce(anyhow::Error) -> RepoEvent + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.run_then(label, op, |_, _| {}, on_error, cx);
+        self.run_then(label, op, |_, _, _| {}, on_error, cx);
     }
 
     /// Like [`Self::run_with`], also handing the operation's result to `on_ok`.
@@ -265,7 +319,7 @@ impl RepoModel {
         &mut self,
         label: impl Into<SharedString>,
         op: impl FnOnce(&Repo) -> Result<T> + Send + 'static,
-        on_ok: impl FnOnce(T, &mut Context<Self>) + 'static,
+        on_ok: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
         on_error: impl FnOnce(anyhow::Error) -> RepoEvent + 'static,
         cx: &mut Context<Self>,
     ) {
@@ -292,7 +346,7 @@ impl RepoModel {
                 match result {
                     Ok(value) => {
                         cx.emit(RepoEvent::OpSucceeded(format!("{label}: done").into()));
-                        on_ok(value, cx);
+                        on_ok(this, value, cx);
                     }
                     Err(_) if conflicted => cx.emit(RepoEvent::Conflicts(label)),
                     Err(err) => cx.emit(on_error(err)),

@@ -153,7 +153,7 @@ impl Render for WorktreeDiff {
                                         .py_1()
                                         .text_xs()
                                         .text_color(cx.theme().muted_foreground)
-                                        .child(if self.loading { "Loading…".to_string() } else { format!("{count} files") }),
+                                        .child(if self.loading { "Loading…".to_string() } else { crate::ui::file_count(count) }),
                                 )
                                 .child(div().id("worktree-files").flex_1().min_h_0().overflow_y_scroll().children(rows)),
                         ),

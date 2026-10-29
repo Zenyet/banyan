@@ -57,6 +57,12 @@ the way git branches grow apart and merge back.
 - Commit whole files, single hunks, or individual lines.
 - Commit, amend, commit and push, rollback, and stash. Recent commit messages are remembered.
 - Add to `.gitignore`, Copy Path, and Reveal in Finder for local changes.
+- **Changelists**: sort local changes into named lists from the file menu (**Move to Another Changelist**);
+  new changes go to the active list, whose files are checked for the next commit. Lists can be created,
+  renamed, deleted and made active from their header's menu.
+- **Shelf**: put changes aside with **Shelve** (selected files, a file, or a whole changelist, new files
+  included) and bring them back later from the **Shelf** tab, all at once or a file at a time, into the
+  changelist they came from. A shelf that no longer fits is merged three-way, leaving conflicts to resolve.
 
 ### Merge conflicts
 

@@ -15,6 +15,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::changelists::Changelists;
 use crate::diff_pane::DiffPane;
 use crate::git::{RepoState, StatusEntry};
 use crate::patch::{self, ChangedLine, Hunk};
@@ -23,29 +24,30 @@ use crate::model::{RepoEvent, RepoModel};
 use crate::settings::Settings;
 use crate::ui::{selection_bg, confirm, prompt_text, status_color};
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum Group {
     Conflicts,
-    Changes,
+    /// A changelist, by name.
+    List(String),
     Unversioned,
 }
 
 impl Group {
-    fn of(entry: &StatusEntry) -> Self {
+    fn of(entry: &StatusEntry, lists: &Changelists) -> Self {
         if entry.is_conflicted() {
             Group::Conflicts
         } else if entry.is_untracked() {
             Group::Unversioned
         } else {
-            Group::Changes
+            Group::List(lists.list_of(&entry.path).to_string())
         }
     }
 
-    fn title(self) -> &'static str {
+    fn title(&self) -> String {
         match self {
-            Group::Conflicts => "Merge Conflicts",
-            Group::Changes => "Changes",
-            Group::Unversioned => "Unversioned Files",
+            Group::Conflicts => "Merge Conflicts".into(),
+            Group::List(name) => name.clone(),
+            Group::Unversioned => "Unversioned Files".into(),
         }
     }
 }
@@ -134,12 +136,15 @@ impl ChangesView {
     /// New tracked changes are included by default, unversioned files are not.
     fn sync_status(&mut self, cx: &mut Context<Self>) {
         let status = self.model.read(cx).status.clone();
+        let lists = self.model.read(cx).changelists.clone();
         let paths: HashSet<String> = status.iter().map(|e| e.path.clone()).collect();
         for entry in &status {
             let is_new = self.known.insert(entry.path.clone());
             if entry.is_conflicted() {
                 self.conflicted.insert(entry.path.clone());
-            } else if self.conflicted.remove(&entry.path) || (is_new && !entry.is_untracked()) {
+            } else if self.conflicted.remove(&entry.path)
+                || (is_new && !entry.is_untracked() && lists.list_of(&entry.path) == lists.active())
+            {
                 // Freshly resolved conflicts are ready to commit.
                 self.included.insert(entry.path.clone());
             }
@@ -297,7 +302,8 @@ impl ChangesView {
     }
 
     fn toggle_group(&mut self, group: Group, include: bool, cx: &mut Context<Self>) {
-        for entry in self.entries(cx).iter().filter(|e| Group::of(e) == group) {
+        let lists = self.model.read(cx).changelists.clone();
+        for entry in self.entries(cx).iter().filter(|e| Group::of(e, &lists) == group) {
             if include {
                 self.included.insert(entry.path.clone());
             } else {
@@ -442,6 +448,21 @@ impl ChangesView {
                         );
                     }),
             )
+            .child(
+                Button::new("changes-shelve")
+                    .icon(IconName::Inbox)
+                    .ghost()
+                    .xsmall()
+                    .tooltip("Shelve Selected Changes...")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        let paths: Vec<String> = this.included.iter().cloned().collect();
+                        if paths.is_empty() {
+                            this.model.update(cx, |_, cx| cx.emit(RepoEvent::OpFailed("No changes selected to shelve".into())));
+                        } else {
+                            prompt_shelve(&this.model, paths, window, cx);
+                        }
+                    })),
+            )
             .child(div().flex_1())
             .child(
                 div()
@@ -454,50 +475,69 @@ impl ChangesView {
 
     fn render_group(&self, group: Group, entries: &[StatusEntry], cx: &mut Context<Self>) -> AnyElement {
         let collapsed = self.collapsed.contains(&group);
-        let all = entries.iter().all(|e| self.included.contains(&e.path));
+        let all = !entries.is_empty() && entries.iter().all(|e| self.included.contains(&e.path));
+        let title = group.title();
+        let active = match &group {
+            Group::List(name) => self.model.read(cx).changelists.active() == name,
+            _ => false,
+        };
         let mut rows = Vec::new();
         if !collapsed {
             for entry in entries {
                 rows.push(self.render_entry(entry, cx));
             }
         }
-        v_flex()
+        let paths: Vec<String> = entries.iter().map(|e| e.path.clone()).collect();
+        let (toggle, check, menu_group) = (group.clone(), group.clone(), group.clone());
+        let model = self.model.clone();
+        let header = h_flex()
+            .id(SharedString::from(format!("group-{title}")))
+            .h(px(24.))
+            .px_2()
+            .gap_1()
+            .text_sm()
+            .font_semibold()
+            .child(Icon::new(if collapsed { IconName::ChevronRight } else { IconName::ChevronDown }).xsmall())
             .child(
-                h_flex()
-                    .id(group.title())
-                    .h(px(24.))
-                    .px_2()
-                    .gap_1()
-                    .text_sm()
-                    .font_semibold()
-                    .child(
-                        Icon::new(if collapsed { IconName::ChevronRight } else { IconName::ChevronDown })
-                            .xsmall(),
-                    )
-                    .child(
-                        Checkbox::new(SharedString::from(format!("group-{}", group.title())))
-                            .checked(all)
-                            .on_click(cx.listener(move |this, checked: &bool, _, cx| {
-                                this.toggle_group(group, *checked, cx)
-                            })),
-                    )
-                    .child(group.title())
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_normal()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(format!("{} files", entries.len())),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if !this.collapsed.remove(&group) {
-                            this.collapsed.insert(group);
-                        }
-                        cx.notify();
+                Checkbox::new(SharedString::from(format!("group-check-{title}")))
+                    .checked(all)
+                    .on_click(cx.listener(move |this, checked: &bool, _, cx| {
+                        this.toggle_group(check.clone(), *checked, cx)
                     })),
             )
-            .children(rows)
-        .into_any_element()
+            .child(title.clone())
+            .when(active, |row| {
+                row.child(
+                    div()
+                        .px_1()
+                        .rounded(px(3.))
+                        .text_xs()
+                        .font_normal()
+                        .bg(cx.theme().secondary)
+                        .text_color(cx.theme().secondary_foreground)
+                        .child("active"),
+                )
+            })
+            .child(
+                div()
+                    .text_xs()
+                    .font_normal()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(crate::ui::file_count(entries.len())),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if !this.collapsed.remove(&toggle) {
+                    this.collapsed.insert(toggle.clone());
+                }
+                cx.notify();
+            }));
+        let header = match menu_group {
+            Group::List(name) => header
+                .context_menu(move |menu, _, _| changelist_menu(menu, &model, &name, active, paths.clone()))
+                .into_any_element(),
+            _ => header.into_any_element(),
+        };
+        v_flex().child(header).children(rows).into_any_element()
     }
 
     fn render_entry(&self, entry: &StatusEntry, cx: &mut Context<Self>) -> AnyElement {
@@ -562,8 +602,36 @@ impl ChangesView {
                     }
                 }
             }))
-            .context_menu(move |mut menu, _, _| {
+            .context_menu(move |mut menu, window, cx| {
                 let full_path = root.join(&path);
+                if !conflicted {
+                    let lists = model.read(cx).changelists.clone();
+                    if !untracked {
+                        let (model, path) = (model.clone(), path.clone());
+                        menu = menu.submenu("Move to Another Changelist", window, cx, move |mut sub, _, _| {
+                            let current = lists.list_of(&path).to_string();
+                            for name in lists.names().iter().filter(|n| **n != current).cloned() {
+                                let (model, path) = (model.clone(), path.clone());
+                                sub = sub.item(PopupMenuItem::new(name.clone()).on_click(move |_, _, cx| {
+                                    model.update(cx, |m, cx| m.change_lists(|l| l.move_to(&[path.clone()], &name), cx))
+                                }));
+                            }
+                            let (model, path) = (model.clone(), path.clone());
+                            sub.separator().item(PopupMenuItem::new("New Changelist...").on_click(move |_, window, cx| {
+                                let (model, path) = (model.clone(), path.clone());
+                                prompt_text("New Changelist", "Create", "", move |name, _, cx| {
+                                    model.update(cx, |m, cx| m.change_lists(|l| l.move_to(&[path.clone()], &name), cx))
+                                }, window, cx);
+                            }))
+                        });
+                    }
+                    let (shelve_model, shelve_path) = (model.clone(), path.clone());
+                    menu = menu
+                        .item(PopupMenuItem::new("Shelve...").on_click(move |_, window, cx| {
+                            prompt_shelve(&shelve_model, vec![shelve_path.clone()], window, cx)
+                        }))
+                        .separator();
+                }
                 if conflicted {
                     let merge_model = model.clone();
                     let merge_path = path.clone();
@@ -884,15 +952,21 @@ impl Render for ChangesView {
         }
         let entries = self.entries(cx);
         let mut groups: Vec<(Group, Vec<StatusEntry>)> = Vec::new();
-        for group in [Group::Conflicts, Group::Changes, Group::Unversioned] {
-            let members: Vec<StatusEntry> = entries.iter().filter(|e| Group::of(e) == group).cloned().collect();
-            if !members.is_empty() {
+        let lists = self.model.read(cx).changelists.clone();
+        let mut order = vec![Group::Conflicts];
+        order.extend(lists.names().iter().map(|name| Group::List(name.clone())));
+        order.push(Group::Unversioned);
+        // Every changelist shows, even empty, once there is more than one.
+        let show_empty_lists = lists.names().len() > 1;
+        for group in order {
+            let members: Vec<StatusEntry> = entries.iter().filter(|e| Group::of(e, &lists) == group).cloned().collect();
+            if !members.is_empty() || (show_empty_lists && matches!(group, Group::List(_))) {
                 groups.push((group, members));
             }
         }
         let mut rendered = Vec::new();
         for (group, members) in &groups {
-            rendered.push(self.render_group(*group, members, cx));
+            rendered.push(self.render_group(group.clone(), members, cx));
         }
         let list = if groups.is_empty() {
             div()
@@ -959,4 +1033,73 @@ fn changed_lines(hunks: &[Hunk]) -> HashSet<ChangedLine> {
 /// Only plain modifications of tracked files can be split into hunks.
 fn can_commit_partially(entry: &StatusEntry) -> bool {
     entry.display_status() == 'M' && entry.orig_path.is_none()
+}
+
+/// Ask for a name, then shelve `paths`.
+fn prompt_shelve(model: &Entity<RepoModel>, paths: Vec<String>, window: &mut Window, cx: &mut App) {
+    let default = {
+        let lists = &model.read(cx).changelists;
+        paths.first().map(|p| lists.list_of(p).to_string()).unwrap_or_default()
+    };
+    let model = model.clone();
+    prompt_text(
+        if paths.len() == 1 { "Shelve 1 File".to_string() } else { format!("Shelve {} Files", paths.len()) },
+        "Shelve",
+        default,
+        move |name, _, cx| model.update(cx, |m, cx| m.shelve(name, paths.clone(), cx)),
+        window,
+        cx,
+    );
+}
+
+/// The menu of a changelist's header.
+fn changelist_menu(
+    mut menu: gpui_kit::component::menu::PopupMenu,
+    model: &Entity<RepoModel>,
+    name: &str,
+    active: bool,
+    paths: Vec<String>,
+) -> gpui_kit::component::menu::PopupMenu {
+    let item = |label: &str, f: Box<dyn Fn(&Entity<RepoModel>, &mut Window, &mut App)>| {
+        let model = model.clone();
+        PopupMenuItem::new(label.to_string()).on_click(move |_, window, cx| f(&model, window, cx))
+    };
+    if !active {
+        let name = name.to_string();
+        menu = menu.item(item(
+            "Set as Active Changelist",
+            Box::new(move |model, _, cx| model.update(cx, |m, cx| m.change_lists(|l| l.set_active(&name), cx))),
+        ));
+    }
+    menu = menu.item(item(
+        "New Changelist...",
+        Box::new(|model, window, cx| {
+            let model = model.clone();
+            prompt_text("New Changelist", "Create", "", move |new, _, cx| {
+                model.update(cx, |m, cx| m.change_lists(|l| l.create(&new), cx))
+            }, window, cx);
+        }),
+    ));
+    let old = name.to_string();
+    menu = menu.item(item(
+        "Rename Changelist...",
+        Box::new(move |model, window, cx| {
+            let (model, old) = (model.clone(), old.clone());
+            prompt_text("Rename Changelist", "Rename", old.clone(), move |new, _, cx| {
+                model.update(cx, |m, cx| m.change_lists(|l| l.rename(&old, &new), cx))
+            }, window, cx);
+        }),
+    ));
+    let gone = name.to_string();
+    menu = menu.item(item(
+        "Delete Changelist",
+        Box::new(move |model, _, cx| model.update(cx, |m, cx| m.change_lists(|l| l.delete(&gone), cx))),
+    ));
+    if !paths.is_empty() {
+        menu = menu.separator().item(item(
+            "Shelve Changes...",
+            Box::new(move |model, window, cx| prompt_shelve(model, paths.clone(), window, cx)),
+        ));
+    }
+    menu
 }

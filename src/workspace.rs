@@ -17,6 +17,7 @@ use gpui_kit::*;
 use crate::actions::{branch_menu, new_branch};
 use crate::changes_view::ChangesView;
 use crate::console::ConsoleView;
+use crate::shelf_view::ShelfView;
 use crate::git::{RefKind, RepoState};
 use crate::log_view::LogView;
 use crate::model::{RepoEvent, RepoModel};
@@ -57,6 +58,7 @@ pub struct Workspace {
     focus: FocusHandle,
     log: Entity<LogView>,
     changes: Entity<ChangesView>,
+    shelf: Entity<ShelfView>,
     console: Entity<ConsoleView>,
     tab: usize,
     chrome: Option<Chrome>,
@@ -67,6 +69,7 @@ impl Workspace {
     pub fn new(model: Entity<RepoModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let log = cx.new(|cx| LogView::new(model.clone(), window, cx));
         let changes = cx.new(|cx| ChangesView::new(model.clone(), window, cx));
+        let shelf = cx.new(|cx| ShelfView::new(model.clone(), cx));
         let console = cx.new(|cx| ConsoleView::new(model.clone(), cx));
         let model_for_events = model.clone();
         let subscriptions = vec![
@@ -114,6 +117,7 @@ impl Workspace {
             focus,
             log,
             changes,
+            shelf,
             console,
             tab: 0,
             chrome: None,
@@ -272,6 +276,14 @@ impl Workspace {
                     .label(format!("Commit ({changes})"))
                     .prefix(Icon::new(IconName::GitCommitHorizontal).small()),
             )
+            .child(
+                Tab::new()
+                    .label(match self.model.read(cx).shelves.len() {
+                        0 => "Shelf".to_string(),
+                        n => format!("Shelf ({n})"),
+                    })
+                    .prefix(Icon::new(IconName::Inbox).small()),
+            )
             .child(Tab::new().label("Console").prefix(Icon::new(IconName::SquareTerminal).small()))
             .on_click(cx.listener(|this, ix: &usize, _, cx| {
                 this.set_tab(*ix, cx);
@@ -418,6 +430,7 @@ impl Render for Workspace {
         let content = match self.tab {
             0 => self.log.clone().into_any_element(),
             1 => self.changes.clone().into_any_element(),
+            2 => self.shelf.clone().into_any_element(),
             _ => self.console.clone().into_any_element(),
         };
         let workspace = cx.entity();
@@ -445,7 +458,7 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|this, _: &ShowLog, _, cx| this.set_tab(0, cx)))
             .on_action(cx.listener(|this, _: &ShowCommitTab, _, cx| this.set_tab(1, cx)))
-            .on_action(cx.listener(|this, _: &ShowConsole, _, cx| this.set_tab(2, cx)))
+            .on_action(cx.listener(|this, _: &ShowConsole, _, cx| this.set_tab(3, cx)))
             .on_action(cx.listener(|this, _: &RefreshRepository, _, cx| {
                 this.model.update(cx, |model, cx| model.refresh(cx));
                 this.log.update(cx, |log, cx| log.reload(cx));

@@ -20,6 +20,11 @@ use crate::settings::Settings;
 
 pub const FILE_PREFIX: &str = "f:";
 
+/// "1 file", "3 files".
+pub fn file_count(n: usize) -> String {
+    if n == 1 { "1 file".into() } else { format!("{n} files") }
+}
+
 /// Graph lane colors, close to the JetBrains palette.
 pub fn lane_color(ix: usize) -> Hsla {
     const COLORS: [u32; 10] = [

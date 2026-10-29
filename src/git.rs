@@ -304,6 +304,80 @@ pub enum RebaseAction {
     Drop,
 }
 
+/// Changes put aside with Shelve, kept as a patch in `banyan/shelf/<id>` of
+/// the git directory, like JetBrains' shelf.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Shelf {
+    pub id: String,
+    pub name: String,
+    /// The changelist the changes came from, which unshelving restores.
+    pub changelist: String,
+    pub time: i64,
+    pub files: Vec<String>,
+}
+
+impl Shelf {
+    fn read(dir: &Path) -> Option<Self> {
+        let info = std::fs::read_to_string(dir.join("info")).ok()?;
+        let mut shelf = Shelf {
+            id: dir.file_name()?.to_string_lossy().into_owned(),
+            name: String::new(),
+            changelist: crate::changelists::DEFAULT.to_string(),
+            time: 0,
+            files: Vec::new(),
+        };
+        for line in info.lines() {
+            match line.split_once('=') {
+                Some(("name", name)) => shelf.name = name.to_string(),
+                Some(("changelist", list)) => shelf.changelist = list.to_string(),
+                Some(("time", time)) => shelf.time = time.parse().unwrap_or(0),
+                Some(("file", path)) => shelf.files.push(path.to_string()),
+                _ => {}
+            }
+        }
+        Some(shelf)
+    }
+
+    fn write(&self, dir: &Path) -> Result<()> {
+        let one_line = |text: &str| text.replace(['\n', '\r'], " ");
+        let mut info = format!(
+            "name={}\nchangelist={}\ntime={}\n",
+            one_line(&self.name),
+            one_line(&self.changelist),
+            self.time
+        );
+        for file in &self.files {
+            info.push_str(&format!("file={file}\n"));
+        }
+        std::fs::write(dir.join("info"), info)?;
+        Ok(())
+    }
+}
+
+/// The per-file parts of a patch, each starting at its `diff --git` line.
+fn patch_blocks(patch: &str) -> Vec<&str> {
+    let mut starts: Vec<usize> = patch.match_indices("diff --git ").map(|(ix, _)| ix).filter(|&ix| ix == 0 || patch.as_bytes()[ix - 1] == b'\n').collect();
+    starts.push(patch.len());
+    starts.windows(2).map(|w| &patch[w[0]..w[1]]).collect()
+}
+
+/// Whether a patch block is the one for `path` (its new name).
+fn block_is_for(block: &str, path: &str) -> bool {
+    block.lines().next().is_some_and(|header| header.ends_with(&format!(" b/{path}")))
+}
+
+/// `path` as a literal pattern for `git apply --include`.
+fn glob_literal(path: &str) -> String {
+    let mut out = String::new();
+    for c in path.chars() {
+        if matches!(c, '*' | '?' | '[' | ']' | '\\') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// A change to the current branch's history, as the Log's commit menu offers.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Rewrite {
@@ -1559,6 +1633,193 @@ impl Repo {
             .collect())
     }
 
+    fn shelf_root(&self) -> Result<PathBuf> {
+        Ok(self.git_dir()?.join("banyan/shelf"))
+    }
+
+    /// Shelved changes, newest first.
+    pub fn shelves(&self) -> Vec<Shelf> {
+        let Ok(root) = self.shelf_root() else { return Vec::new() };
+        let Ok(entries) = std::fs::read_dir(root) else { return Vec::new() };
+        let mut shelves: Vec<Shelf> = entries.flatten().filter_map(|entry| Shelf::read(&entry.path())).collect();
+        shelves.sort_by(|a, b| b.time.cmp(&a.time).then_with(|| b.id.cmp(&a.id)));
+        shelves
+    }
+
+    /// Put the changes of `paths` aside as shelf `name` and take them out of
+    /// the work tree, new files included. `changelist` is where unshelving
+    /// puts them back.
+    pub fn shelve(&self, name: &str, changelist: &str, paths: &[String]) -> Result<Shelf> {
+        if !self.has_head() {
+            bail!("shelving compares with the last commit; commit something first");
+        }
+        if self.repo_state() != RepoState::Clean {
+            bail!("finish or abort the current merge, rebase or cherry-pick first");
+        }
+        let entries: Vec<StatusEntry> = self.status()?.into_iter().filter(|e| paths.contains(&e.path)).collect();
+        if entries.is_empty() {
+            bail!("no changes to shelve");
+        }
+        if entries.iter().any(|e| e.is_conflicted()) {
+            bail!("resolve the conflicts before shelving");
+        }
+        let untracked: Vec<&str> = entries.iter().filter(|e| e.is_untracked()).map(|e| e.path.as_str()).collect();
+        let mut pathspec: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
+        pathspec.extend(entries.iter().filter_map(|e| e.orig_path.as_deref()));
+        let undo_intent = || {
+            if !untracked.is_empty() {
+                let mut args = vec!["rm", "-q", "--cached", "--ignore-unmatch", "--"];
+                args.extend(&untracked);
+                self.git(&args).ok();
+            }
+        };
+        if !untracked.is_empty() {
+            // Intent-to-add makes new files part of the diff.
+            let mut args = vec!["add", "-N", "--"];
+            args.extend(&untracked);
+            self.git(&args)?;
+        }
+        let mut args = vec!["diff", "HEAD", "--binary", "--full-index", "-M", "--"];
+        args.extend(&pathspec);
+        let patch = match self.git(&args) {
+            Ok(patch) if !patch.trim().is_empty() => patch,
+            Ok(_) => {
+                undo_intent();
+                bail!("no changes to shelve");
+            }
+            Err(err) => {
+                undo_intent();
+                return Err(err);
+            }
+        };
+
+        let time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let shelf = Shelf {
+            id: format!("{}-{:09}", time.as_secs(), time.subsec_nanos()),
+            name: name.trim().to_string(),
+            changelist: changelist.to_string(),
+            time: time.as_secs() as i64,
+            files: {
+                let mut files: Vec<String> = entries.iter().map(|e| e.path.clone()).collect();
+                files.sort();
+                files
+            },
+        };
+        let dir = self.shelf_root()?.join(&shelf.id);
+        std::fs::create_dir_all(&dir)?;
+        let patch_file = dir.join("patch.diff");
+        std::fs::write(&patch_file, &patch)?;
+        shelf.write(&dir)?;
+        // Only touch the work tree once the patch is known to undo cleanly.
+        let patch_arg = patch_file.to_string_lossy().into_owned();
+        if let Err(err) = self.git(&["apply", "--check", "-R", "--binary", &patch_arg]) {
+            std::fs::remove_dir_all(&dir).ok();
+            undo_intent();
+            return Err(err.context("the shelf patch does not undo cleanly; nothing was changed"));
+        }
+
+        let mut args = vec!["ls-tree", "-r", "-z", "--name-only", "HEAD", "--"];
+        args.extend(&pathspec);
+        let tree = self.git(&args)?;
+        let in_head: Vec<&str> = tree.split('\0').filter(|p| !p.is_empty()).collect();
+        let (restore, remove): (Vec<&str>, Vec<&str>) = pathspec.iter().partition(|p| in_head.contains(p));
+        if !restore.is_empty() {
+            let mut args = vec!["checkout", "HEAD", "--"];
+            args.extend(&restore);
+            self.git(&args)?;
+        }
+        if !remove.is_empty() {
+            let mut args = vec!["rm", "-q", "--cached", "-f", "--ignore-unmatch", "--"];
+            args.extend(&remove);
+            self.git(&args)?;
+            for path in remove {
+                std::fs::remove_file(self.root.join(path)).ok();
+            }
+        }
+        Ok(shelf)
+    }
+
+    /// Apply shelved changes again: all of shelf `id`, or only `paths` of it.
+    /// Applied files leave the shelf and an emptied shelf goes. Returns the
+    /// shelf as it was and the files restored. Hunks that no longer fit are
+    /// merged three-way and left with conflict markers.
+    pub fn unshelve(&self, id: &str, paths: Option<&[String]>) -> Result<(Shelf, Vec<String>)> {
+        let dir = self.shelf_root()?.join(id);
+        let shelf = Shelf::read(&dir).context("this shelf no longer exists")?;
+        let files: Vec<String> = match paths {
+            Some(paths) => shelf.files.iter().filter(|f| paths.contains(f)).cloned().collect(),
+            None => shelf.files.clone(),
+        };
+        if files.is_empty() {
+            bail!("nothing to unshelve");
+        }
+        let patch_file = dir.join("patch.diff");
+        let patch = std::fs::read_to_string(&patch_file)?;
+        let includes: Vec<String> = files.iter().map(|f| format!("--include={}", glob_literal(f))).collect();
+        let patch_arg = patch_file.to_string_lossy().into_owned();
+        let mut args = vec!["apply", "--binary"];
+        args.extend(includes.iter().map(String::as_str));
+        args.push(&patch_arg);
+        if self.git(&args).is_err() {
+            args.insert(1, "--3way");
+            match self.git(&args) {
+                // Applied, leaving conflicts to resolve.
+                Err(err) if format!("{err:#}").contains("with conflicts") => {}
+                result => {
+                    result?;
+                }
+            }
+        }
+        // Files the patch adds show up as new files, not unversioned ones.
+        let added: Vec<&str> = patch_blocks(&patch)
+            .into_iter()
+            .filter(|block| block.contains("\nnew file mode"))
+            .filter_map(|block| files.iter().find(|f| block_is_for(block, f)))
+            .map(String::as_str)
+            .filter(|f| self.root.join(f).exists())
+            .collect();
+        if !added.is_empty() {
+            let mut args = vec!["add", "-N", "--"];
+            args.extend(&added);
+            self.git(&args).ok();
+        }
+
+        let remaining: Vec<String> = shelf.files.iter().filter(|f| !files.contains(f)).cloned().collect();
+        if remaining.is_empty() {
+            std::fs::remove_dir_all(&dir)?;
+        } else {
+            let kept: String = patch_blocks(&patch)
+                .into_iter()
+                .filter(|block| remaining.iter().any(|f| block_is_for(block, f)))
+                .collect();
+            std::fs::write(&patch_file, kept)?;
+            Shelf { files: remaining, ..shelf.clone() }.write(&dir)?;
+        }
+        Ok((shelf, files))
+    }
+
+    /// The part of shelf `id`'s patch for `path`.
+    pub fn shelf_file_patch(&self, id: &str, path: &str) -> Result<String> {
+        let patch = std::fs::read_to_string(self.shelf_root()?.join(id).join("patch.diff"))?;
+        Ok(patch_blocks(&patch)
+            .into_iter()
+            .find(|block| block_is_for(block, path))
+            .unwrap_or_default()
+            .to_string())
+    }
+
+    pub fn rename_shelf(&self, id: &str, name: &str) -> Result<()> {
+        let dir = self.shelf_root()?.join(id);
+        let shelf = Shelf::read(&dir).context("this shelf no longer exists")?;
+        Shelf { name: name.trim().to_string(), ..shelf }.write(&dir)
+    }
+
+    pub fn delete_shelf(&self, id: &str) -> Result<()> {
+        std::fs::remove_dir_all(self.shelf_root()?.join(id)).context("cannot delete the shelf")
+    }
+
     pub fn stash(&self, message: &str) -> Result<String> {
         if message.is_empty() {
             self.git(&["stash", "push", "--include-untracked"])
@@ -1982,6 +2243,55 @@ mod tests {
         assert_eq!(paths, vec!["Three.txt", "Two.txt"]);
         let patch = t.repo.diff_between(&ids[1], Some(&ids[3]), &files[1]).unwrap();
         assert!(patch.contains("+Two"), "{patch}");
+    }
+
+    #[test]
+    fn shelving_takes_changes_out_and_unshelving_brings_them_back() {
+        let t = TempRepo::new("shelve");
+        t.commit("keep.txt", "keep\n", "Base");
+        t.commit("gone.txt", "gone\n", "Second");
+        t.write("keep.txt", "keep\nmore\n");
+        std::fs::remove_file(t.dir.join("gone.txt")).unwrap();
+        t.write("new dir/new.txt", "new\n");
+        t.write("other.txt", "not shelved\n");
+        let paths = vec!["gone.txt".to_string(), "keep.txt".to_string(), "new dir/new.txt".to_string()];
+
+        let shelf = t.repo.shelve("Work in progress", "Feature", &paths).unwrap();
+        assert_eq!(shelf.files, paths);
+        let status: Vec<String> = t.repo.status().unwrap().into_iter().map(|e| e.path).collect();
+        assert_eq!(status, vec!["other.txt"]);
+        assert_eq!(std::fs::read_to_string(t.dir.join("keep.txt")).unwrap(), "keep\n");
+        assert!(t.dir.join("gone.txt").exists());
+        assert!(!t.dir.join("new dir/new.txt").exists());
+        assert_eq!(t.repo.shelves(), vec![shelf.clone()]);
+        assert!(t.repo.shelf_file_patch(&shelf.id, "keep.txt").unwrap().contains("+more"));
+
+        // One file first; the rest stays shelved.
+        let (_, restored) = t.repo.unshelve(&shelf.id, Some(&["new dir/new.txt".to_string()])).unwrap();
+        assert_eq!(restored, vec!["new dir/new.txt"]);
+        assert_eq!(std::fs::read_to_string(t.dir.join("new dir/new.txt")).unwrap(), "new\n");
+        let entry = t.repo.status().unwrap().into_iter().find(|e| e.path == "new dir/new.txt").unwrap();
+        assert!(!entry.is_untracked());
+        assert_eq!(t.repo.shelves()[0].files, vec!["gone.txt", "keep.txt"]);
+
+        let (back, _) = t.repo.unshelve(&shelf.id, None).unwrap();
+        assert_eq!(back.changelist, "Feature");
+        assert!(t.repo.shelves().is_empty());
+        assert_eq!(std::fs::read_to_string(t.dir.join("keep.txt")).unwrap(), "keep\nmore\n");
+        assert!(!t.dir.join("gone.txt").exists());
+    }
+
+    #[test]
+    fn unshelving_onto_changed_files_merges_three_way() {
+        let t = TempRepo::new("unshelve-conflict");
+        t.commit("a.txt", "one\n", "Base");
+        t.write("a.txt", "shelved\n");
+        let shelf = t.repo.shelve("Mine", "Changes", &["a.txt".to_string()]).unwrap();
+        t.commit("a.txt", "committed meanwhile\n", "Other");
+        t.repo.unshelve(&shelf.id, None).unwrap();
+        let text = std::fs::read_to_string(t.dir.join("a.txt")).unwrap();
+        assert!(text.contains("shelved") && text.contains("committed meanwhile"), "{text}");
+        assert!(t.repo.status().unwrap().iter().any(|e| e.is_conflicted()));
     }
 
     #[test]
