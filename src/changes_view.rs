@@ -8,7 +8,7 @@ use gpui_kit::component::{
     checkbox::Checkbox,
     h_flex, h_resizable,
     input::{InputEvent, Textarea, TextareaState},
-    menu::{ContextMenuExt as _, PopupMenuItem},
+    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
     resizable_panel, v_flex,
 };
 use gpui_kit::assets::IconName;
@@ -20,6 +20,7 @@ use crate::git::{RepoState, StatusEntry};
 use crate::patch::{self, ChangedLine, Hunk};
 use crate::log_view::panel_header;
 use crate::model::{RepoEvent, RepoModel};
+use crate::settings::Settings;
 use crate::ui::{selection_bg, confirm, prompt_text, status_color};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -334,6 +335,7 @@ impl ChangesView {
             .collect();
         let amend = self.amend;
         let label = if push { "Commit and Push" } else { "Commit" };
+        Settings::add_message(message.clone());
         self.excluded.clear();
         self.model.update(cx, |model, cx| {
             model.run(
@@ -730,6 +732,35 @@ impl ChangesView {
             .into_any_element()
     }
 
+    /// Recent commit messages, like JetBrains' Commit Message History.
+    fn render_message_history(&self) -> AnyElement {
+        let input = self.message.clone();
+        Button::new("message-history")
+            .icon(IconName::Clock)
+            .ghost()
+            .xsmall()
+            .tooltip("Commit Message History")
+            .dropdown_menu(move |mut menu, _, _| {
+                let messages = Settings::load().messages;
+                if messages.is_empty() {
+                    return menu.item(PopupMenuItem::new("No recent messages").disabled(true));
+                }
+                for message in messages {
+                    let subject = message.lines().next().unwrap_or_default();
+                    let mut label: String = subject.chars().take(70).collect();
+                    if label.len() < subject.len() || message.contains('\n') {
+                        label.push('…');
+                    }
+                    let input = input.clone();
+                    menu = menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
+                        input.update(cx, |state, cx| state.set_value(message.clone(), window, cx));
+                    }));
+                }
+                menu.max_h(px(400.)).scrollable(true)
+            })
+            .into_any_element()
+    }
+
     fn render_commit_box(&self, cx: &mut Context<Self>) -> AnyElement {
         let state = self.model.read(cx).state;
         v_flex()
@@ -781,6 +812,7 @@ impl ChangesView {
                             .checked(self.amend)
                             .on_click(cx.listener(|this, checked: &bool, window, cx| this.set_amend(*checked, window, cx))),
                     )
+                    .child(self.render_message_history())
                     .child(div().flex_1())
                     .child(
                         Button::new("commit-push")

@@ -1,9 +1,11 @@
-//! Tiny persisted settings: theme and recently opened repositories.
+//! Tiny persisted settings: theme, recently opened repositories and recent
+//! commit messages.
 //! Stored as `key=value` lines in ~/Library/Application Support/GitBrains/settings.
 
 use std::path::PathBuf;
 
 const MAX_RECENT: usize = 10;
+const MAX_MESSAGES: usize = 20;
 
 #[derive(Default)]
 pub struct Settings {
@@ -11,6 +13,30 @@ pub struct Settings {
     /// Update Project rebases instead of merging.
     pub update_rebase: bool,
     pub recent: Vec<PathBuf>,
+    /// Commit messages, newest first.
+    pub messages: Vec<String>,
+}
+
+/// Keep a value on one line.
+fn escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('\n', "\\n")
+}
+
+fn unescape(value: &str) -> String {
+    let mut out = String::new();
+    let mut chars = value.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some(other) => out.push(other),
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 fn file() -> Option<PathBuf> {
@@ -29,6 +55,7 @@ impl Settings {
                 Some(("theme", value)) => settings.dark = value == "dark",
                 Some(("update", value)) => settings.update_rebase = value == "rebase",
                 Some(("recent", value)) => settings.recent.push(PathBuf::from(value)),
+                Some(("message", value)) => settings.messages.push(unescape(value)),
                 _ => {}
             }
         }
@@ -44,6 +71,9 @@ impl Settings {
         );
         for repo in &self.recent {
             text.push_str(&format!("recent={}\n", repo.display()));
+        }
+        for message in &self.messages {
+            text.push_str(&format!("message={}\n", escape(message)));
         }
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).ok();
@@ -63,5 +93,27 @@ impl Settings {
             settings.recent.insert(0, repo);
             settings.recent.truncate(MAX_RECENT);
         });
+    }
+
+    pub fn add_message(message: String) {
+        Settings::update(|settings| {
+            settings.messages.retain(|m| m != &message);
+            settings.messages.insert(0, message);
+            settings.messages.truncate(MAX_MESSAGES);
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{escape, unescape};
+
+    #[test]
+    fn messages_round_trip() {
+        for message in ["Subject", "Subject\n\nBody line\nC:\\path\\n", "trailing \\"] {
+            let escaped = escape(message);
+            assert!(!escaped.contains('\n'));
+            assert_eq!(unescape(&escaped), message);
+        }
     }
 }
