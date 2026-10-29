@@ -50,18 +50,29 @@ the way git branches grow apart and merge back.
 - Commit, amend, commit and push, rollback, and stash. Recent commit messages are remembered.
 - Add to `.gitignore`, Copy Path, and Reveal in Finder for local changes.
 
+### Merge conflicts
+
+![The Conflicts dialog listing app.js and notes.md under a "Merging feature/greeting into main" banner](docs/screenshots/conflicts.png)
+
+- When a merge, rebase, cherry-pick, revert or pull stops on conflicts, the **Conflicts** dialog opens with each
+  conflicted file and what each side did to it, offering Accept Yours / Accept Theirs / Merge…
+- A banner above the tabs stays until the operation is finished: **Resolve Conflicts…** while files conflict,
+  then **Commit Merge** / **Continue Rebase**, and **Abort** at any time. It also picks up operations started
+  outside Banyan, such as a `git merge` in the terminal.
+- A conflicted file in the Commit tab shows the same actions above its diff.
+
+![The merge tool: yours on the left, the result in the middle and theirs on the right, one conflict resolved and one open](docs/screenshots/merge-tool.png)
+
+- The **merge tool** shows yours, the result and theirs side by side. Changes that merge cleanly are applied
+  already; each conflict takes yours (»), theirs («), both, or text you type, and shows the common ancestor
+  until it's resolved. The arrows jump between conflicts.
+- A file deleted on one side is resolved by accepting a side.
+
 ### Branches and history
 
 - Branch popup in the toolbar: checkout (with Smart Checkout when local changes are in the way),
   new branch from, merge into current, rebase current onto, rename, and delete local, remote and tag refs.
 - **Interactive rebase** from any commit: reorder, pick, reword, squash, fixup, drop.
-- **Conflict handling**: when a merge, rebase, cherry-pick, revert or pull stops on conflicts, a **Conflicts**
-  dialog lists the files with what each side did, offering Accept Yours / Accept Theirs / Merge…
-  A banner above the tabs stays until the operation is finished, with **Resolve Conflicts…**, then
-  **Commit Merge** / **Continue Rebase**, and **Abort** at any time, also for operations started outside Banyan.
-- **Merge tool**: yours, the result and theirs side by side. Changes that merge cleanly are applied already;
-  each conflict takes yours (»), theirs («), both, or text you type, and shows the common ancestor until resolved.
-  Files deleted on one side are resolved by accepting a side.
 - **File history** and **Annotate** (git blame shaded by age).
 - **Compare with Current** for any branch, and a **stash viewer** showing each stash's files and diff.
 
