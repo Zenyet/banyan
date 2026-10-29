@@ -42,6 +42,12 @@ pub fn open(cx: &mut App) {
 pub fn apply_appearance(cx: &mut App) {
     let (theme, font_size) = Settings::read(|s| (s.theme, s.font_size));
     crate::i18n::apply(&Settings::read(|s| s.language.clone()));
+    // The native title bar follows the app's appearance, not the theme.
+    cx.set_window_appearance(match theme {
+        ThemeChoice::System => None,
+        ThemeChoice::Light => Some(WindowAppearance::Light),
+        ThemeChoice::Dark => Some(WindowAppearance::Dark),
+    });
     match theme {
         ThemeChoice::System => Theme::sync_system_appearance(None, cx),
         ThemeChoice::Light => Theme::change(ThemeMode::Light, None, cx),
