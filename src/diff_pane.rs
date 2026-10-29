@@ -15,13 +15,18 @@ pub struct DiffPane {
     message: Option<SharedString>,
     mode: DiffMode,
     _relayout: Option<Task<()>>,
+    _observe_state: Subscription,
 }
 
 impl DiffPane {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let mode = DiffMode::Split;
+        let state = cx.new(|cx| DiffState::new(Vec::new(), cx).with_mode(mode));
         Self {
-            state: cx.new(|cx| DiffState::new(Vec::new(), cx).with_mode(mode)),
+            // The pane is shown as a cached view, so repaint it whenever the
+            // diff changes, such as when its highlighting finishes.
+            _observe_state: cx.observe(&state, |_, _, cx| cx.notify()),
+            state,
             title: None,
             message: None,
             mode,

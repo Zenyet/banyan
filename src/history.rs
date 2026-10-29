@@ -209,7 +209,7 @@ impl Render for HistoryView {
             .child(
                 h_resizable("history")
                     .child(resizable_panel().size(px(460.)).child(left))
-                    .child(resizable_panel().child(self.diff.clone())),
+                    .child(resizable_panel().child(crate::ui::cached(self.diff.clone()))),
             )
     }
 }

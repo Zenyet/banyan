@@ -887,7 +887,7 @@ impl Render for ChangesView {
                     v_flex()
                         .size_full()
                         .when(!self.hunks.is_empty(), |col| col.child(self.render_hunks(cx)))
-                        .child(div().flex_1().min_h_0().child(self.diff.clone())),
+                        .child(div().flex_1().min_h_0().child(crate::ui::cached(self.diff.clone()))),
                 ),
             )
     }

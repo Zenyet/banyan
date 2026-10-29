@@ -10,7 +10,7 @@ use gpui_kit::component::{
     h_flex, h_resizable,
     input::{Input, InputEvent, InputState},
     list::ListItem,
-    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
+    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
     resizable_panel,
     tree::{TreeItem, TreeState, tree},
     v_flex, v_resizable,
@@ -24,7 +24,7 @@ use crate::diff_pane::DiffPane;
 use crate::git::{Branch, Commit, CommitDetails, FileChange, RefKind};
 use crate::graph::{self, GraphRow, Half};
 use crate::model::{RepoEvent, RepoModel};
-use crate::ui::{selection_bg, FILE_PREFIX, file_tree, format_full_time, format_time, lane_color, path_tree, ref_label, status_color};
+use crate::ui::{cached, SubView, selection_bg, FILE_PREFIX, file_tree, format_full_time, format_time, lane_color, path_tree, ref_colors, status_color};
 
 const ROW_HEIGHT: Pixels = px(24.);
 const LANE_WIDTH: Pixels = px(14.);
@@ -65,6 +65,8 @@ pub struct LogView {
     selected: Option<String>,
     /// Commits selected along with `selected` by Cmd- or Shift-click.
     marked: HashSet<String>,
+    /// The commit whose context menu is opening.
+    menu_target: Option<String>,
     /// Where a Shift-click range starts.
     anchor: Option<String>,
     head: Option<String>,
@@ -83,6 +85,7 @@ pub struct LogView {
     files: Rc<HashMap<SharedString, FileChange>>,
     selected_file: Option<SharedString>,
     diff: Entity<DiffPane>,
+    panels: Option<Panels>,
     scroll: UniformListScrollHandle,
     focus: FocusHandle,
     loading: bool,
@@ -144,6 +147,7 @@ impl LogView {
             rows: Rc::default(),
             selected: None,
             marked: HashSet::new(),
+            menu_target: None,
             anchor: None,
             head: None,
             filter,
@@ -159,6 +163,7 @@ impl LogView {
             files: Rc::default(),
             selected_file: None,
             diff,
+            panels: None,
             scroll: UniformListScrollHandle::new(),
             focus: cx.focus_handle(),
             loading: true,
@@ -582,7 +587,7 @@ impl LogView {
             )
     }
 
-    fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn branch_names(&self, cx: &App) -> Vec<String> {
         let model = self.model.read(cx);
         let mut names: Vec<String> = model
             .branches_of(RefKind::Local)
@@ -590,6 +595,11 @@ impl LogView {
             .map(|b| b.name.clone())
             .collect();
         names.dedup();
+        names
+    }
+
+    // The menus below gather their items when opened, not on every render.
+    fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let view = cx.entity().downgrade();
         let label = match &self.branch_filter {
             Some(branch) => format!("Branch: {branch}"),
@@ -616,7 +626,8 @@ impl LogView {
                     .ghost()
                     .xsmall()
                     .dropdown_caret(true)
-                    .dropdown_menu(move |mut menu, _, _| {
+                    .dropdown_menu(move |mut menu, _, cx| {
+                        let names = view.upgrade().map(|view| view.read(cx).branch_names(cx)).unwrap_or_default();
                         let view = view.clone();
                         menu = menu.item(PopupMenuItem::new("All").on_click({
                             let view = view.clone();
@@ -638,7 +649,6 @@ impl LogView {
             )
             .child({
                 let view = cx.entity().downgrade();
-                let authors = self.authors();
                 Button::new("author-filter")
                     .label(match &self.author_filter {
                         Some(author) => format!("User: {author}"),
@@ -647,7 +657,8 @@ impl LogView {
                     .ghost()
                     .xsmall()
                     .dropdown_caret(true)
-                    .dropdown_menu(move |mut menu, _, _| {
+                    .dropdown_menu(move |mut menu, _, cx| {
+                        let authors = view.upgrade().map(|view| view.read(cx).authors()).unwrap_or_default();
                         let all = view.clone();
                         menu = menu
                             .item(PopupMenuItem::new("All").on_click(move |_, _, cx| {
@@ -740,7 +751,6 @@ impl LogView {
         let has_more = !self.is_filtered(cx) && self.commits.len() >= self.limit;
         v_flex()
             .size_full()
-            .child(self.render_toolbar(cx))
             .child(
                 div()
                     .id("commit-list")
@@ -754,6 +764,18 @@ impl LogView {
                     .on_action(cx.listener(|this, _: &PageDownCommits, _, cx| this.select_offset(25, cx)))
                     .flex_1()
                     .min_h_0()
+                    .context_menu({
+                        let view = cx.entity().downgrade();
+                        move |menu, _, cx| {
+                            let Some(target) = view.update(cx, |this, _| this.menu_target.take()).ok().flatten() else {
+                                return menu;
+                            };
+                            match view.upgrade() {
+                                Some(view) => view.read(cx).commit_list_menu(menu, target),
+                                None => menu,
+                            }
+                        }
+                    })
                     .child(
                         uniform_list(
                             "commits",
@@ -829,22 +851,34 @@ impl LogView {
         } else {
             px(8.)
         };
-        let id = commit.id.clone();
-        let subject = commit.subject.clone();
-        let model = self.model.clone();
-        let view = cx.entity().downgrade();
         let muted = cx.theme().muted_foreground;
         let fg = cx.theme().foreground;
+        // One canvas paints the whole row, as laying out a dozen flex children
+        // per row on every scroll step made scrolling costly.
+        let paint = RowPaint {
+            graph: show_graph.then_some(graph_row),
+            graph_width,
+            is_head,
+            refs: commit
+                .refs
+                .iter()
+                .map(|r| {
+                    let (bg, fg) = ref_colors(&r.kind, cx);
+                    (SharedString::from(r.name.clone()), bg, fg)
+                })
+                .collect(),
+            subject: commit.subject.clone().into(),
+            author: commit.author.clone().into(),
+            time: format_time(commit.time).into(),
+            fg,
+            secondary: if selected { fg } else { muted },
+        };
 
         div()
-            .id(SharedString::from(commit.id.clone()))
+            .id(row)
             .h(ROW_HEIGHT)
             .w_full()
-            .flex()
-            .items_center()
-            .pr_2()
             .text_sm()
-            .text_color(fg)
             .when(selected, |row| row.bg(selection_bg()))
             .when(!selected, |row| row.hover(|style| style.bg(cx.theme().list_hover)))
             .on_mouse_down(
@@ -857,65 +891,31 @@ impl LogView {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, _, _, cx| {
-                    if !this.is_selected(&this.commits[ix].id) {
-                        this.select(Some(this.commits[ix].id.clone()), cx)
+                    let id = this.commits[ix].id.clone();
+                    if !this.is_selected(&id) {
+                        this.select(Some(id.clone()), cx)
                     }
+                    this.menu_target = Some(id);
                 }),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .w(graph_width)
-                    .h_full()
-                    .when(show_graph, |cell| {
-                        cell.child(
-                            canvas(
-                                |_, _, _| {},
-                                move |bounds, _, window, cx| paint_graph(&graph_row, is_head, bounds, window, cx),
-                            )
-                            .size_full(),
-                        )
-                    }),
-            )
-            .child(
-                h_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap_1()
-                    .overflow_hidden()
-                    .children(commit.refs.iter().map(|r| ref_label(&r.name, &r.kind, cx)))
-                    .child(div().min_w_0().truncate().child(commit.subject.clone())),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(140.))
-                    .pl_2()
-                    .truncate()
-                    .text_color(if selected { fg } else { muted })
-                    .child(commit.author.clone()),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(130.))
-                    .pl_2()
-                    .truncate()
-                    .text_color(if selected { fg } else { muted })
-                    .child(format_time(commit.time)),
-            )
-            .context_menu(move |menu, _, cx| {
-                let selection = view
-                    .upgrade()
-                    .map(|view| view.read(cx).selection_for_menu(&id))
-                    .unwrap_or_default();
-                if selection.is_empty() {
-                    commit_menu(menu, &model, id.clone(), subject.clone())
-                } else {
-                    commits_menu(menu, &model, selection)
-                }
-            })
+            .child(canvas(|_, _, _| {}, move |bounds, _, window, cx| paint.paint(bounds, window, cx)).size_full())
             .into_any_element()
+    }
+
+    /// The menu for the commit last right-clicked, or for the selection it
+    /// belongs to. One menu serves the whole list.
+    fn commit_list_menu(&self, menu: PopupMenu, id: String) -> PopupMenu {
+        let selection = self.selection_for_menu(&id);
+        if !selection.is_empty() {
+            return commits_menu(menu, &self.model, selection);
+        }
+        let subject = self
+            .commits
+            .iter()
+            .find(|c| c.id == id)
+            .map(|c| c.subject.clone())
+            .unwrap_or_default();
+        commit_menu(menu, &self.model, id, subject)
     }
 
     fn render_details(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1042,18 +1042,52 @@ impl LogView {
     }
 }
 
+/// The log's columns as separate cached views: scrolling the commits then
+/// leaves the branches, details and diff as they were instead of laying
+/// them out and painting them again on every step.
+#[derive(Clone)]
+struct Panels {
+    branches: Entity<SubView<LogView>>,
+    toolbar: Entity<SubView<LogView>>,
+    commits: Entity<SubView<LogView>>,
+    details: Entity<SubView<LogView>>,
+}
+
 impl Render for LogView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let log = cx.entity();
+        let panels = self
+            .panels
+            .get_or_insert_with(|| {
+                let panels = Panels {
+                    branches: SubView::new(&log, |log, cx| log.render_branches(cx).into_any_element(), cx),
+                    toolbar: SubView::new(&log, |log, cx| log.render_toolbar(cx).into_any_element(), cx),
+                    commits: SubView::new(&log, |log, cx| log.render_commits(cx).into_any_element(), cx),
+                    details: SubView::new(&log, |log, cx| log.render_details(cx).into_any_element(), cx),
+                };
+                // Expanding a folder changes only the tree's own state.
+                SubView::observe(&panels.branches, &self.branch_tree, cx);
+                SubView::observe(&panels.details, &self.file_tree, cx);
+                panels
+            })
+            .clone();
         v_resizable("log-main")
             .child(
                 resizable_panel().child(
                     h_resizable("log-columns")
-                        .child(resizable_panel().size(px(230.)).size_range(px(140.)..px(500.)).child(self.render_branches(cx)))
-                        .child(resizable_panel().child(self.render_commits(cx)))
-                        .child(resizable_panel().size(px(340.)).size_range(px(200.)..px(800.)).child(self.render_details(cx))),
+                        .child(resizable_panel().size(px(230.)).size_range(px(140.)..px(500.)).child(cached(panels.branches)))
+                        .child(
+                            resizable_panel().child(
+                                v_flex()
+                                    .size_full()
+                                    .child(div().flex_none().h(px(36.)).child(cached(panels.toolbar)))
+                                    .child(div().flex_1().min_h_0().child(cached(panels.commits))),
+                            ),
+                        )
+                        .child(resizable_panel().size(px(340.)).size_range(px(200.)..px(800.)).child(cached(panels.details))),
                 ),
             )
-            .child(resizable_panel().size(px(300.)).child(self.diff.clone()))
+            .child(resizable_panel().size(px(300.)).child(cached(self.diff.clone())))
     }
 }
 
@@ -1097,6 +1131,94 @@ pub fn panel_header(title: impl Into<SharedString>, cx: &App) -> impl IntoElemen
         .border_b_1()
         .border_color(cx.theme().border)
         .child(title.into())
+}
+
+/// Everything a commit row draws, captured for its canvas.
+struct RowPaint {
+    graph: Option<GraphRow>,
+    graph_width: Pixels,
+    is_head: bool,
+    /// Label, background and text color of each ref.
+    refs: Vec<(SharedString, Hsla, Hsla)>,
+    subject: SharedString,
+    author: SharedString,
+    time: SharedString,
+    fg: Hsla,
+    /// Author and date.
+    secondary: Hsla,
+}
+
+const AUTHOR_WIDTH: Pixels = px(140.);
+const TIME_WIDTH: Pixels = px(130.);
+const CELL_PADDING: Pixels = px(8.);
+
+impl RowPaint {
+    fn paint(&self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
+        if let Some(graph) = &self.graph {
+            let graph_bounds = Bounds::new(bounds.origin, size(self.graph_width, bounds.size.height));
+            paint_graph(graph, self.is_head, graph_bounds, window, cx);
+        }
+        let style = window.text_style();
+        let font = style.font();
+        let font_size = style.font_size.to_pixels(window.rem_size());
+        let line_height = style.line_height_in_pixels(window.rem_size());
+        let text_top = bounds.origin.y + (bounds.size.height - line_height) / 2.;
+
+        let right = bounds.right() - CELL_PADDING;
+        let time_left = right - TIME_WIDTH;
+        let author_left = time_left - AUTHOR_WIDTH;
+        let mut x = bounds.origin.x + self.graph_width;
+
+        // Ref labels, then the subject in what is left of the column.
+        let label_size = font_size * 0.86;
+        let label_height = px(16.);
+        for (name, bg, fg) in &self.refs {
+            let line = shape(name.clone(), &font, label_size, *fg, window);
+            let width = line.width + px(8.);
+            if x + width > author_left - CELL_PADDING {
+                break;
+            }
+            let label = Bounds::new(
+                point(x, bounds.origin.y + (bounds.size.height - label_height) / 2.),
+                size(width, label_height),
+            );
+            window.paint_quad(fill(label, *bg).corner_radii(px(3.)));
+            let label_line_height = label_size * 1.3;
+            line.paint(
+                point(x + px(4.), label.origin.y + (label_height - label_line_height) / 2.),
+                label_line_height,
+                TextAlign::Left,
+                None,
+                window,
+                cx,
+            )
+            .ok();
+            x += width + px(4.);
+        }
+        let cells = [
+            (&self.subject, self.fg, x, author_left - CELL_PADDING),
+            (&self.author, self.secondary, author_left + CELL_PADDING, time_left),
+            (&self.time, self.secondary, time_left + CELL_PADDING, right),
+        ];
+        for (text, color, left, right) in cells {
+            let width = right - left;
+            if width <= px(0.) || text.is_empty() {
+                continue;
+            }
+            let run = [TextRun { len: text.len(), font: font.clone(), color, background_color: None, underline: None, strikethrough: None }];
+            let (text, runs) = window
+                .text_system()
+                .line_wrapper(font.clone(), font_size)
+                .truncate_line((*text).clone(), width, "…", &run, TruncateFrom::End);
+            let line = window.text_system().shape_line(text, font_size, &runs, None);
+            line.paint(point(left, text_top), line_height, TextAlign::Left, None, window, cx).ok();
+        }
+    }
+}
+
+fn shape(text: SharedString, font: &Font, font_size: Pixels, color: Hsla, window: &Window) -> ShapedLine {
+    let run = TextRun { len: text.len(), font: font.clone(), color, background_color: None, underline: None, strikethrough: None };
+    window.text_system().shape_line(text, font_size, &[run], None)
 }
 
 fn paint_graph(row: &GraphRow, is_head: bool, bounds: Bounds<Pixels>, window: &mut Window, cx: &App) {

@@ -140,7 +140,7 @@ impl Render for WorktreeDiff {
                                 .child(div().id("worktree-files").flex_1().min_h_0().overflow_y_scroll().children(rows)),
                         ),
                     )
-                    .child(resizable_panel().child(self.diff.clone())),
+                    .child(resizable_panel().child(crate::ui::cached(self.diff.clone()))),
             )
     }
 }

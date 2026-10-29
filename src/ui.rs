@@ -45,22 +45,14 @@ pub fn status_color(status: char, cx: &App) -> Hsla {
     }
 }
 
-pub fn ref_label(name: &str, kind: &RefKind, cx: &App) -> AnyElement {
-    let (bg, fg): (Hsla, Hsla) = match kind {
+/// Background and text color of a ref label.
+pub fn ref_colors(kind: &RefKind, cx: &App) -> (Hsla, Hsla) {
+    match kind {
         RefKind::Head => (rgb(0xf0c75e).into(), rgb(0x3c2f00).into()),
         RefKind::Local => (rgb(0x5f9e5f).into(), white()),
         RefKind::Remote => (rgb(0x8a6db8).into(), white()),
         RefKind::Tag => (cx.theme().secondary, cx.theme().secondary_foreground),
-    };
-    div()
-        .flex_none()
-        .px_1()
-        .rounded(px(3.))
-        .bg(bg)
-        .text_color(fg)
-        .text_xs()
-        .child(SharedString::from(name.to_string()))
-        .into_any_element()
+    }
 }
 
 pub fn format_time(timestamp: i64) -> String {
@@ -259,4 +251,42 @@ fn dialog_buttons(
                 .on_click(|_, window, cx| window.close_dialog(cx)),
         )
         .child(if danger { ok.danger() } else { ok.primary() })
+}
+
+/// A view that fills its parent and is repainted only when it notifies,
+/// not whenever its parent is.
+pub fn cached(view: impl Into<AnyView>) -> impl IntoElement {
+    view.into().cached(StyleRefinement::default().size_full())
+}
+
+/// A piece of `V`'s UI, rendered by `V` but as a view of its own so that it
+/// can be cached: it is laid out and painted again only when `V` notifies,
+/// not whenever a sibling repaints, such as a list scrolling next to it.
+pub struct SubView<V: 'static> {
+    view: WeakEntity<V>,
+    render: fn(&mut V, &mut Context<V>) -> AnyElement,
+    _observe: Vec<Subscription>,
+}
+
+impl<V: 'static> SubView<V> {
+    pub fn new(view: &Entity<V>, render: fn(&mut V, &mut Context<V>) -> AnyElement, cx: &mut App) -> Entity<Self> {
+        cx.new(|cx| Self {
+            view: view.downgrade(),
+            render,
+            _observe: vec![cx.observe(view, |_, _, cx| cx.notify())],
+        })
+    }
+
+    /// Also repaint when `entity`, whose state this part shows, changes.
+    pub fn observe<E: 'static>(this: &Entity<Self>, entity: &Entity<E>, cx: &mut App) {
+        this.update(cx, |this, cx| this._observe.push(cx.observe(entity, |_, _, cx| cx.notify())));
+    }
+}
+
+impl<V: 'static> Render for SubView<V> {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let render = self.render;
+        // Laid out on its own, so stretch the content as a flex parent would.
+        v_flex().size_full().children(self.view.update(cx, render).ok())
+    }
 }

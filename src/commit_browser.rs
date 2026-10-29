@@ -194,7 +194,7 @@ impl Render for CommitBrowser {
                                     .children(files),
                             ),
                         )
-                        .child(resizable_panel().child(self.diff.clone())),
+                        .child(resizable_panel().child(crate::ui::cached(self.diff.clone()))),
                 ),
             )
     }

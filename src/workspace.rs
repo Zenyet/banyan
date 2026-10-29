@@ -21,7 +21,7 @@ use crate::git::{RefKind, RepoState};
 use crate::log_view::LogView;
 use crate::model::{RepoEvent, RepoModel};
 use crate::settings::Settings;
-use crate::ui::{confirm, prompt_text};
+use crate::ui::{SubView, cached, confirm, prompt_text};
 
 actions!(
     workspace,
@@ -40,6 +40,18 @@ pub fn init(cx: &mut App) {
     ]);
 }
 
+/// The height of a small underlined `TabBar`.
+const TAB_BAR_HEIGHT: Pixels = px(30.);
+
+/// The parts around the tab content, as cached views: the whole workspace
+/// repaints with every scroll step of a list inside it.
+#[derive(Clone)]
+struct Chrome {
+    toolbar: Entity<SubView<Workspace>>,
+    tabs: Entity<SubView<Workspace>>,
+    status_bar: Entity<SubView<Workspace>>,
+}
+
 pub struct Workspace {
     model: Entity<RepoModel>,
     focus: FocusHandle,
@@ -47,6 +59,7 @@ pub struct Workspace {
     changes: Entity<ChangesView>,
     console: Entity<ConsoleView>,
     tab: usize,
+    chrome: Option<Chrome>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -88,6 +101,7 @@ impl Workspace {
             changes,
             console,
             tab: 0,
+            chrome: None,
             _subscriptions: subscriptions,
         }
     }
@@ -230,6 +244,46 @@ impl Workspace {
             })
     }
 
+    fn render_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let changes = self.changes.read(cx).change_count(cx);
+        TabBar::new("main-tabs")
+            .underline()
+            .small()
+            .selected_index(self.tab)
+            .child(Tab::new().label("Log").prefix(Icon::new(IconName::GitGraph).small()))
+            .child(
+                Tab::new()
+                    .label(format!("Commit ({changes})"))
+                    .prefix(Icon::new(IconName::GitCommitHorizontal).small()),
+            )
+            .child(Tab::new().label("Console").prefix(Icon::new(IconName::SquareTerminal).small()))
+            .on_click(cx.listener(|this, ix: &usize, _, cx| {
+                this.set_tab(*ix, cx);
+            }))
+    }
+
+    fn render_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .flex_none()
+            .h(px(24.))
+            .px_2()
+            .gap_3()
+            .text_xs()
+            .text_color(cx.theme().muted_foreground)
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .child(self.model.read(cx).repo.root().display().to_string())
+            .child(div().flex_1())
+            .child(
+                self.model
+                    .read(cx)
+                    .current_branch
+                    .clone()
+                    .unwrap_or_else(|| "Detached HEAD".into()),
+            )
+            .font_normal()
+    }
+
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let repo_model = self.model.clone();
         let model = self.model.read(cx);
@@ -346,12 +400,20 @@ impl Workspace {
 
 impl Render for Workspace {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let changes = self.changes.read(cx).change_count(cx);
         let content = match self.tab {
             0 => self.log.clone().into_any_element(),
             1 => self.changes.clone().into_any_element(),
             _ => self.console.clone().into_any_element(),
         };
+        let workspace = cx.entity();
+        let chrome = self
+            .chrome
+            .get_or_insert_with(|| Chrome {
+                toolbar: SubView::new(&workspace, |this, cx| this.render_toolbar(cx).into_any_element(), cx),
+                tabs: SubView::new(&workspace, |this, cx| this.render_tabs(cx).into_any_element(), cx),
+                status_bar: SubView::new(&workspace, |this, cx| this.render_status_bar(cx).into_any_element(), cx),
+            })
+            .clone();
         v_flex()
             .key_context("Workspace")
             .track_focus(&self.focus)
@@ -376,45 +438,10 @@ impl Render for Workspace {
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(self.render_toolbar(cx))
-            .child(
-                TabBar::new("main-tabs")
-                    .underline()
-                    .small()
-                    .selected_index(self.tab)
-                    .child(Tab::new().label("Log").prefix(Icon::new(IconName::GitGraph).small()))
-                    .child(
-                        Tab::new()
-                            .label(format!("Commit ({changes})"))
-                            .prefix(Icon::new(IconName::GitCommitHorizontal).small()),
-                    )
-                    .child(Tab::new().label("Console").prefix(Icon::new(IconName::SquareTerminal).small()))
-                    .on_click(cx.listener(|this, ix: &usize, _, cx| {
-                        this.set_tab(*ix, cx);
-                    })),
-            )
+            .child(div().flex_none().h(px(40.)).child(cached(chrome.toolbar)))
+            .child(div().flex_none().h(TAB_BAR_HEIGHT).child(cached(chrome.tabs)))
             .child(div().flex_1().min_h_0().child(content))
-            .child(
-                h_flex()
-                    .flex_none()
-                    .h(px(24.))
-                    .px_2()
-                    .gap_3()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .border_t_1()
-                    .border_color(cx.theme().border)
-                    .child(self.model.read(cx).repo.root().display().to_string())
-                    .child(div().flex_1())
-                    .child(
-                        self.model
-                            .read(cx)
-                            .current_branch
-                            .clone()
-                            .unwrap_or_else(|| "Detached HEAD".into()),
-                    )
-                    .font_normal(),
-            )
+            .child(div().flex_none().h(px(24.)).child(cached(chrome.status_bar)))
     }
 }
 
