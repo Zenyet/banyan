@@ -154,6 +154,20 @@ fn main() {
                     }
                 }
             }
+
+            // CI launches the app this way to check that it starts: it quits
+            // by itself once its window has been up for a few seconds.
+            if std::env::var_os("BANYAN_SMOKE_TEST").is_some() {
+                cx.spawn(async |cx| {
+                    cx.background_executor().timer(std::time::Duration::from_secs(5)).await;
+                    cx.update(|cx| {
+                        println!("smoke test passed: {} window(s) open", cx.windows().len());
+                        QUITTING.store(true, Ordering::Relaxed);
+                        cx.quit();
+                    });
+                })
+                .detach();
+            }
         });
 }
 

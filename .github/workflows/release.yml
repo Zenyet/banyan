@@ -39,7 +39,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
-            libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev libasound2-dev
+            libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev libasound2-dev \
+            xvfb mesa-vulkan-drivers
 
       - name: Install cargo-deb
         if: matrix.name == 'Linux'
@@ -70,6 +71,31 @@ jobs:
       - name: Package (Windows)
         if: matrix.name == 'Windows'
         run: scripts/package-windows.ps1
+
+      # Start each build once: it opens this repository and quits by itself.
+      # A crash at launch never prints the line the check looks for.
+      - name: Smoke test (macOS)
+        if: matrix.name == 'macOS'
+        timeout-minutes: 2
+        run: |
+          BANYAN_SMOKE_TEST=1 target/aarch64-apple-darwin/release/Banyan.app/Contents/MacOS/banyan . | tee smoke.log
+          grep -q "smoke test passed" smoke.log
+
+      - name: Smoke test (Linux)
+        if: matrix.name == 'Linux'
+        timeout-minutes: 2
+        run: |
+          xvfb-run -a env BANYAN_SMOKE_TEST=1 target/release/banyan . | tee smoke.log
+          grep -q "smoke test passed" smoke.log
+
+      - name: Smoke test (Windows)
+        if: matrix.name == 'Windows'
+        timeout-minutes: 2
+        run: |
+          $env:BANYAN_SMOKE_TEST = "1"
+          $app = Start-Process target\release\banyan.exe -ArgumentList "." -Wait -PassThru -RedirectStandardOutput smoke.log
+          Get-Content smoke.log
+          if ($app.ExitCode -ne 0 -or -not (Select-String -Quiet "smoke test passed" smoke.log)) { exit 1 }
 
       - uses: actions/upload-artifact@v4
         with:
