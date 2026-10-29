@@ -1,5 +1,6 @@
-// Draws the GitBrains app icon: "brains" across and "git" down, crossing at
-// the "i" they share, each letter on its own tile like a crossword.
+// Draws the GitBrains app icon: a "gb" monogram whose letters share one
+// stem. The "g" hangs its bowl and hook off the left of the stem, the "b"
+// its bowl off the right, and the stem runs from b's ascender to g's tail.
 // Usage: swift scripts/make_icon.swift <output.png>
 import AppKit
 
@@ -17,8 +18,8 @@ func color(_ hex: Int, _ alpha: CGFloat = 1) -> CGColor {
     NSColor(red: CGFloat((hex >> 16) & 0xff) / 255, green: CGFloat((hex >> 8) & 0xff) / 255,
             blue: CGFloat(hex & 0xff) / 255, alpha: alpha).cgColor
 }
-func gradient(_ a: Int, _ b: Int) -> CGGradient {
-    CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [color(a), color(b)] as CFArray, locations: [0, 1])!
+func gradient(_ colors: [Int]) -> CGGradient {
+    CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors.map { color($0) } as CFArray, locations: nil)!
 }
 
 // macOS icon grid: an 824pt rounded square centred in 1024.
@@ -27,69 +28,56 @@ let background = CGRect(x: inset, y: inset, width: size - 2 * inset, height: siz
 ctx.saveGState()
 ctx.addPath(CGPath(roundedRect: background, cornerWidth: 185, cornerHeight: 185, transform: nil))
 ctx.clip()
-ctx.drawLinearGradient(gradient(0x262a38, 0x101219), start: CGPoint(x: 0, y: size), end: CGPoint(x: 0, y: 0), options: [])
+ctx.drawLinearGradient(gradient([0x262a38, 0x101219]), start: CGPoint(x: 0, y: size), end: CGPoint(x: 0, y: 0), options: [])
 ctx.restoreGState()
 
-// Git's orange and a violet for the brains.
-let git = (0xf4683f, 0xd8401f)
-let brains = (0x9b7bff, 0x6a4ae8)
+// Git's orange for the g, violet for the brains.
+let orange = [0xff7a4d, 0xe0451f]
+let violet = [0xa98bff, 0x6a4ae8]
 
-let cell: CGFloat = 120, gap: CGFloat = 9, radius: CGFloat = 26
-let across = Array("brains"), down = Array("git")
-let shared = 3 // the "i" of "brains", which is also the "i" of "git"
-let width = CGFloat(across.count) * cell + CGFloat(across.count - 1) * gap
-let left = (size - width) / 2
-let middle = size / 2 - cell / 2 // bottom of the "brains" row
+let weight: CGFloat = 104 // stroke width
+let radius: CGFloat = 140 // bowls, measured to the middle of the stroke
+let stem: CGFloat = 512 // x of the shared stem
+let middle: CGFloat = 524 // y of the bowls' centres (y grows upwards)
+let top = middle + radius + 150 // b's ascender
+let tail = middle - radius - 30 // where g's stem turns into its hook
+let hook: CGFloat = 122
 
-let font: NSFont = {
-    let base = NSFont.systemFont(ofSize: cell * 0.64, weight: .heavy)
-    let rounded = base.fontDescriptor.withDesign(.rounded) ?? base.fontDescriptor
-    return NSFont(descriptor: rounded, size: cell * 0.64) ?? base
-}()
-
-func tile(_ letter: Character, at origin: CGPoint, colors: (Int, Int), split: (Int, Int)? = nil) {
-    let rect = CGRect(origin: origin, size: CGSize(width: cell, height: cell))
-    let path = CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
-    // Soft shadow under each tile.
-    ctx.saveGState()
-    ctx.setShadow(offset: CGSize(width: 0, height: -6), blur: 14, color: color(0x000000, 0.45))
-    ctx.addPath(path)
-    ctx.setFillColor(color(colors.1))
-    ctx.fillPath()
-    ctx.restoreGState()
-
-    ctx.saveGState()
-    ctx.addPath(path)
-    ctx.clip()
-    if let split {
-        // The shared tile blends from git (top left) into brains (bottom right).
-        ctx.drawLinearGradient(gradient(colors.0, split.1), start: CGPoint(x: rect.minX, y: rect.maxY),
-                               end: CGPoint(x: rect.maxX, y: rect.minY), options: [])
-    } else {
-        ctx.drawLinearGradient(gradient(colors.0, colors.1), start: CGPoint(x: 0, y: rect.maxY), end: CGPoint(x: 0, y: rect.minY), options: [])
+/// Fill the outline of `path`, stroked at `weight`, with a gradient from
+/// `start` to `end`.
+func paint(_ path: CGPath, _ colors: [Int], from start: CGPoint, to end: CGPoint, shadow: Bool = true) {
+    let outline = path.copy(strokingWithWidth: weight, lineCap: .round, lineJoin: .round, miterLimit: 10)
+    if shadow {
+        ctx.saveGState()
+        ctx.setShadow(offset: CGSize(width: 0, height: -10), blur: 28, color: color(0x000000, 0.5))
+        ctx.addPath(outline)
+        ctx.setFillColor(color(colors.last!))
+        ctx.fillPath()
+        ctx.restoreGState()
     }
-    // A thin highlight along the top edge.
-    ctx.setFillColor(color(0xffffff, 0.14))
-    ctx.fill(CGRect(x: rect.minX, y: rect.maxY - 5, width: rect.width, height: 5))
+    ctx.saveGState()
+    ctx.addPath(outline)
+    ctx.clip()
+    ctx.drawLinearGradient(gradient(colors), start: start, end: end, options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
     ctx.restoreGState()
-
-    // Centre the glyph's ink, not its line box, so "g" and "b" sit level.
-    let text = NSAttributedString(string: String(letter), attributes: [.font: font, .foregroundColor: NSColor.white])
-    let line = CTLineCreateWithAttributedString(text)
-    ctx.textPosition = .zero
-    let ink = CTLineGetImageBounds(line, ctx)
-    ctx.textPosition = CGPoint(x: rect.midX - ink.midX, y: rect.midY - ink.midY)
-    CTLineDraw(line, ctx)
 }
 
-let x = { (column: Int) in left + CGFloat(column) * (cell + gap) }
-for (column, letter) in across.enumerated() where column != shared {
-    tile(letter, at: CGPoint(x: x(column), y: middle), colors: brains)
-}
-// "g" above the shared tile and "t" below it.
-tile(down[0], at: CGPoint(x: x(shared), y: middle + cell + gap), colors: git)
-tile(down[2], at: CGPoint(x: x(shared), y: middle - cell - gap), colors: git)
-tile(down[1], at: CGPoint(x: x(shared), y: middle), colors: git, split: brains)
+// The bowls.
+let gBowl = CGMutablePath()
+gBowl.addEllipse(in: CGRect(x: stem - 2 * radius, y: middle - radius, width: 2 * radius, height: 2 * radius))
+let bBowl = CGMutablePath()
+bBowl.addEllipse(in: CGRect(x: stem, y: middle - radius, width: 2 * radius, height: 2 * radius))
+paint(gBowl, orange, from: CGPoint(x: 0, y: middle + radius), to: CGPoint(x: 0, y: middle - radius))
+paint(bBowl, violet, from: CGPoint(x: 0, y: middle + radius), to: CGPoint(x: 0, y: middle - radius))
+
+// The shared stem, violet up in the b's ascender and orange down in the
+// g's tail, ending in the g's hook.
+let spine = CGMutablePath()
+spine.move(to: CGPoint(x: stem, y: top))
+spine.addLine(to: CGPoint(x: stem, y: tail))
+spine.addArc(center: CGPoint(x: stem - hook, y: tail), radius: hook, startAngle: 0, endAngle: -.pi * 0.95, clockwise: true)
+paint(spine, [violet[0], violet[1], orange[0], orange[1]], from: CGPoint(x: 0, y: top), to: CGPoint(x: 0, y: tail - hook),
+      shadow: false)
 
 NSGraphicsContext.current = nil
 try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: output))
