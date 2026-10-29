@@ -1857,6 +1857,39 @@ impl Repo {
             .collect())
     }
 
+    /// Keep git's commit-graph current: write one (with changed-path
+    /// filters) when the repository has none, else add the commits made
+    /// since as a new layer. History walks, branch lookups and file history
+    /// are many times faster with it; `git gc` and `git maintenance` write
+    /// the same file.
+    pub fn update_commit_graph(&self) -> Result<()> {
+        let info = PathBuf::from(self.git(&["rev-parse", "--git-path", "objects/info"])?.trim());
+        let info = if info.is_absolute() { info } else { self.root.join(info) };
+        let exists = info.join("commit-graph").exists() || info.join("commit-graphs").exists();
+        let mut args = vec!["commit-graph", "write", "--reachable", "--changed-paths"];
+        if exists {
+            args.push("--split");
+        }
+        self.git(&args).map(|_| ())
+    }
+
+    /// Bring the file times cached in the index up to date. Status then
+    /// stops re-reading files whose contents didn't change, which it would
+    /// otherwise do on every refresh.
+    ///
+    /// This lets `git status` take the index lock it calls optional, which
+    /// it skips when anything else holds it, so it never gets in the way.
+    pub fn refresh_index(&self) -> Result<()> {
+        let output = command(&self.root, &["status", "--porcelain", "--untracked-files=no"])
+            .env("GIT_OPTIONAL_LOCKS", "1")
+            .output()
+            .context("failed to run git")?;
+        if !output.status.success() {
+            bail!("git status: {}", String::from_utf8_lossy(&output.stderr).trim());
+        }
+        Ok(())
+    }
+
     /// The repository's working trees, the main one first.
     pub fn worktrees(&self) -> Result<Vec<Worktree>> {
         let current = self.root.canonicalize().unwrap_or_else(|_| self.root.clone());
@@ -2786,6 +2819,54 @@ mod tests {
         t.repo.commit("Unsigned", &["a.txt".into()], false, &unsigned).unwrap();
         let head = t.repo.head().unwrap();
         assert_eq!(t.repo.commit_details(&head).unwrap().signature, Signature::None);
+    }
+
+    /// Timings on a big repository, for performance work:
+    /// `BANYAN_BENCH_REPO=path cargo test --release bench_ -- --ignored --nocapture`
+    #[test]
+    #[ignore = "needs BANYAN_BENCH_REPO"]
+    fn bench_large_repository() {
+        let Some(path) = std::env::var_os("BANYAN_BENCH_REPO") else { return };
+        let repo = Repo::open(Path::new(&path)).unwrap();
+        let time = |label: &str, f: &mut dyn FnMut() -> usize| {
+            let start = std::time::Instant::now();
+            let n = f();
+            eprintln!("{label:<34} {:>8.1} ms  ({n})", start.elapsed().as_secs_f64() * 1000.0);
+        };
+        for limit in [5_000, 20_000, 100_000] {
+            let mut commits = Vec::new();
+            time(&format!("log {limit}"), &mut || {
+                commits = repo.log(None, None, None, limit).unwrap();
+                commits.len()
+            });
+            time(&format!("graph layout {limit}"), &mut || crate::graph::layout(&commits).len());
+        }
+        time("branches", &mut || repo.branches().unwrap().len());
+        time("status", &mut || repo.status().unwrap().len());
+        time("refresh index", &mut || repo.refresh_index().is_ok() as usize);
+        time("status after refreshing the index", &mut || repo.status().unwrap().len());
+        time("stashes", &mut || repo.stashes().unwrap().len());
+        time("shelves", &mut || repo.shelves().len());
+        time("repo state + operation", &mut || repo.operation().is_some() as usize);
+        time("head + current branch", &mut || repo.head().is_some() as usize + repo.current_branch().is_some() as usize);
+        let head = repo.head().unwrap();
+        time("commit details (HEAD)", &mut || repo.commit_details(&head).unwrap().files.len());
+        let old = repo.git(&["rev-list", "-1", "--skip=50000", "HEAD"]).unwrap().trim().to_string();
+        time("commit details (old commit)", &mut || repo.commit_details(&old).unwrap().branches.len());
+        time("file history (Makefile)", &mut || repo.file_history("Makefile").unwrap().len());
+    }
+
+    #[test]
+    fn commit_graph_is_written_then_extended() {
+        let (t, _) = four_commits("commit-graph");
+        let info = t.dir.join(".git/objects/info");
+        t.repo.update_commit_graph().unwrap();
+        assert!(info.join("commit-graph").exists());
+        t.commit("Five.txt", "Five", "Five");
+        t.repo.update_commit_graph().unwrap();
+        assert!(info.join("commit-graphs").exists());
+        t.repo.refresh_index().unwrap();
+        assert_eq!(t.subjects()[0], "Five");
     }
 
     #[test]

@@ -48,6 +48,10 @@ pub struct RepoModel {
     pub refs_version: u64,
     refs_key: Option<RefsKey>,
     refresh_task: Option<Task<()>>,
+    /// When git's commit-graph was last brought up to date.
+    graph_updated: Option<Instant>,
+    index_refreshed: Option<Instant>,
+    _maintenance: Option<Task<()>>,
     _watch_task: Option<Task<()>>,
     _auto_fetch_task: Task<()>,
 }
@@ -66,6 +70,9 @@ struct Snapshot {
     status: Vec<StatusEntry>,
     stashes: Vec<Stash>,
     shelves: Vec<Shelf>,
+    /// Reading the status took long enough that the index's cached file
+    /// times are worth refreshing.
+    slow_status: bool,
 }
 
 impl RepoModel {
@@ -85,12 +92,49 @@ impl RepoModel {
             refs_version: 0,
             refs_key: None,
             refresh_task: None,
+            graph_updated: None,
+            index_refreshed: None,
+            _maintenance: None,
             _watch_task: None,
             _auto_fetch_task: Self::auto_fetch(cx),
         };
         this.refresh(cx);
         this.watch(cx);
+        this.maintain(true, cx);
         this
+    }
+
+    /// Refresh the file times cached in the index in the background, at most
+    /// once a minute.
+    fn refresh_index(&mut self, cx: &mut Context<Self>) {
+        if self.index_refreshed.is_some_and(|at| at.elapsed() < Duration::from_secs(60)) {
+            return;
+        }
+        self.index_refreshed = Some(Instant::now());
+        let repo = self.repo.clone();
+        cx.background_executor().spawn(async move { repo.refresh_index().ok() }).detach();
+    }
+
+    /// Keep git's own indexes helping on big repositories, off the main
+    /// thread: the commit-graph (at most every 30 seconds), and on opening
+    /// the file times cached in the index.
+    fn maintain(&mut self, opening: bool, cx: &mut Context<Self>) {
+        if self.graph_updated.is_some_and(|at| at.elapsed() < Duration::from_secs(30)) {
+            return;
+        }
+        self.graph_updated = Some(Instant::now());
+        let repo = self.repo.clone();
+        self._maintenance = Some(cx.spawn(async move |_, cx| {
+            cx.background_executor()
+                .spawn(async move {
+                    // Failing only means history stays slower; nothing to report.
+                    repo.update_commit_graph().ok();
+                    if opening {
+                        repo.refresh_index().ok();
+                    }
+                })
+                .await;
+        }));
     }
 
     /// Fetch in the background as often as the settings ask.
@@ -169,13 +213,17 @@ impl RepoModel {
             let snapshot = cx
                 .background_executor()
                 .spawn(async move {
+                    let started = Instant::now();
+                    let status = repo.status();
+                    let slow_status = started.elapsed() > Duration::from_millis(100);
                     Snapshot {
                         head: repo.head(),
                         branches: repo.branches().unwrap_or_default(),
                         current_branch: repo.current_branch(),
                         state: repo.repo_state(),
                         operation: repo.operation(),
-                        status: repo.status().unwrap_or_default(),
+                        status: status.unwrap_or_default(),
+                        slow_status,
                         stashes: repo.stashes().unwrap_or_default(),
                         shelves: repo.shelves(),
                     }
@@ -191,6 +239,10 @@ impl RepoModel {
                         .collect(),
                 );
                 if this.refs_key.as_ref() != Some(&refs_key) {
+                    // New commits or refs: add them to the commit-graph.
+                    if this.refs_key.is_some() {
+                        this.maintain(false, cx);
+                    }
                     this.refs_key = Some(refs_key);
                     this.refs_version += 1;
                 }
@@ -201,6 +253,9 @@ impl RepoModel {
                 this.status = snapshot.status;
                 this.stashes = snapshot.stashes;
                 this.shelves = snapshot.shelves;
+                if snapshot.slow_status {
+                    this.refresh_index(cx);
+                }
                 let tracked = this.status.iter().filter(|e| !e.is_untracked()).map(|e| e.path.as_str());
                 if this.changelists.sync(tracked) {
                     this.save_changelists();
