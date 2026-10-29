@@ -982,11 +982,15 @@ impl Repo {
         }
     }
 
-    pub fn push_to(&self, target: &PushTarget, force: bool) -> Result<String> {
+    /// Push the branch, and with `tags` every local tag too.
+    pub fn push_to(&self, target: &PushTarget, force: bool, tags: bool) -> Result<String> {
         let refspec = format!("{}:{}", target.branch, target.remote_branch);
         let mut args = vec!["push"];
         if force {
             args.push("--force-with-lease");
+        }
+        if tags {
+            args.push("--tags");
         }
         if target.is_new {
             args.push("-u");
@@ -997,7 +1001,7 @@ impl Repo {
     }
 
     pub fn push(&self) -> Result<String> {
-        self.push_to(&self.push_target()?, false)
+        self.push_to(&self.push_target()?, false, false)
     }
 
     /// Commits from `from` up to HEAD, oldest first, for an interactive rebase.
@@ -1401,10 +1405,14 @@ mod tests {
         assert_eq!((target.remote.as_str(), target.remote_branch.as_str()), ("origin", "main"));
         assert_eq!(t.repo.outgoing(&target).unwrap().len(), 2);
 
-        t.repo.push_to(&target, false).unwrap();
+        t.repo.push_to(&target, false, false).unwrap();
         let target = t.repo.push_target().unwrap();
         assert!(!target.is_new);
         assert!(t.repo.outgoing(&target).unwrap().is_empty());
+
+        t.repo.create_tag("v1", "HEAD").unwrap();
+        t.repo.push_to(&target, false, true).unwrap();
+        assert!(run(&remote.dir, &["rev-parse", "--verify", "refs/tags/v1"]).is_ok());
 
         t.commit("a.txt", "c\n", "Third");
         let outgoing = t.repo.outgoing(&target).unwrap();

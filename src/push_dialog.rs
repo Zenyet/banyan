@@ -31,6 +31,7 @@ struct PushDialog {
     selected: Option<usize>,
     files: Vec<FileChange>,
     force: bool,
+    tags: bool,
     error: Option<SharedString>,
     loading: bool,
     _task: Task<()>,
@@ -70,6 +71,7 @@ impl PushDialog {
             selected: None,
             files: Vec::new(),
             force: false,
+            tags: false,
             error: None,
             loading: true,
             _task: task,
@@ -98,11 +100,11 @@ impl PushDialog {
 
     fn push(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(target) = self.target.clone() else { return };
-        let force = self.force;
+        let (force, tags) = (self.force, self.tags);
         window.close_dialog(cx);
         let label = if force { "Force Push" } else { "Push" };
         self.model.update(cx, |model, cx| {
-            model.run(label, move |repo| repo.push_to(&target, force), cx)
+            model.run(label, move |repo| repo.push_to(&target, force, tags), cx)
         });
     }
 }
@@ -180,7 +182,7 @@ impl Render for PushDialog {
                     .child(div().truncate().text_color(color).child(file.path.clone()))
             }));
 
-        let can_push = self.target.is_some() && (!self.commits.is_empty() || self.force);
+        let can_push = self.target.is_some() && (!self.commits.is_empty() || self.force || self.tags);
         v_flex()
             .gap_3()
             .child(h_flex().text_sm().child(header))
@@ -217,6 +219,15 @@ impl Render for PushDialog {
                             .checked(self.force)
                             .on_click(cx.listener(|this, checked: &bool, _, cx| {
                                 this.force = *checked;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Checkbox::new("push-tags")
+                            .label("Push tags")
+                            .checked(self.tags)
+                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                this.tags = *checked;
                                 cx.notify();
                             })),
                     )
