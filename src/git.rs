@@ -654,8 +654,8 @@ impl Repo {
         self.git(&args)
     }
 
-    /// Commit whole files plus only some hunks of others. `partial` pairs a
-    /// modified file with the headers of the hunks to leave out.
+    /// Commit whole files plus only some changed lines of others. `partial`
+    /// pairs a modified file with the lines to leave out.
     ///
     /// The index is rebuilt from HEAD: staging done outside the app is not
     /// kept, matching the changelist model of the Commit tab.
@@ -663,7 +663,7 @@ impl Repo {
         &self,
         message: &str,
         full: &[String],
-        partial: &[(String, Vec<String>)],
+        partial: &[(String, Vec<crate::patch::ChangedLine>)],
         amend: bool,
     ) -> Result<String> {
         if self.repo_state() != RepoState::Clean {
@@ -678,7 +678,10 @@ impl Repo {
         for (path, excluded) in partial {
             let diff = self.git(&["diff", "HEAD", "--", path])?;
             let file = crate::patch::parse(&diff);
-            if let Some(patch) = crate::patch::select(&file, |hunk| !excluded.contains(&hunk.header)) {
+            let keep = |hunk: &crate::patch::Hunk, ix: usize| {
+                !excluded.iter().any(|(header, line)| *header == hunk.header && *line == ix)
+            };
+            if let Some(patch) = crate::patch::select(&file, keep) {
                 self.git_with_input(&["apply", "--cached", "--recount", "-"], &patch)?;
             }
         }
@@ -1531,7 +1534,7 @@ mod tests {
 
         // Commit other.txt whole and only the second hunk of f.txt.
         t.repo
-            .commit_partial("Partial", &["other.txt".into()], &[("f.txt".into(), vec![hunks[0].header.clone()])], false)
+            .commit_partial("Partial", &["other.txt".into()], &[("f.txt".into(), excluded_hunk(&hunks[0]))], false)
             .unwrap();
         let committed = t.repo.git(&["show", "HEAD:f.txt"]).unwrap();
         assert!(committed.contains("line 2\n") && committed.contains("line eighteen\n"));
@@ -1539,6 +1542,30 @@ mod tests {
         assert_eq!(std::fs::read_to_string(t.dir.join("f.txt")).unwrap(), changed);
         let status: Vec<_> = t.repo.status().unwrap().into_iter().map(|e| e.path).collect();
         assert_eq!(status, vec!["f.txt"]);
+    }
+
+    fn excluded_hunk(hunk: &crate::patch::Hunk) -> Vec<crate::patch::ChangedLine> {
+        hunk.changes().map(|ix| (hunk.header.clone(), ix)).collect()
+    }
+
+    #[test]
+    fn commit_partial_commits_single_lines() {
+        let t = TempRepo::new("partial-lines");
+        t.commit("f.txt", "a\nb\nc\n", "Base");
+        let changed = "a\nB\nc\nd\n";
+        t.write("f.txt", changed);
+
+        let diff = t.repo.git(&["diff", "HEAD", "--", "f.txt"]).unwrap();
+        let hunk = crate::patch::parse(&diff).hunks.remove(0);
+        // -b +B +d: leave out the removal of b and the addition of d.
+        let excluded: Vec<_> = hunk
+            .changes()
+            .filter(|&ix| hunk.lines[ix] != "+B")
+            .map(|ix| (hunk.header.clone(), ix))
+            .collect();
+        t.repo.commit_partial("Add B", &[], &[("f.txt".into(), excluded)], false).unwrap();
+        assert_eq!(t.repo.git(&["show", "HEAD:f.txt"]).unwrap(), "a\nb\nB\nc\n");
+        assert_eq!(std::fs::read_to_string(t.dir.join("f.txt")).unwrap(), changed);
     }
 
     #[test]

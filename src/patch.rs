@@ -1,5 +1,9 @@
-//! Splitting a single-file unified diff into hunks and putting a subset back
-//! together, for committing only some of a file's changes.
+//! Splitting a single-file unified diff into hunks and putting a subset of
+//! its changed lines back together, for committing only some of a file's
+//! changes.
+
+/// A changed line: its hunk's header and its index into the hunk's `lines`.
+pub type ChangedLine = (String, usize);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Hunk {
@@ -34,6 +38,25 @@ impl Hunk {
             .take_while(|line| line.starts_with(' '))
             .count();
         self.new_start() + leading_context
+    }
+
+    /// Indices into `lines` of the added and removed lines.
+    pub fn changes(&self) -> impl Iterator<Item = usize> + '_ {
+        self.lines
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| is_change(line))
+            .map(|(ix, _)| ix)
+    }
+
+    /// Line in the new file at `lines[ix]`; for a removed line, the line
+    /// that follows it.
+    pub fn new_line_at(&self, ix: usize) -> usize {
+        let before = self.lines[..ix]
+            .iter()
+            .filter(|line| line.starts_with(' ') || line.starts_with('+'))
+            .count();
+        self.new_start() + before
     }
 
     /// First line of the hunk in the new file.
@@ -71,13 +94,56 @@ pub fn parse(patch: &str) -> FilePatch {
     file
 }
 
-/// A patch with only the hunks `keep` accepts, or `None` if none remain.
+fn is_change(line: &str) -> bool {
+    line.starts_with('+') || line.starts_with('-')
+}
+
+/// A patch with only the changed lines `keep` accepts, given a hunk and an
+/// index into its `lines`, or `None` if none remain. A left-out removal
+/// stays as context; a left-out addition is dropped.
 ///
-/// Line numbers in later hunks may be off once earlier hunks are left out;
-/// apply the result with `git apply --recount`, which tolerates that.
-pub fn select(file: &FilePatch, keep: impl Fn(&Hunk) -> bool) -> Option<String> {
-    let hunks: Vec<&Hunk> = file.hunks.iter().filter(|h| keep(h)).collect();
-    if hunks.is_empty() {
+/// Line counts in hunk headers are not adjusted; apply the result with
+/// `git apply --recount`, which recomputes them.
+pub fn select(file: &FilePatch, keep: impl Fn(&Hunk, usize) -> bool) -> Option<String> {
+    let mut body = String::new();
+    for hunk in &file.hunks {
+        let mut lines = Vec::new();
+        let mut kept_any = false;
+        // Whether the previous line made it into the patch, for the
+        // "\ No newline at end of file" marker that follows it.
+        let mut previous_kept = true;
+        for (ix, line) in hunk.lines.iter().enumerate() {
+            if line.starts_with('\\') {
+                if previous_kept {
+                    lines.push(line.clone());
+                }
+                continue;
+            }
+            if !is_change(line) {
+                lines.push(line.clone());
+                previous_kept = true;
+            } else if keep(hunk, ix) {
+                lines.push(line.clone());
+                kept_any = true;
+                previous_kept = true;
+            } else if let Some(text) = line.strip_prefix('-') {
+                lines.push(format!(" {text}"));
+                previous_kept = true;
+            } else {
+                previous_kept = false;
+            }
+        }
+        if !kept_any {
+            continue;
+        }
+        body.push_str(&hunk.header);
+        body.push('\n');
+        for line in lines {
+            body.push_str(&line);
+            body.push('\n');
+        }
+    }
+    if body.is_empty() {
         return None;
     }
     let mut out = String::new();
@@ -85,14 +151,7 @@ pub fn select(file: &FilePatch, keep: impl Fn(&Hunk) -> bool) -> Option<String> 
         out.push_str(line);
         out.push('\n');
     }
-    for hunk in hunks {
-        out.push_str(&hunk.header);
-        out.push('\n');
-        for line in &hunk.lines {
-            out.push_str(line);
-            out.push('\n');
-        }
-    }
+    out.push_str(&body);
     Some(out)
 }
 
@@ -133,10 +192,34 @@ index 1111111..2222222 100644
     fn selects_a_subset() {
         let file = parse(PATCH);
         let second = file.hunks[1].header.clone();
-        let patch = select(&file, |h| h.header == second).unwrap();
+        let patch = select(&file, |h, _| h.header == second).unwrap();
         assert!(patch.starts_with("diff --git a/f.txt b/f.txt\n"));
         assert!(patch.contains("+nine and a half\n"));
         assert!(!patch.contains("+ONE"));
-        assert_eq!(select(&file, |_| false), None);
+        assert!(!patch.contains("fn first()"));
+        assert_eq!(select(&file, |_, _| false), None);
+    }
+
+    #[test]
+    fn selects_single_lines() {
+        let file = parse(PATCH);
+        let first = &file.hunks[0];
+        assert_eq!(first.changes().collect::<Vec<_>>(), vec![0, 1]);
+        assert_eq!(first.new_line_at(1), 1);
+        assert_eq!(file.hunks[1].new_line_at(2), 10);
+        // Keep only the addition: the removal becomes context.
+        let patch = select(&file, |h, ix| h.header == first.header && ix == 1).unwrap();
+        assert!(patch.contains("@@ -1,3 +1,3 @@ fn first()\n one\n+ONE\n two\n"));
+        assert!(!patch.contains("nine and a half"));
+        // Keep only the removal: the addition is dropped.
+        let patch = select(&file, |h, ix| h.header == first.header && ix == 0).unwrap();
+        assert!(patch.contains("fn first()\n-one\n two\n"));
+    }
+
+    #[test]
+    fn no_newline_marker_follows_its_line() {
+        let file = parse("--- a/f\n+++ b/f\n@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n");
+        let patch = select(&file, |_, ix| ix == 0).unwrap();
+        assert!(patch.ends_with("@@ -1 +1 @@\n-old\n\\ No newline at end of file\n"), "{patch}");
     }
 }

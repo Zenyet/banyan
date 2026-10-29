@@ -15,7 +15,7 @@ cargo run -- /path/to/repo   # or run inside a repository; with no repository a 
 - **Branch popup** (toolbar) and branches-tree context menu: checkout, new branch from, merge into current,
   rebase current onto, rename, delete (local, remote, tag).
 - **Commit tab**: changelist-style checkboxes (Changes / Unversioned Files / Merge Conflicts), commit, amend,
-  commit and push, rollback, stash; accept yours / theirs for conflicts; continue / abort merge, rebase, cherry-pick.
+  commit and push, rollback, stash; commit only some hunks or single lines of a file; accept yours / theirs for conflicts; continue / abort merge, rebase, cherry-pick.
 - **Merge tool**: resolve conflicts per hunk (accept yours / theirs / both), apply and mark resolved;
   the merge message is pre-filled from `MERGE_MSG`.
 - **Push dialog**: review outgoing commits and their files, see the target branch (new or tracked), optional force push with lease.

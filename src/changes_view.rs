@@ -17,7 +17,7 @@ use gpui_kit::*;
 
 use crate::diff_pane::DiffPane;
 use crate::git::{RepoState, StatusEntry};
-use crate::patch::{self, Hunk};
+use crate::patch::{self, ChangedLine, Hunk};
 use crate::log_view::panel_header;
 use crate::model::{RepoEvent, RepoModel};
 use crate::ui::{selection_bg, confirm, prompt_text, status_color};
@@ -65,8 +65,10 @@ pub struct ChangesView {
     diff_task: Option<Task<()>>,
     /// Hunks of the selected file, when it can be committed partially.
     hunks: Vec<Hunk>,
-    /// Hunk headers left out of the commit, per file.
-    excluded: HashMap<String, HashSet<String>>,
+    /// Changed lines left out of the commit, per file.
+    excluded: HashMap<String, HashSet<ChangedLine>>,
+    /// Hunks of the selected file showing their lines.
+    expanded: HashSet<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -107,6 +109,7 @@ impl ChangesView {
             diff_task: None,
             hunks: Vec::new(),
             excluded: HashMap::new(),
+            expanded: HashSet::new(),
             _subscriptions: subscriptions,
         };
         this.sync_status(cx);
@@ -161,6 +164,9 @@ impl ChangesView {
     }
 
     fn select(&mut self, path: String, cx: &mut Context<Self>) {
+        if self.selected.as_ref() != Some(&path) {
+            self.expanded.clear();
+        }
         self.selected = Some(path);
         self.load_diff(cx);
         cx.notify();
@@ -189,9 +195,11 @@ impl ChangesView {
                     (Ok(patch), true) => patch::parse(patch).hunks,
                     _ => Vec::new(),
                 };
-                // Forget exclusions of hunks that no longer exist.
+                // Forget exclusions of lines that no longer exist.
+                let lines = changed_lines(&this.hunks);
+                this.expanded.retain(|header| this.hunks.iter().any(|h| &h.header == header));
                 if let Some(excluded) = this.excluded.get_mut(&path) {
-                    excluded.retain(|header| this.hunks.iter().any(|h| &h.header == header));
+                    excluded.retain(|line| lines.contains(line));
                     if excluded.is_empty() {
                         this.excluded.remove(&path);
                     }
@@ -218,31 +226,59 @@ impl ChangesView {
         self.included.contains(path) && self.excluded.get(path).is_some_and(|e| !e.is_empty())
     }
 
-    fn is_hunk_included(&self, path: &str, header: &str) -> bool {
-        self.included.contains(path) && !self.excluded.get(path).is_some_and(|e| e.contains(header))
+    fn is_line_included(&self, path: &str, line: &ChangedLine) -> bool {
+        self.included.contains(path) && !self.excluded.get(path).is_some_and(|e| e.contains(line))
     }
 
-    /// Include or leave out one hunk of the selected file. Checking a hunk of
-    /// an unchecked file includes just that hunk.
-    fn toggle_hunk(&mut self, header: String, cx: &mut Context<Self>) {
+    /// How many of the hunk's changed lines are included, out of how many.
+    fn hunk_inclusion(&self, path: &str, hunk: &Hunk) -> (usize, usize) {
+        let lines: Vec<ChangedLine> = hunk.changes().map(|ix| (hunk.header.clone(), ix)).collect();
+        let included = lines.iter().filter(|line| self.is_line_included(path, line)).count();
+        (included, lines.len())
+    }
+
+    /// Include or leave out some changed lines of the selected file.
+    /// Including lines of an unchecked file includes just those lines.
+    fn set_lines_included(&mut self, lines: Vec<ChangedLine>, include: bool, cx: &mut Context<Self>) {
         let Some(path) = self.selected.clone() else { return };
-        let all: HashSet<String> = self.hunks.iter().map(|h| h.header.clone()).collect();
-        if !self.included.contains(&path) {
-            self.included.insert(path.clone());
-            let mut excluded = all;
-            excluded.remove(&header);
-            self.excluded.insert(path, excluded);
-        } else {
-            let excluded = self.excluded.entry(path.clone()).or_default();
-            if !excluded.remove(&header) {
-                excluded.insert(header);
+        let all = changed_lines(&self.hunks);
+        if self.included.insert(path.clone()) {
+            self.excluded.insert(path.clone(), all.clone());
+        }
+        let excluded = self.excluded.entry(path.clone()).or_default();
+        for line in lines {
+            if include {
+                excluded.remove(&line);
+            } else {
+                excluded.insert(line);
             }
-            if *excluded == all {
-                self.excluded.remove(&path);
-                self.included.remove(&path);
-            } else if excluded.is_empty() {
-                self.excluded.remove(&path);
-            }
+        }
+        if *excluded == all {
+            self.excluded.remove(&path);
+            self.included.remove(&path);
+        } else if excluded.is_empty() {
+            self.excluded.remove(&path);
+        }
+        cx.notify();
+    }
+
+    /// A partly included hunk becomes fully included.
+    fn toggle_hunk(&mut self, hunk: &Hunk, cx: &mut Context<Self>) {
+        let Some(path) = self.selected.clone() else { return };
+        let (included, total) = self.hunk_inclusion(&path, hunk);
+        let lines = hunk.changes().map(|ix| (hunk.header.clone(), ix)).collect();
+        self.set_lines_included(lines, included < total, cx);
+    }
+
+    fn toggle_line(&mut self, line: ChangedLine, cx: &mut Context<Self>) {
+        let Some(path) = self.selected.clone() else { return };
+        let include = !self.is_line_included(&path, &line);
+        self.set_lines_included(vec![line], include, cx);
+    }
+
+    fn toggle_expanded(&mut self, header: String, cx: &mut Context<Self>) {
+        if !self.expanded.remove(&header) {
+            self.expanded.insert(header);
         }
         cx.notify();
     }
@@ -286,7 +322,7 @@ impl ChangesView {
             self.model.update(cx, |_, cx| cx.emit(RepoEvent::OpFailed("No changes selected to commit".into())));
             return;
         }
-        let partial: Vec<(String, Vec<String>)> = self
+        let partial: Vec<(String, Vec<ChangedLine>)> = self
             .excluded
             .iter()
             .filter(|(path, excluded)| self.included.contains(*path) && !excluded.is_empty())
@@ -562,41 +598,104 @@ impl ChangesView {
         .into_any_element()
     }
 
-    /// Checkboxes for the hunks of the selected file, like the gutter
-    /// checkboxes of JetBrains' commit diff.
+    /// Checkboxes for the hunks of the selected file and, once expanded,
+    /// for their lines, like the gutter checkboxes of JetBrains' commit diff.
     fn render_hunks(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(path) = self.selected.clone() else {
             return div().into_any_element();
         };
         let muted = cx.theme().muted_foreground;
-        let rows = self.hunks.iter().enumerate().map(|(ix, hunk)| {
-            let header = hunk.header.clone();
+        let mono = cx.theme().mono_font_family.clone();
+        let mut rows: Vec<AnyElement> = Vec::new();
+        for (ix, hunk) in self.hunks.iter().enumerate() {
             let line = hunk.first_changed_line();
             let context = hunk.context();
-            h_flex()
-                .id(("hunk", ix))
-                .h(px(24.))
-                .px_2()
-                .gap_2()
-                .text_sm()
-                .hover(|s| s.bg(cx.theme().list_hover))
-                .child(
-                    Checkbox::new(("hunk-include", ix))
-                        .checked(self.is_hunk_included(&path, &header))
-                        .on_click(cx.listener(move |this, _: &bool, _, cx| this.toggle_hunk(header.clone(), cx))),
-                )
-                .child(div().flex_none().text_color(muted).child(format!("Line {line}")))
-                .child(div().flex_1().min_w_0().truncate().child(if context.is_empty() {
-                    format!("Change {}", ix + 1)
-                } else {
-                    context.to_string()
-                }))
-                .child(div().flex_none().text_xs().text_color(cx.theme().success).child(format!("+{}", hunk.additions())))
-                .child(div().flex_none().text_xs().text_color(cx.theme().danger).child(format!("−{}", hunk.deletions())))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.diff.update(cx, |diff, cx| diff.scroll_to_line(line, cx))
-                }))
-        });
+            let (included, total) = self.hunk_inclusion(&path, hunk);
+            let expanded = self.expanded.contains(&hunk.header);
+            let toggle = hunk.clone();
+            let header = hunk.header.clone();
+            rows.push(
+                h_flex()
+                    .id(("hunk", ix))
+                    .h(px(24.))
+                    .px_2()
+                    .gap_2()
+                    .text_sm()
+                    .hover(|s| s.bg(cx.theme().list_hover))
+                    .child(
+                        Button::new(("hunk-expand", ix))
+                            .icon(if expanded { IconName::ChevronDown } else { IconName::ChevronRight })
+                            .ghost()
+                            .xsmall()
+                            .tooltip(if expanded { "Hide lines" } else { "Choose lines" })
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                cx.stop_propagation();
+                                this.toggle_expanded(header.clone(), cx)
+                            })),
+                    )
+                    .child(
+                        Checkbox::new(("hunk-include", ix))
+                            .checked(included > 0)
+                            .on_click(cx.listener(move |this, _: &bool, _, cx| this.toggle_hunk(&toggle, cx))),
+                    )
+                    .child(div().flex_none().text_color(muted).child(format!("Line {line}")))
+                    .child(div().flex_1().min_w_0().truncate().child(if context.is_empty() {
+                        format!("Change {}", ix + 1)
+                    } else {
+                        context.to_string()
+                    }))
+                    .when(included > 0 && included < total, |row| {
+                        row.child(div().flex_none().text_xs().text_color(muted).child(format!("{included}/{total} lines")))
+                    })
+                    .child(div().flex_none().text_xs().text_color(cx.theme().success).child(format!("+{}", hunk.additions())))
+                    .child(div().flex_none().text_xs().text_color(cx.theme().danger).child(format!("−{}", hunk.deletions())))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.diff.update(cx, |diff, cx| diff.scroll_to_line(line, cx))
+                    }))
+                    .into_any_element(),
+            );
+            if !expanded {
+                continue;
+            }
+            for line_ix in hunk.changes() {
+                let text = &hunk.lines[line_ix];
+                let key: ChangedLine = (hunk.header.clone(), line_ix);
+                let checked = self.is_line_included(&path, &key);
+                let added = text.starts_with('+');
+                let new_line = hunk.new_line_at(line_ix);
+                rows.push(
+                    h_flex()
+                        .id(SharedString::from(format!("hunk-line-{ix}-{line_ix}")))
+                        .h(px(22.))
+                        .pl(px(44.))
+                        .pr_2()
+                        .gap_2()
+                        .text_xs()
+                        .font_family(mono.clone())
+                        .bg(if added { cx.theme().success.opacity(0.08) } else { cx.theme().danger.opacity(0.08) })
+                        .hover(|s| s.bg(cx.theme().list_hover))
+                        .child(
+                            Checkbox::new(SharedString::from(format!("hunk-line-include-{ix}-{line_ix}")))
+                                .checked(checked)
+                                .on_click(cx.listener(move |this, _: &bool, _, cx| this.toggle_line(key.clone(), cx))),
+                        )
+                        .child(div().flex_none().w(px(36.)).text_color(muted).child(new_line.to_string()))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_color(if added { cx.theme().success } else { cx.theme().danger })
+                                .when(!checked, |text| text.line_through().opacity(0.6))
+                                .child(text.clone()),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.diff.update(cx, |diff, cx| diff.scroll_to_line(new_line, cx))
+                        }))
+                        .into_any_element(),
+                );
+            }
+        }
         v_flex()
             .flex_none()
             .border_b_1()
@@ -609,7 +708,7 @@ impl ChangesView {
                     .text_color(muted)
                     .child("Changes to commit in this file"),
             )
-            .child(div().id("hunks").max_h(px(150.)).overflow_y_scroll().py_1().children(rows))
+            .child(div().id("hunks").max_h(px(240.)).overflow_y_scroll().py_1().children(rows))
             .into_any_element()
     }
 
@@ -742,6 +841,14 @@ impl Render for ChangesView {
                 ),
             )
     }
+}
+
+/// Every changed line of `hunks`.
+fn changed_lines(hunks: &[Hunk]) -> HashSet<ChangedLine> {
+    hunks
+        .iter()
+        .flat_map(|hunk| hunk.changes().map(|ix| (hunk.header.clone(), ix)))
+        .collect()
 }
 
 /// Only plain modifications of tracked files can be split into hunks.
