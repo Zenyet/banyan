@@ -1044,7 +1044,8 @@ impl LogView {
                                     details.parents.iter().map(|p| short(p)).collect::<Vec<_>>().join(", ")
                                 )))
                             })
-                            .child(div().text_xs().text_color(muted).whitespace_normal().child(branches)),
+                            .child(div().text_xs().text_color(muted).whitespace_normal().child(branches))
+                            .when_some(signature_line(&details.signature, cx), |col, line| col.child(line)),
                     )
                     .into_any_element()
             }
@@ -1263,4 +1264,19 @@ fn paint_graph(row: &GraphRow, is_head: bool, bounds: Bounds<Pixels>, window: &m
     } else {
         window.paint_quad(fill(node, color).corner_radii(radius));
     }
+}
+
+/// How a commit's signature checks out, in a line for its details.
+fn signature_line(signature: &crate::git::Signature, cx: &App) -> Option<AnyElement> {
+    use crate::git::Signature;
+    let theme = cx.theme();
+    let (text, color) = match signature {
+        Signature::None => return None,
+        Signature::Good(signer) => (tr!("Signed by {} (verified)", signer), theme.success),
+        Signature::Untrusted(signer) => (tr!("Signed by {} (key not trusted)", signer), theme.warning),
+        Signature::Bad => (tr!("Bad signature").to_string(), theme.danger),
+        Signature::Expired => (tr!("Signature or key expired or revoked").to_string(), theme.warning),
+        Signature::Unchecked => (tr!("Signed, but the signature can't be checked").to_string(), theme.muted_foreground),
+    };
+    Some(div().text_xs().text_color(color).child(text).into_any_element())
 }

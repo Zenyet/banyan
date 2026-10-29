@@ -16,6 +16,7 @@ mod changes_view;
 mod changelists;
 mod clone_dialog;
 mod commit_browser;
+mod commit_options;
 mod compare;
 mod conflict;
 mod conflicts_dialog;

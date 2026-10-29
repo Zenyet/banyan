@@ -137,6 +137,90 @@ pub struct CommitDetails {
     pub message: String,
     pub files: Vec<FileChange>,
     pub branches: Vec<String>,
+    pub signature: Signature,
+}
+
+/// Whether a commit is signed, and how its signature checks out.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Signature {
+    None,
+    /// A good signature by this signer.
+    Good(String),
+    /// A good signature by a key that isn't trusted.
+    Untrusted(String),
+    Bad,
+    /// Expired or revoked signature or key.
+    Expired,
+    /// The signature couldn't be checked, e.g. the key is unknown.
+    Unchecked,
+}
+
+impl Signature {
+    fn parse(code: &str, signer: &str) -> Self {
+        match code.trim() {
+            "G" => Signature::Good(signer.trim().to_string()),
+            "U" => Signature::Untrusted(signer.trim().to_string()),
+            "B" => Signature::Bad,
+            "X" | "Y" | "R" => Signature::Expired,
+            "E" => Signature::Unchecked,
+            _ => Signature::None,
+        }
+    }
+}
+
+/// Choices for one commit beyond its message and files, like JetBrains'
+/// Commit Options.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CommitOptions {
+    /// `Name <email>` to commit as another author.
+    pub author: Option<String>,
+    /// Add a `Signed-off-by` line.
+    pub sign_off: bool,
+    /// Sign the commit; `None` leaves it to `commit.gpgsign`.
+    pub sign: Option<bool>,
+    /// Skip the pre-commit and commit-msg hooks.
+    pub skip_hooks: bool,
+}
+
+impl CommitOptions {
+    fn args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+        if let Some(author) = &self.author {
+            args.push(format!("--author={author}"));
+        }
+        if self.sign_off {
+            args.push("--signoff".into());
+        }
+        match self.sign {
+            Some(true) => args.push("--gpg-sign".into()),
+            Some(false) => args.push("--no-gpg-sign".into()),
+            None => {}
+        }
+        if self.skip_hooks {
+            args.push("--no-verify".into());
+        }
+        args
+    }
+}
+
+/// Whether `author` reads `Name <email>`, as `git commit --author` wants it.
+pub fn is_valid_author(author: &str) -> bool {
+    let author = author.trim();
+    match author.split_once('<') {
+        Some((name, rest)) => !name.trim().is_empty() && rest.ends_with('>') && rest.len() > 1,
+        None => false,
+    }
+}
+
+/// How the repository signs commits.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SigningConfig {
+    /// `commit.gpgsign`: every commit is signed.
+    pub always: bool,
+    /// `user.signingkey`, if set.
+    pub key: Option<String>,
+    /// `gpg.format`: `openpgp` (the default), `ssh` or `x509`.
+    pub format: String,
 }
 
 #[derive(Clone, Debug)]
@@ -693,7 +777,8 @@ impl Repo {
     }
 
     pub fn commit_details(&self, id: &str) -> Result<CommitDetails> {
-        let format = format!("--format=%H{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%at{FIELD}%cn{FIELD}%ct{FIELD}%B");
+        let format =
+            format!("--format=%H{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%at{FIELD}%cn{FIELD}%ct{FIELD}%G?{FIELD}%GS{FIELD}%B");
         let out = self.git(&["show", "-s", &format, id])?;
         let mut fields = out.split(FIELD);
         let mut next = || fields.next().unwrap_or_default().to_string();
@@ -704,6 +789,7 @@ impl Repo {
         let author_time = next().parse().unwrap_or(0);
         let committer = next();
         let commit_time = next().parse().unwrap_or(0);
+        let signature = Signature::parse(&next(), &next());
         let message = next().trim_end().to_string();
         let files = self.commit_files(&id, parents.first().map(String::as_str))?;
         let branches = self
@@ -721,6 +807,7 @@ impl Repo {
             message,
             files,
             branches,
+            signature,
         })
     }
 
@@ -908,16 +995,18 @@ impl Repo {
     }
 
     /// Commit exactly `paths` with their working tree content, like a JetBrains changelist.
-    pub fn commit(&self, message: &str, paths: &[String], amend: bool) -> Result<String> {
+    pub fn commit(&self, message: &str, paths: &[String], amend: bool, options: &CommitOptions) -> Result<String> {
         if !paths.is_empty() {
             let mut add = vec!["add", "-A", "--"];
             add.extend(paths.iter().map(String::as_str));
             self.git(&add)?;
         }
+        let extra = options.args();
         let mut args = vec!["commit", "-m", message];
         if amend {
             args.push("--amend");
         }
+        args.extend(extra.iter().map(String::as_str));
         if !paths.is_empty() && self.has_head() && self.repo_state() == RepoState::Clean {
             args.push("--only");
             args.push("--");
@@ -937,6 +1026,7 @@ impl Repo {
         full: &[String],
         partial: &[(String, Vec<crate::patch::ChangedLine>)],
         amend: bool,
+        options: &CommitOptions,
     ) -> Result<String> {
         if self.repo_state() != RepoState::Clean {
             bail!("partial commits are not possible while a merge or rebase is in progress");
@@ -957,11 +1047,39 @@ impl Repo {
                 self.git_with_input(&["apply", "--cached", "--recount", "-"], &patch)?;
             }
         }
+        let extra = options.args();
         let mut args = vec!["commit", "-m", message];
         if amend {
             args.push("--amend");
         }
+        args.extend(extra.iter().map(String::as_str));
         self.git(&args)
+    }
+
+    /// The repository's signing settings, local or global.
+    pub fn signing(&self) -> SigningConfig {
+        let get = |key: &str| {
+            self.git(&["config", "--get", key]).ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+        };
+        SigningConfig {
+            always: get("commit.gpgsign").is_some_and(|v| v == "true"),
+            key: get("user.signingkey"),
+            format: get("gpg.format").unwrap_or_else(|| "openpgp".into()),
+        }
+    }
+
+    /// Sign every commit in this repository, or not.
+    pub fn set_always_sign(&self, always: bool) -> Result<String> {
+        self.git(&["config", "--local", "commit.gpgsign", if always { "true" } else { "false" }])
+    }
+
+    /// The key this repository signs with; empty uses the default key.
+    pub fn set_signing_key(&self, key: &str) -> Result<String> {
+        if key.trim().is_empty() {
+            self.git(&["config", "--local", "--unset", "user.signingkey"]).or_else(|_| Ok(String::new()))
+        } else {
+            self.git(&["config", "--local", "user.signingkey", key.trim()])
+        }
     }
 
     /// Run git with `input` on stdin.
@@ -2604,6 +2722,73 @@ mod tests {
     }
 
     #[test]
+    fn commit_options_set_author_sign_off_and_skip_hooks() {
+        let t = TempRepo::new("commit-options");
+        t.commit("a.txt", "a\n", "First");
+        t.write("a.txt", "b\n");
+        let options = CommitOptions {
+            author: Some("Pair Programmer <pair@example.com>".into()),
+            sign_off: true,
+            ..CommitOptions::default()
+        };
+        t.repo.commit("Second", &["a.txt".into()], false, &options).unwrap();
+        let log = t.repo.git(&["log", "-1", "--format=%an <%ae>%n%B"]).unwrap();
+        assert!(log.starts_with("Pair Programmer <pair@example.com>"), "{log}");
+        assert!(log.contains("Signed-off-by: Test <t@example.com>"), "{log}");
+
+        // A failing pre-commit hook stops a commit unless hooks are skipped.
+        let hook = t.dir.join(".git/hooks/pre-commit");
+        std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        t.write("a.txt", "c\n");
+        assert!(t.repo.commit("Third", &["a.txt".into()], false, &CommitOptions::default()).is_err());
+        let skip = CommitOptions { skip_hooks: true, ..CommitOptions::default() };
+        t.repo.commit("Third", &["a.txt".into()], false, &skip).unwrap();
+        assert_eq!(t.subjects()[0], "Third");
+
+        assert!(is_valid_author("Ada Park <ada@example.com>"));
+        assert!(!is_valid_author("ada@example.com"));
+        assert!(!is_valid_author(" <ada@example.com>"));
+    }
+
+    #[test]
+    fn signed_commits_show_their_signature() {
+        // SSH signing needs only ssh-keygen, unlike GPG.
+        let t = TempRepo::new("signing");
+        let key = t.dir.join(".git/test-key");
+        if run(&t.dir, &["version"]).is_err()
+            || std::process::Command::new("ssh-keygen")
+                .args(["-q", "-t", "ed25519", "-N", "", "-C", "t@example.com", "-f"])
+                .arg(&key)
+                .status()
+                .map_or(true, |s| !s.success())
+        {
+            return;
+        }
+        let public = std::fs::read_to_string(key.with_extension("pub")).unwrap();
+        let allowed = t.dir.join(".git/allowed-signers");
+        std::fs::write(&allowed, format!("t@example.com {public}")).unwrap();
+        t.repo.git(&["config", "gpg.format", "ssh"]).unwrap();
+        t.repo.git(&["config", "gpg.ssh.allowedSignersFile", &allowed.display().to_string()]).unwrap();
+        t.repo.set_signing_key(&key.with_extension("pub").display().to_string()).unwrap();
+        t.repo.set_always_sign(true).unwrap();
+        let signing = t.repo.signing();
+        assert!(signing.always && signing.key.is_some() && signing.format == "ssh");
+
+        t.write("a.txt", "a\n");
+        t.repo.commit("Signed", &["a.txt".into()], false, &CommitOptions::default()).unwrap();
+        let head = t.repo.head().unwrap();
+        assert!(matches!(t.repo.commit_details(&head).unwrap().signature, Signature::Good(_)));
+
+        t.write("a.txt", "b\n");
+        let unsigned = CommitOptions { sign: Some(false), ..CommitOptions::default() };
+        t.repo.commit("Unsigned", &["a.txt".into()], false, &unsigned).unwrap();
+        let head = t.repo.head().unwrap();
+        assert_eq!(t.repo.commit_details(&head).unwrap().signature, Signature::None);
+    }
+
+    #[test]
     fn init_makes_a_folder_a_repository() {
         let dir = std::env::temp_dir().join(format!("banyan-test-init-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("sub")).unwrap();
@@ -2690,7 +2875,7 @@ mod tests {
         assert!(status.iter().any(|e| e.path == "new.txt" && e.is_untracked()));
 
         t.repo
-            .commit("Selected", &["a.txt".into(), "new.txt".into()], false)
+            .commit("Selected", &["a.txt".into(), "new.txt".into()], false, &CommitOptions::default())
             .unwrap();
         let remaining: Vec<_> = t.repo.status().unwrap().into_iter().map(|e| e.path).collect();
         assert_eq!(remaining, vec!["skip.txt"]);
@@ -2798,7 +2983,7 @@ mod tests {
 
         // Commit other.txt whole and only the second hunk of f.txt.
         t.repo
-            .commit_partial("Partial", &["other.txt".into()], &[("f.txt".into(), excluded_hunk(&hunks[0]))], false)
+            .commit_partial("Partial", &["other.txt".into()], &[("f.txt".into(), excluded_hunk(&hunks[0]))], false, &CommitOptions::default())
             .unwrap();
         let committed = t.repo.git(&["show", "HEAD:f.txt"]).unwrap();
         assert!(committed.contains("line 2\n") && committed.contains("line eighteen\n"));
@@ -2827,7 +3012,7 @@ mod tests {
             .filter(|&ix| hunk.lines[ix] != "+B")
             .map(|ix| (hunk.header.clone(), ix))
             .collect();
-        t.repo.commit_partial("Add B", &[], &[("f.txt".into(), excluded)], false).unwrap();
+        t.repo.commit_partial("Add B", &[], &[("f.txt".into(), excluded)], false, &CommitOptions::default()).unwrap();
         assert_eq!(t.repo.git(&["show", "HEAD:f.txt"]).unwrap(), "a\nb\nB\nc\n");
         assert_eq!(std::fs::read_to_string(t.dir.join("f.txt")).unwrap(), changed);
     }

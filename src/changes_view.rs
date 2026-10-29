@@ -17,7 +17,7 @@ use gpui_kit::*;
 
 use crate::changelists::Changelists;
 use crate::diff_pane::DiffPane;
-use crate::git::{RepoState, StatusEntry};
+use crate::git::{CommitOptions, RepoState, StatusEntry};
 use crate::patch::{self, ChangedLine, Hunk};
 use crate::log_view::panel_header;
 use crate::model::{RepoEvent, RepoModel};
@@ -69,6 +69,8 @@ pub struct ChangesView {
     selected: Option<String>,
     message: Entity<TextareaState>,
     amend: bool,
+    /// Author, sign-off, signing and hooks for the next commit.
+    options: CommitOptions,
     diff: Entity<DiffPane>,
     diff_task: Option<Task<()>>,
     /// Hunks of the selected file, when it can be committed partially.
@@ -117,6 +119,7 @@ impl ChangesView {
             selected: None,
             message,
             amend: false,
+            options: CommitOptions::default(),
             diff,
             diff_task: None,
             hunks: Vec::new(),
@@ -355,6 +358,9 @@ impl ChangesView {
             .filter(|p| !partial.iter().any(|(path, _)| path == p))
             .collect();
         let amend = self.amend;
+        let options = self.options.clone();
+        // Like JetBrains, the author applies to one commit only.
+        self.options.author = None;
         let label = if push { tr!("Commit and Push") } else { tr!("Commit") };
         Settings::add_message(message.clone());
         self.excluded.clear();
@@ -363,9 +369,9 @@ impl ChangesView {
                 label,
                 move |repo| {
                     if partial.is_empty() {
-                        repo.commit(&message, &full, amend)?;
+                        repo.commit(&message, &full, amend, &options)?;
                     } else {
-                        repo.commit_partial(&message, &full, &partial, amend)?;
+                        repo.commit_partial(&message, &full, &partial, amend, &options)?;
                     }
                     if push {
                         repo.push()?;
@@ -919,6 +925,27 @@ impl ChangesView {
             .into_any_element()
     }
 
+    /// What the next commit does beyond the defaults, e.g. "Author: Ada · Sign-off".
+    fn options_summary(&self) -> Option<String> {
+        let o = &self.options;
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(author) = &o.author {
+            parts.push(tr!("Author: {}", author.split('<').next().unwrap_or(author).trim()));
+        }
+        if o.sign_off {
+            parts.push(tr!("Sign-off").into());
+        }
+        match o.sign {
+            Some(true) => parts.push(tr!("Signed").into()),
+            Some(false) => parts.push(tr!("Not signed").into()),
+            None => {}
+        }
+        if o.skip_hooks {
+            parts.push(tr!("Hooks skipped").into());
+        }
+        (!parts.is_empty()).then(|| parts.join(" · "))
+    }
+
     fn render_commit_box(&self, cx: &mut Context<Self>) -> AnyElement {
         v_flex()
             .flex_none()
@@ -927,6 +954,9 @@ impl ChangesView {
             .border_t_1()
             .border_color(cx.theme().border)
             .child(Textarea::new(&self.message))
+            .when_some(self.options_summary(), |col, summary| {
+                col.child(div().text_xs().text_color(cx.theme().warning).truncate().child(summary))
+            })
             .child(
                 h_flex()
                     .gap_2()
@@ -937,6 +967,29 @@ impl ChangesView {
                             .on_click(cx.listener(|this, checked: &bool, window, cx| this.set_amend(*checked, window, cx))),
                     )
                     .child(self.render_message_history())
+                    .child(
+                        Button::new("commit-options")
+                            .icon(IconName::Settings2)
+                            .ghost()
+                            .xsmall()
+                            .tooltip(tr!("Commit Options…"))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                let view = cx.entity().downgrade();
+                                crate::commit_options::open(
+                                    this.model.clone(),
+                                    this.options.clone(),
+                                    move |options, cx| {
+                                        view.update(cx, |this, cx| {
+                                            this.options = options;
+                                            cx.notify();
+                                        })
+                                        .ok();
+                                    },
+                                    window,
+                                    cx,
+                                );
+                            })),
+                    )
                     .child(div().flex_1())
                     .child(
                         Button::new("commit-push")
