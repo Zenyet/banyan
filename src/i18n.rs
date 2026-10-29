@@ -26,7 +26,8 @@ static CHINESE: AtomicBool = AtomicBool::new(false);
 
 static TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| zh::TABLE.iter().copied().collect());
 
-/// Use the language the settings ask for: `en`, `zh`, or the system's.
+/// Use the language the settings ask for, `en` or `zh`; anything else
+/// (nothing chosen yet) means the system's.
 pub fn apply(setting: &str) {
     let chinese = match setting {
         "zh" => true,

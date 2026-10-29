@@ -123,9 +123,13 @@ impl SettingsWindow {
                 SettingItem::new(
                     tr!("Language"),
                     choice(
-                        [("system", tr!("Same as the system")), ("en", "English"), ("zh", "简体中文")]
-                            .map(|(key, label)| (key.to_string(), label.to_string())),
-                        |s| s.language.clone(),
+                        [("en", "English"), ("zh", "简体中文")].map(|(key, label)| (key.to_string(), label.to_string())),
+                        // Until one is chosen, the system's language is the one in use.
+                        |s| match s.language.as_str() {
+                            "en" | "zh" => s.language.clone(),
+                            _ if crate::i18n::is_chinese() => "zh".into(),
+                            _ => "en".into(),
+                        },
                         |s, value| s.language = value.to_string(),
                     ),
                 )

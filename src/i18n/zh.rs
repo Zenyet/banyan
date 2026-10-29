@@ -337,7 +337,6 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Font size", "字号"),
     ("Size of the interface text; diffs scale with it.", "界面文字大小；差异视图也随之缩放。"),
     ("Language", "语言"),
-    ("Same as the system", "跟随系统"),
     ("Menus in the menu bar change after a restart.", "菜单栏中的菜单在重启后切换。"),
     ("Log", "日志"),
     ("Commit dates", "提交日期"),

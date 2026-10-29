@@ -54,7 +54,8 @@ pub struct Settings {
     pub unified_diff: bool,
     /// Leave whitespace-only changes out of diffs (`git diff -w`).
     pub ignore_whitespace: bool,
-    /// Interface language: `system`, `en` or `zh`.
+    /// Interface language: `en` or `zh`; empty until chosen, when the
+    /// system's language decides.
     pub language: String,
     /// How many commits the log loads at a time.
     pub log_page_size: usize,
@@ -74,7 +75,7 @@ impl Default for Settings {
             auto_fetch_minutes: 0,
             unified_diff: false,
             ignore_whitespace: false,
-            language: "system".into(),
+            language: String::new(),
             log_page_size: 5000,
             recent: Vec::new(),
             messages: Vec::new(),
