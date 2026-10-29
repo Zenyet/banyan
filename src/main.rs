@@ -41,7 +41,7 @@ use crate::git::Repo;
 use crate::model::RepoModel;
 use crate::workspace::Workspace;
 
-actions!(gitbrains, [Quit, OpenRepository, CloseWindow, OpenSettings]);
+actions!(banyan, [Quit, OpenRepository, CloseWindow, OpenSettings]);
 
 fn main() {
     // Git runs this executable to ask for credentials; answer and exit.
@@ -80,11 +80,11 @@ fn main() {
             ]);
             cx.set_menus(vec![
                 Menu {
-                    name: "GitBrains".into(),
+                    name: "Banyan".into(),
                     items: vec![
                         MenuItem::action("Settings…", OpenSettings),
                         MenuItem::separator(),
-                        MenuItem::action("Quit GitBrains", Quit),
+                        MenuItem::action("Quit Banyan", Quit),
                     ],
                     disabled: false,
                 },
@@ -211,7 +211,7 @@ fn open_welcome_window(cx: &mut App) {
         ..Default::default()
     };
     gpui_kit::open_window(options, cx, |window, cx| {
-        window.set_window_title("Welcome to GitBrains");
+        window.set_window_title("Welcome to Banyan");
         cx.new(|_| Welcome)
     })
     .expect("failed to open window");
@@ -228,7 +228,7 @@ impl Render for Welcome {
             .gap_4()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(div().text_2xl().child("GitBrains"))
+            .child(div().text_2xl().child("Banyan"))
             .child(
                 div()
                     .text_sm()

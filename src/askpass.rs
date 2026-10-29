@@ -26,7 +26,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 /// Set in git's environment; its presence puts this executable in client mode.
-pub const SOCKET_ENV: &str = "GITBRAINS_ASKPASS_SOCKET";
+pub const SOCKET_ENV: &str = "BANYAN_ASKPASS_SOCKET";
 
 /// How long git may wait for the user before the prompt counts as cancelled.
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(600);
@@ -73,7 +73,7 @@ fn ask(socket: &Path, prompt: &str) -> Option<String> {
 
 /// Listen for prompts; each arrives on the returned channel.
 pub fn start_server() -> std::io::Result<Receiver<Request>> {
-    let path = std::env::temp_dir().join(format!("gitbrains-askpass-{}.sock", std::process::id()));
+    let path = std::env::temp_dir().join(format!("banyan-askpass-{}.sock", std::process::id()));
     let (tx, rx) = mpsc::channel();
     serve(&path, tx)?;
     SOCKET.set(path).ok();
@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn prompt_round_trip() {
-        let path = std::env::temp_dir().join(format!("gitbrains-askpass-test-{}.sock", std::process::id()));
+        let path = std::env::temp_dir().join(format!("banyan-askpass-test-{}.sock", std::process::id()));
         let (tx, rx) = mpsc::channel();
         serve(&path, tx).unwrap();
         std::thread::spawn(move || {

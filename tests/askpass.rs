@@ -1,4 +1,4 @@
-//! Git asks for credentials through the gitbrains executable in askpass mode.
+//! Git asks for credentials through the banyan executable in askpass mode.
 
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::os::unix::net::UnixListener;
@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 
 #[test]
 fn git_gets_credentials_from_the_app() {
-    let socket = std::env::temp_dir().join(format!("gitbrains-askpass-it-{}.sock", std::process::id()));
+    let socket = std::env::temp_dir().join(format!("banyan-askpass-it-{}.sock", std::process::id()));
     std::fs::remove_file(&socket).ok();
     let listener = UnixListener::bind(&socket).unwrap();
     // Stand in for the app: answer the username and password prompts.
@@ -25,8 +25,8 @@ fn git_gets_credentials_from_the_app() {
 
     let mut git = Command::new("git")
         .args(["-c", "credential.helper=", "credential", "fill"])
-        .env("GIT_ASKPASS", env!("CARGO_BIN_EXE_gitbrains"))
-        .env("GITBRAINS_ASKPASS_SOCKET", &socket)
+        .env("GIT_ASKPASS", env!("CARGO_BIN_EXE_banyan"))
+        .env("BANYAN_ASKPASS_SOCKET", &socket)
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

@@ -96,7 +96,7 @@ impl Workspace {
             }),
         ];
         let name = model.read(cx).repo.name();
-        window.set_window_title(&format!("{name} – GitBrains"));
+        window.set_window_title(&format!("{name} – Banyan"));
         let focus = cx.focus_handle();
         focus.focus(window, cx);
         Self {

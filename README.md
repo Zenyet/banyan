@@ -1,6 +1,8 @@
-# GitBrains
+# Banyan
 
 A JetBrains-style Git desktop client built with [GPUI](https://gpui.rs) and [GPUI Kit](https://gpui-kit.com).
+Named after the banyan tree, whose branches drop roots that grow into new trunks, as branches grow apart
+and merge back. (It was called GitBrains; its settings are carried over on first launch.)
 
 ```sh
 cargo run -- /path/to/repo   # or run inside a repository; with no repository a welcome window opens
@@ -25,7 +27,7 @@ cargo run -- /path/to/repo   # or run inside a repository; with no repository a 
 - **File history** and **Annotate** (git blame with age shading), from the changed-files tree or the Commit tab.
 - **Compare with Current** for any branch, and a **stash viewer** with each stash's files and diff.
 - **Git console** tab: every git command run by your actions, with output and timing.
-- **Git Authentication** dialog for HTTPS credentials and ssh passphrases (GitBrains acts as `GIT_ASKPASS` / `SSH_ASKPASS`).
+- **Git Authentication** dialog for HTTPS credentials and ssh passphrases (Banyan acts as `GIT_ASKPASS` / `SSH_ASKPASS`).
 - **Clone Repository…** and **Manage Remotes…** from the repository menu.
 - Refreshes automatically when files, the index or refs change (git-ignored files are skipped).
 - Fetch / Pull / Push, stash pop / apply / drop.
@@ -33,7 +35,7 @@ cargo run -- /path/to/repo   # or run inside a repository; with no repository a 
   the default Update Project method, background fetch, side-by-side or unified diffs, and how many commits the log loads.
 - Shortcuts: ⌘K commit (⌘↩ in the message), ⇧⌘K push, ⌘T update project, ⌘9 / ⌘0 Log / Commit, ⌘R refresh, ⌘, settings.
 - The log loads 5000 commits at a time by default, more when you scroll to the end; Home / End / PageUp / PageDown in the commit list.
-- Settings, recently opened repositories and recent commit messages are kept in `~/Library/Application Support/GitBrains/settings`.
+- Settings, recently opened repositories and recent commit messages are kept in `~/Library/Application Support/Banyan/settings`.
 
 ## Layout
 
@@ -70,7 +72,7 @@ cargo test   # graph layout, ref parsing, and git operations against throwaway r
 ## Packaging
 
 ```sh
-scripts/bundle.sh   # builds target/release/GitBrains.app (icon, Info.plist, ad-hoc signature)
+scripts/bundle.sh   # builds target/release/Banyan.app (icon, Info.plist, ad-hoc signature)
 ```
 
 The app is about 27 MB. Diffs are syntax-highlighted for common languages; to also highlight Kotlin, Swift, C#,

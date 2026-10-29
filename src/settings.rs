@@ -1,9 +1,9 @@
 //! Persisted settings: the preferences in the Settings dialog, recently
 //! opened repositories and recent commit messages.
-//! Stored as `key=value` lines in ~/Library/Application Support/GitBrains/settings,
+//! Stored as `key=value` lines in ~/Library/Application Support/Banyan/settings,
 //! and kept in memory so that views can read them while rendering.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, RwLock};
 
 const MAX_RECENT: usize = 10;
@@ -100,11 +100,23 @@ fn unescape(value: &str) -> String {
 
 fn file() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join("Library/Application Support/GitBrains/settings"))
+    Some(PathBuf::from(home).join("Library/Application Support/Banyan/settings"))
+}
+
+/// The app was called GitBrains; read its settings if Banyan has none yet.
+fn read_or_migrate(path: &Path) -> Option<String> {
+    if let Ok(text) = std::fs::read_to_string(path) {
+        return Some(text);
+    }
+    let old = path.parent()?.parent()?.join("GitBrains/settings");
+    let text = std::fs::read_to_string(old).ok()?;
+    std::fs::create_dir_all(path.parent()?).ok()?;
+    std::fs::write(path, &text).ok()?;
+    Some(text)
 }
 
 static CURRENT: LazyLock<RwLock<Settings>> = LazyLock::new(|| {
-    let text = file().and_then(|path| std::fs::read_to_string(path).ok()).unwrap_or_default();
+    let text = file().and_then(|path| read_or_migrate(&path)).unwrap_or_default();
     RwLock::new(Settings::parse(&text))
 });
 

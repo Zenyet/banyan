@@ -786,7 +786,7 @@ impl Repo {
     /// Stash local changes, check out, and bring the changes back, like
     /// JetBrains' "Smart Checkout".
     pub fn smart_checkout(&self, target: &str, remote: bool) -> Result<String> {
-        self.git(&["stash", "push", "--include-untracked", "-m", &format!("GitBrains: smart checkout of {target}")])?;
+        self.git(&["stash", "push", "--include-untracked", "-m", &format!("Banyan: smart checkout of {target}")])?;
         if let Err(err) = self.checkout_any(target, remote) {
             // Put things back the way they were.
             self.git(&["stash", "pop", "--index"]).ok();
@@ -892,7 +892,7 @@ impl Repo {
     /// Kept inside the repository's git directory so concurrent rebases of
     /// different repositories never share it.
     fn rebase_files_dir(&self) -> Result<PathBuf> {
-        Ok(self.git_dir()?.join("gitbrains-rebase"))
+        Ok(self.git_dir()?.join("banyan-rebase"))
     }
 
     fn abort_op(&self, state: RepoState) -> Result<String> {
@@ -1333,7 +1333,7 @@ mod tests {
     impl TempRepo {
         fn new(name: &str) -> Self {
             let dir = std::env::temp_dir().join(format!(
-                "gitbrains-test-{name}-{}-{:?}",
+                "banyan-test-{name}-{}-{:?}",
                 std::process::id(),
                 std::time::SystemTime::now()
             ));

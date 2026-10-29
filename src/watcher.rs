@@ -106,7 +106,7 @@ mod tests {
 
     #[test]
     fn reports_worktree_and_ref_changes() {
-        let dir = std::env::temp_dir().join(format!("gitbrains-watch-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("banyan-watch-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let dir = dir.canonicalize().unwrap();
         let git = |args: &[&str]| {

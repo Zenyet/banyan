@@ -1,4 +1,4 @@
-// Draws the GitBrains app icon: a big bare tree with a few thick limbs
+// Draws the Banyan app icon: a big bare tree with a few thick limbs
 // forking against an overcast sky, as git history branches. The tree is
 // grown from a fixed seed, so every run draws the same one.
 // Usage: swift scripts/make_icon.swift <output.png>
