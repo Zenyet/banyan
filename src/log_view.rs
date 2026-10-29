@@ -96,7 +96,6 @@ pub struct LogView {
     load_more_scheduled: bool,
     log_task: Option<Task<()>>,
     details_task: Option<Task<()>>,
-    diff_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -172,7 +171,6 @@ impl LogView {
             load_more_scheduled: false,
             log_task: None,
             details_task: None,
-            diff_task: None,
             _subscriptions: subscriptions,
         };
         this.rebuild_branches(cx);
@@ -520,19 +518,8 @@ impl LogView {
             Some(orig) => format!("{orig} → {}  ({})", file.path, short(&details.id)),
             None => format!("{}  ({})", file.path, short(&details.id)),
         };
-        self.diff_task = Some(cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_executor()
-                .spawn(async move { repo.commit_file_diff(&details, &file) })
-                .await;
-            this.update(cx, |this, cx| {
-                this.diff.update(cx, |diff, cx| match result {
-                    Ok(patch) => diff.show_patch(title, &patch, cx),
-                    Err(err) => diff.show_message(Some(title.into()), format!("{err:#}"), cx),
-                })
-            })
-            .ok();
-        }));
+        self.diff
+            .update(cx, |diff, cx| diff.load(title, move || repo.commit_file_diff(&details, &file), cx));
     }
 
     fn render_branches(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -961,6 +948,10 @@ impl LogView {
                 let (m, p) = (model.clone(), path.clone());
                 let menu = menu.item(PopupMenuItem::new("Show History").on_click(move |_, window, cx| {
                     crate::history::show_history(m.clone(), p.clone(), window, cx)
+                }));
+                let (m, p, r) = (model.clone(), path.clone(), rev.clone());
+                let menu = menu.item(PopupMenuItem::new("Compare with Local").on_click(move |_, window, cx| {
+                    crate::worktree_diff::open_between(m.clone(), r.clone(), None, Some(p.clone()), window, cx)
                 }));
                 if change.status == 'D' {
                     return menu;

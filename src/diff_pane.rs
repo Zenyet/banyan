@@ -7,15 +7,24 @@ use gpui_kit::component::{
     h_flex, v_flex,
 };
 use gpui_kit::assets::IconName;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use std::sync::Arc;
+
 use crate::settings::Settings;
+
+/// Makes the patch shown, again whenever a diff option changes.
+type Loader = Arc<dyn Fn() -> anyhow::Result<String> + Send + Sync>;
 
 pub struct DiffPane {
     state: Entity<DiffState>,
     title: Option<SharedString>,
     message: Option<SharedString>,
     mode: DiffMode,
+    /// What [`Self::load`] last showed, and the whitespace option it used.
+    loader: Option<(Loader, bool)>,
+    _load: Option<Task<()>>,
     _relayout: Option<Task<()>>,
     _observe_state: Subscription,
 }
@@ -32,12 +41,39 @@ impl DiffPane {
             title: None,
             message: None,
             mode,
+            loader: None,
+            _load: None,
             _relayout: None,
         }
     }
 
-    pub fn show_patch(&mut self, title: impl Into<SharedString>, patch: &str, cx: &mut Context<Self>) {
+    /// Show the patch `load` makes, off the main thread. It runs again when
+    /// the whitespace option changes.
+    pub fn load(
+        &mut self,
+        title: impl Into<SharedString>,
+        load: impl Fn() -> anyhow::Result<String> + Send + Sync + 'static,
+        cx: &mut Context<Self>,
+    ) {
         self.title = Some(title.into());
+        self.run_loader(Arc::new(load), cx);
+    }
+
+    fn run_loader(&mut self, loader: Loader, cx: &mut Context<Self>) {
+        let whitespace = Settings::read(|s| s.ignore_whitespace);
+        self.loader = Some((loader.clone(), whitespace));
+        let title = self.title.clone().unwrap_or_default();
+        self._load = Some(cx.spawn(async move |this, cx| {
+            let result = cx.background_executor().spawn(async move { loader() }).await;
+            this.update(cx, |this, cx| match result {
+                Ok(patch) => this.set_patch(&patch, cx),
+                Err(err) => this.set_message(Some(title), format!("{err:#}"), cx),
+            })
+            .ok();
+        }));
+    }
+
+    fn set_patch(&mut self, patch: &str, cx: &mut Context<Self>) {
         match DiffFile::parse(patch) {
             Ok(files) if files.is_empty() => {
                 self.message = Some("No differences".into());
@@ -73,6 +109,12 @@ impl DiffPane {
     }
 
     pub fn show_message(&mut self, title: Option<SharedString>, message: impl Into<SharedString>, cx: &mut Context<Self>) {
+        self.loader = None;
+        self._load = None;
+        self.set_message(title, message, cx);
+    }
+
+    fn set_message(&mut self, title: Option<SharedString>, message: impl Into<SharedString>, cx: &mut Context<Self>) {
         self.title = title;
         self.message = Some(message.into());
         self.state.update(cx, |state, cx| state.set_files(Vec::new(), cx));
@@ -108,6 +150,12 @@ impl Render for DiffPane {
             self.mode = mode;
             self.state.update(cx, |state, cx| state.set_mode(mode, cx));
         }
+        let ignore_whitespace = Settings::read(|s| s.ignore_whitespace);
+        if let Some((loader, used)) = self.loader.clone()
+            && used != ignore_whitespace
+        {
+            self.run_loader(loader, cx);
+        }
         let toolbar = h_flex()
             .flex_none()
             .h(px(32.))
@@ -142,6 +190,19 @@ impl Render for DiffPane {
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.state.update(cx, |state, cx| state.next_change(cx))
                     })),
+            )
+            .child(
+                Button::new("diff-whitespace")
+                    .label("Ignore Whitespace")
+                    // Toggled ghost buttons hardly show it in the dark theme.
+                    .when(ignore_whitespace, |button| button.icon(IconName::Check))
+                    .ghost()
+                    .xsmall()
+                    .toggled(ignore_whitespace)
+                    .tooltip("Leave out changes that only touch whitespace")
+                    .on_click(|_, _, cx| {
+                        crate::settings_window::change(cx, |s| s.ignore_whitespace = !s.ignore_whitespace)
+                    }),
             )
             .child(
                 Button::new("diff-split")

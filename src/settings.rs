@@ -52,6 +52,8 @@ pub struct Settings {
     pub auto_fetch_minutes: u32,
     /// Show diffs unified instead of side by side.
     pub unified_diff: bool,
+    /// Leave whitespace-only changes out of diffs (`git diff -w`).
+    pub ignore_whitespace: bool,
     /// How many commits the log loads at a time.
     pub log_page_size: usize,
     pub recent: Vec<PathBuf>,
@@ -69,6 +71,7 @@ impl Default for Settings {
             update_rebase: false,
             auto_fetch_minutes: 0,
             unified_diff: false,
+            ignore_whitespace: false,
             log_page_size: 5000,
             recent: Vec::new(),
             messages: Vec::new(),
@@ -171,6 +174,7 @@ impl Settings {
                 "update" => settings.update_rebase = value == "rebase",
                 "auto_fetch" => settings.auto_fetch_minutes = value.parse().unwrap_or(0),
                 "diff" => settings.unified_diff = value == "unified",
+                "whitespace" => settings.ignore_whitespace = value == "ignore",
                 "log_page" => settings.log_page_size = value.parse().unwrap_or(settings.log_page_size),
                 "recent" => settings.recent.push(PathBuf::from(value)),
                 "message" => settings.messages.push(unescape(value)),
@@ -182,7 +186,7 @@ impl Settings {
 
     fn to_text(&self) -> String {
         let mut text = format!(
-            "theme={}\nfont_size={}\ndates={}\ngit={}\nupdate={}\nauto_fetch={}\ndiff={}\nlog_page={}\n",
+            "theme={}\nfont_size={}\ndates={}\ngit={}\nupdate={}\nauto_fetch={}\ndiff={}\nwhitespace={}\nlog_page={}\n",
             self.theme.key(),
             self.font_size,
             if self.relative_dates { "relative" } else { "absolute" },
@@ -190,6 +194,7 @@ impl Settings {
             if self.update_rebase { "rebase" } else { "merge" },
             self.auto_fetch_minutes,
             if self.unified_diff { "unified" } else { "split" },
+            if self.ignore_whitespace { "ignore" } else { "show" },
             self.log_page_size,
         );
         for repo in &self.recent {
@@ -253,6 +258,7 @@ mod tests {
             update_rebase: true,
             auto_fetch_minutes: 15,
             unified_diff: true,
+            ignore_whitespace: true,
             log_page_size: 2000,
             recent: vec!["/tmp/repo".into()],
             messages: vec!["Fix\n\nDetails".into()],

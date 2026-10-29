@@ -37,7 +37,9 @@ the way git branches grow apart and merge back.
 - Branches tree (HEAD / Local / Remote / Tags) next to a commit graph with colored lanes and ref labels.
 - Filter by text or hash, branch, author, date, and file or folder.
 - Commit details ("in N branches"), a changed-files tree, and a side-by-side or unified diff
-  with syntax highlighting.
+  with syntax highlighting. **Ignore Whitespace** above any diff leaves out whitespace-only changes.
+- **Compare with Local** for a file of any commit or in File History, and **Compare Commits** for two
+  commits selected in the log.
 - Commit context menu: copy hash, checkout, new branch / tag, cherry-pick, revert,
   reset (soft / mixed / hard), and "Show Diff with Working Tree".
   Cmd-click or Shift-click selects several commits to cherry-pick or revert together.
@@ -71,7 +73,7 @@ the way git branches grow apart and merge back.
 
 - The **merge tool** shows yours, the result and theirs side by side. Changes that merge cleanly are applied
   already; each conflict takes yours (»), theirs («), both, or text you type, and shows the common ancestor
-  until it's resolved. The arrows jump between conflicts.
+  until it's resolved. The arrows jump between conflicts. Code is syntax-highlighted and long lines wrap.
 - A file deleted on one side is resolved by accepting a side.
 
 ### Branches and history

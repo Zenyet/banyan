@@ -108,6 +108,11 @@ pub fn blocked_files(message: &str) -> Vec<String> {
         .collect()
 }
 
+/// `-w` while the settings leave whitespace-only changes out of diffs.
+fn whitespace_args() -> &'static [&'static str] {
+    if crate::settings::Settings::read(|s| s.ignore_whitespace) { &["-w"] } else { &[] }
+}
+
 /// The branch or commit a merge message names: `feature` in
 /// "Merge branch 'feature' into main" or "Merge remote-tracking branch 'origin/x'".
 fn merged_name(message: &str) -> Option<String> {
@@ -491,7 +496,10 @@ impl Repo {
 
     /// Patch of `path` introduced by commit `id` (against its first parent).
     pub fn revision_diff(&self, id: &str, path: &str) -> Result<String> {
-        self.git(&["show", "--format=", "-M", "--first-parent", id, "--", path])
+        let mut args = vec!["show", "--format=", "-M", "--first-parent"];
+        args.extend(whitespace_args());
+        args.extend([id, "--", path]);
+        self.git(&args)
     }
 
     /// Line-by-line blame of `path` at `rev`.
@@ -614,20 +622,26 @@ impl Repo {
         Ok(parse_name_status(&out))
     }
 
-    /// Files that differ between `rev` and the work tree.
-    pub fn worktree_changes_since(&self, rev: &str) -> Result<Vec<FileChange>> {
-        Ok(parse_name_status(&self.git(&["diff", "-M", "--name-status", "-z", rev, "--"])?))
+    /// Files that differ from `from` to `to`, or to the work tree when `to` is `None`.
+    pub fn changes_between(&self, from: &str, to: Option<&str>) -> Result<Vec<FileChange>> {
+        let mut args = vec!["diff", "-M", "--name-status", "-z", from];
+        args.extend(to);
+        args.push("--");
+        Ok(parse_name_status(&self.git(&args)?))
     }
 
-    /// Patch of one file from `rev` to the work tree.
-    pub fn worktree_diff_since(&self, rev: &str, file: &FileChange) -> Result<String> {
-        let mut args = vec!["diff", "-M", rev, "--", file.path.as_str()];
+    /// Patch of one file from `from` to `to`, or to the work tree when `to` is `None`.
+    pub fn diff_between(&self, from: &str, to: Option<&str>, file: &FileChange) -> Result<String> {
+        let mut args = vec!["diff", "-M"];
+        args.extend(whitespace_args());
+        args.push(from);
+        args.extend(to);
+        args.extend(["--", file.path.as_str()]);
         if let Some(orig) = &file.orig_path {
             args.push(orig);
         }
         self.git(&args)
     }
-
 
     /// Patch of one file in a commit, against its first parent.
     pub fn commit_file_diff(&self, details: &CommitDetails, file: &FileChange) -> Result<String> {
@@ -637,8 +651,16 @@ impl Repo {
         }
         let mut args: Vec<&str> = Vec::new();
         match details.parents.first() {
-            Some(parent) => args.extend(["diff", "-M", parent.as_str(), details.id.as_str()]),
-            None => args.extend(["show", "--format=", "-M", details.id.as_str()]),
+            Some(parent) => {
+                args.extend(["diff", "-M"]);
+                args.extend(whitespace_args());
+                args.extend([parent.as_str(), details.id.as_str()]);
+            }
+            None => {
+                args.extend(["show", "--format=", "-M"]);
+                args.extend(whitespace_args());
+                args.push(details.id.as_str());
+            }
         }
         args.push("--");
         args.extend(paths);
@@ -718,11 +740,14 @@ impl Repo {
     }
 
     /// Patch of a working tree file against HEAD (staged and unstaged together).
-    pub fn worktree_diff(&self, entry: &StatusEntry) -> Result<String> {
+    pub fn worktree_diff(&self, entry: &StatusEntry, ignore_whitespace: bool) -> Result<String> {
         if entry.is_untracked() {
             return run_allow_diff(&self.root, &["diff", "--no-index", "--", "/dev/null", &entry.path]);
         }
         let mut args = vec!["diff", "-M"];
+        if ignore_whitespace {
+            args.push("-w");
+        }
         if self.has_head() {
             args.push("HEAD");
         } else {
@@ -1950,6 +1975,16 @@ mod tests {
     }
 
     #[test]
+    fn compares_two_revisions() {
+        let (t, ids) = four_commits("compare-revisions");
+        let files = t.repo.changes_between(&ids[1], Some(&ids[3])).unwrap();
+        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, vec!["Three.txt", "Two.txt"]);
+        let patch = t.repo.diff_between(&ids[1], Some(&ids[3]), &files[1]).unwrap();
+        assert!(patch.contains("+Two"), "{patch}");
+    }
+
+    #[test]
     fn init_makes_a_folder_a_repository() {
         let dir = std::env::temp_dir().join(format!("banyan-test-init-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("sub")).unwrap();
@@ -2301,10 +2336,10 @@ mod tests {
         let base = t.commit("a.txt", "a\n", "Base");
         t.commit("b.txt", "b\n", "Add b");
         t.write("a.txt", "changed\n");
-        let files = t.repo.worktree_changes_since(&base).unwrap();
+        let files = t.repo.changes_between(&base, None).unwrap();
         let summary: Vec<_> = files.iter().map(|f| (f.status, f.path.as_str())).collect();
         assert_eq!(summary, vec![('M', "a.txt"), ('A', "b.txt")]);
-        let patch = t.repo.worktree_diff_since(&base, &files[0]).unwrap();
+        let patch = t.repo.diff_between(&base, None, &files[0]).unwrap();
         assert!(patch.contains("+changed"));
     }
 }

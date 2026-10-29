@@ -2,12 +2,15 @@
 //! yours on the left, theirs on the right and the result in the middle.
 //! Each conflict takes yours (»), theirs («), both, or text typed in.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, Sizable as _, WindowExt as _,
+    ActiveTheme as _, Disableable as _, Icon, Rope, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
+    diff::DiffFile,
     h_flex,
+    highlighter::{HighlightTheme, SyntaxHighlighter},
     input::{Textarea, TextareaState},
     v_flex,
 };
@@ -40,7 +43,8 @@ pub fn open(model: Entity<RepoModel>, path: String, window: &mut Window, cx: &mu
         .map(|op| (op.ours, op.theirs))
         .unwrap_or_else(|| ("yours".into(), "theirs".into()));
     let segments = conflict::parse(&text);
-    let tool = cx.new(|_| MergeTool::new(model, path.clone(), ours, theirs, segments));
+    let theme = cx.theme().highlight_theme.clone();
+    let tool = cx.new(|_| MergeTool::new(model, path.clone(), ours, theirs, segments, theme));
     window.open_dialog(cx, move |dialog, _, _| {
         dialog
             .title(format!("Merge Revisions for {path}"))
@@ -64,12 +68,31 @@ struct MergeTool {
     /// The conflict the arrows last moved to.
     current: usize,
     scroll: ScrollHandle,
+    highlighter: SyntaxHighlighter,
+    theme: std::sync::Arc<HighlightTheme>,
+    /// Syntax styles of each line shown, by its text.
+    styles: HashMap<String, Styles>,
+}
+
+type Styles = Vec<(Range<usize>, HighlightStyle)>;
+
+/// A line as shown: without its ending, tabs as spaces.
+fn shown(line: &str) -> String {
+    conflict::display(line).replace('\t', "    ")
 }
 
 impl MergeTool {
-    fn new(model: Entity<RepoModel>, path: String, ours: String, theirs: String, segments: Vec<Segment>) -> Self {
+    fn new(
+        model: Entity<RepoModel>,
+        path: String,
+        ours: String,
+        theirs: String,
+        segments: Vec<Segment>,
+        theme: std::sync::Arc<HighlightTheme>,
+    ) -> Self {
         let conflicts = segments.iter().filter(|s| matches!(s, Segment::Conflict(_))).count();
-        Self {
+        let language = DiffFile::parse_conflicts(path.clone(), "").map(|f| f.language()).unwrap_or_else(|_| "text".into());
+        let mut this = Self {
             model,
             path,
             ours: ours.into(),
@@ -80,6 +103,41 @@ impl MergeTool {
             unfolded: HashSet::new(),
             current: 0,
             scroll: ScrollHandle::new(),
+            highlighter: SyntaxHighlighter::new(&language),
+            theme,
+            styles: HashMap::new(),
+        };
+        let blocks: Vec<Vec<String>> = this
+            .segments
+            .iter()
+            .flat_map(|segment| match segment {
+                Segment::Clean(lines) => vec![lines.clone()],
+                Segment::Conflict(c) => vec![c.ours.clone(), c.base.clone(), c.theirs.clone()],
+            })
+            .collect();
+        for block in &blocks {
+            this.highlight(block);
+        }
+        this
+    }
+
+    /// Remember the syntax styles of `lines`, highlighted together so that
+    /// strings and comments spanning lines come out right.
+    fn highlight(&mut self, lines: &[String]) {
+        let lines: Vec<String> = lines.iter().map(|line| shown(line)).collect();
+        let text = lines.join("\n");
+        self.highlighter.update(None, &Rope::from_str(&text), None);
+        let styles = self.highlighter.styles(&(0..text.len()), &*self.theme);
+        let mut start = 0;
+        for line in lines {
+            let end = start + line.len();
+            let line_styles = styles
+                .iter()
+                .filter(|(range, _)| range.start < end && range.end > start)
+                .map(|(range, style)| (range.start.max(start) - start..range.end.min(end) - start, *style))
+                .collect();
+            self.styles.entry(line).or_insert(line_styles);
+            start = end + 1;
         }
     }
 
@@ -131,6 +189,7 @@ impl MergeTool {
     fn finish_edit(&mut self, cx: &mut Context<Self>) {
         if let Some((conflict, state)) = self.editing.take() {
             let text = state.read(cx).value().to_string();
+            self.highlight(&conflict::split_lines(&text));
             self.resolutions[conflict] = Some(Resolution::Custom(text));
         }
         cx.notify();
@@ -187,38 +246,34 @@ impl MergeTool {
         });
     }
 
-    fn render_lines(
-        lines: &[String],
-        numbers: Option<usize>,
-        color: Hsla,
-        cx: &App,
-    ) -> Vec<AnyElement> {
+    /// Lines in `color`, syntax-highlighted unless muted. Long lines wrap;
+    /// every column keeps the line-number gutter so they wrap alike.
+    fn render_lines(&self, lines: &[String], numbers: Option<usize>, color: Hsla, cx: &App) -> Vec<AnyElement> {
+        let highlight = color == cx.theme().foreground;
         lines
             .iter()
             .enumerate()
             .map(|(ix, line)| {
+                let text = shown(line);
+                let styles = highlight.then(|| self.styles.get(&text)).flatten().cloned();
+                let content = match styles {
+                    Some(styles) => StyledText::new(text).with_highlights(styles).into_any_element(),
+                    None => text.into_any_element(),
+                };
                 h_flex()
-                    .h(LINE_HEIGHT)
-                    .when_some(numbers, |row, first| {
-                        row.child(
-                            div()
-                                .flex_none()
-                                .w(px(36.))
-                                .pr_2()
-                                .text_right()
-                                .text_color(cx.theme().muted_foreground)
-                                .child((first + ix).to_string()),
-                        )
-                    })
+                    .items_start()
+                    .min_h(LINE_HEIGHT)
+                    .line_height(LINE_HEIGHT)
                     .child(
                         div()
-                            .pl_2()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_color(color)
-                            .child(conflict::display(line).replace('\t', "    ")),
+                            .flex_none()
+                            .w(px(36.))
+                            .pr_2()
+                            .text_right()
+                            .text_color(cx.theme().muted_foreground)
+                            .when_some(numbers, |gutter, first| gutter.child((first + ix).to_string())),
                     )
+                    .child(div().flex_1().min_w_0().pl_2().text_color(color).child(content))
                     .into_any_element()
             })
             .collect()
@@ -233,7 +288,7 @@ impl MergeTool {
         let muted = cx.theme().muted_foreground;
         let fg = cx.theme().foreground;
         let column = |lines: &[String], first: usize, numbers: bool, color: Hsla, cx: &App| {
-            v_flex().children(Self::render_lines(lines, numbers.then_some(first), color, cx))
+            v_flex().children(self.render_lines(lines, numbers.then_some(first), color, cx))
         };
         let row = |left: Div, middle: Div, right: Div| {
             h_flex()
@@ -314,7 +369,7 @@ impl MergeTool {
                 .when(lines.is_empty(), |col| {
                     col.child(div().h(LINE_HEIGHT).pl_2().italic().text_color(muted).child("(no lines)"))
                 })
-                .children(Self::render_lines(lines, None, fg, cx))
+                .children(self.render_lines(lines, None, fg, cx))
         };
         let arrow = |id: &str, icon: IconName, tooltip: &'static str, ours: bool, cx: &mut Context<Self>| {
             div().flex_none().w(GUTTER).pt_1().flex().justify_center().child(
@@ -358,7 +413,7 @@ impl MergeTool {
             (_, Some(resolution)) => v_flex()
                 .bg(resolved_bg)
                 .child(self.conflict_toolbar(conflict, true, cx))
-                .children(Self::render_lines(&c.resolved(resolution), Some(first_line), fg, cx))
+                .children(self.render_lines(&c.resolved(resolution), Some(first_line), fg, cx))
                 .when(c.resolved(resolution).is_empty(), |col| {
                     col.child(div().h(LINE_HEIGHT).pl_2().italic().text_color(muted).child("(no lines)"))
                 }),
@@ -368,7 +423,7 @@ impl MergeTool {
                 .when(c.base.is_empty(), |col| {
                     col.child(div().h(LINE_HEIGHT).pl_2().italic().text_color(muted).child("(not in the common ancestor)"))
                 })
-                .children(Self::render_lines(&c.base, None, muted, cx)),
+                .children(self.render_lines(&c.base, None, muted, cx)),
         };
 
         h_flex()

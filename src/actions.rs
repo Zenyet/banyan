@@ -283,6 +283,12 @@ pub fn commits_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, ids: Vec<Str
         let ids = revert_ids.clone();
         model.update(cx, |m, cx| m.run(format!("Revert {count} commits"), move |repo| repo.revert(&ids), cx))
     }));
+    if let [newer, older] = ids.as_slice() {
+        let (newer, older) = (newer.clone(), older.clone());
+        menu = menu.item(item("Compare Commits", model, move |model, window, cx| {
+            crate::worktree_diff::open_between(model.clone(), older.clone(), Some(newer.clone()), None, window, cx)
+        }));
+    }
     menu = menu.separator();
     let squash_ids = ids.clone();
     menu = menu.item(item(format!("Squash {count} Commits..."), model, move |model, window, cx| {

@@ -51,7 +51,6 @@ struct HistoryView {
     diff: Entity<DiffPane>,
     loading: bool,
     _task: Option<Task<()>>,
-    diff_task: Option<Task<()>>,
 }
 
 impl HistoryView {
@@ -86,7 +85,6 @@ impl HistoryView {
             diff,
             loading: true,
             _task: Some(task),
-            diff_task: None,
         }
     }
 
@@ -98,19 +96,9 @@ impl HistoryView {
         self.selected = Some(ix);
         let repo = self.model.read(cx).repo.clone();
         let title = format!("{}  ({})", revision.path, revision.commit.short_id());
-        self.diff_task = Some(cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_executor()
-                .spawn(async move { repo.revision_diff(&revision.commit.id, &revision.path) })
-                .await;
-            this.update(cx, |this, cx| {
-                this.diff.update(cx, |diff, cx| match result {
-                    Ok(patch) => diff.show_patch(title, &patch, cx),
-                    Err(err) => diff.show_message(Some(title.into()), format!("{err:#}"), cx),
-                })
-            })
-            .ok();
-        }));
+        self.diff.update(cx, |diff, cx| {
+            diff.load(title, move || repo.revision_diff(&revision.commit.id, &revision.path), cx)
+        });
         cx.notify();
     }
 }
@@ -168,11 +156,22 @@ impl Render for HistoryView {
                                 let model = model.clone();
                                 let id = id.clone();
                                 let path = path.clone();
+                                let (m, i, p) = (model.clone(), id.clone(), path.clone());
                                 menu.item(PopupMenuItem::new("Annotate at This Revision").on_click(
                                     move |_, window, cx| {
                                         annotate(model.clone(), id.clone(), path.clone(), window, cx)
                                     },
                                 ))
+                                .item(PopupMenuItem::new("Compare with Local").on_click(move |_, window, cx| {
+                                    crate::worktree_diff::open_between(
+                                        m.clone(),
+                                        i.clone(),
+                                        None,
+                                        Some(p.clone()),
+                                        window,
+                                        cx,
+                                    )
+                                }))
                             })
                     })
                     .collect::<Vec<_>>()

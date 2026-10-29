@@ -195,11 +195,17 @@ impl ChangesView {
         let repo = self.model.read(cx).repo.clone();
         let title: SharedString = entry.path.clone().into();
         let splittable = can_commit_partially(&entry);
+        // The diff shown follows the whitespace option; the hunks to commit
+        // always come from the full patch, as the commit applies it.
+        let shown = (repo.clone(), entry.clone());
+        self.diff.update(cx, |diff, cx| {
+            diff.load(title, move || shown.0.worktree_diff(&shown.1, Settings::read(|s| s.ignore_whitespace)), cx)
+        });
         self.diff_task = Some(cx.spawn(async move |this, cx| {
             let path = entry.path.clone();
             let result = cx
                 .background_executor()
-                .spawn(async move { repo.worktree_diff(&entry) })
+                .spawn(async move { if splittable { repo.worktree_diff(&entry, false) } else { Ok(String::new()) } })
                 .await;
             this.update(cx, |this, cx| {
                 this.hunks = match (&result, splittable) {
@@ -215,10 +221,6 @@ impl ChangesView {
                         this.excluded.remove(&path);
                     }
                 }
-                this.diff.update(cx, |diff, cx| match result {
-                    Ok(patch) => diff.show_patch(title, &patch, cx),
-                    Err(err) => diff.show_message(Some(title), format!("{err:#}"), cx),
-                });
                 cx.notify();
             })
             .ok();

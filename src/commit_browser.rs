@@ -23,7 +23,6 @@ pub struct CommitBrowser {
     diff: Entity<DiffPane>,
     empty_message: SharedString,
     details_task: Option<Task<()>>,
-    diff_task: Option<Task<()>>,
 }
 
 impl CommitBrowser {
@@ -39,7 +38,6 @@ impl CommitBrowser {
             diff,
             empty_message: "No commits".into(),
             details_task: None,
-            diff_task: None,
         }
     }
 
@@ -93,19 +91,8 @@ impl CommitBrowser {
         cx.notify();
         let repo = self.model.read(cx).repo.clone();
         let title = file.path.clone();
-        self.diff_task = Some(cx.spawn(async move |this, cx| {
-            let patch = cx
-                .background_executor()
-                .spawn(async move { repo.commit_file_diff(&details, &file) })
-                .await;
-            this.update(cx, |this, cx| {
-                this.diff.update(cx, |diff, cx| match patch {
-                    Ok(patch) => diff.show_patch(title, &patch, cx),
-                    Err(err) => diff.show_message(Some(title.into()), format!("{err:#}"), cx),
-                })
-            })
-            .ok();
-        }));
+        self.diff
+            .update(cx, |diff, cx| diff.load(title, move || repo.commit_file_diff(&details, &file), cx));
     }
 }
 

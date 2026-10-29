@@ -187,14 +187,26 @@ impl SettingsWindow {
 
     fn diff_log_page() -> SettingPage {
         SettingPage::new("Diff and Log").icon(IconName::GitCompare).groups([
-            SettingGroup::new().title("Diff").item(SettingItem::new(
-                "Show diffs",
-                choice(
-                    [("split", "Side by side"), ("unified", "Unified")].map(|(key, label)| (key.to_string(), label.to_string())),
-                    |s| if s.unified_diff { "unified" } else { "split" }.to_string(),
-                    |s, value| s.unified_diff = value == "unified",
+            SettingGroup::new().title("Diff").items([
+                SettingItem::new(
+                    "Show diffs",
+                    choice(
+                        [("split", "Side by side"), ("unified", "Unified")]
+                            .map(|(key, label)| (key.to_string(), label.to_string())),
+                        |s| if s.unified_diff { "unified" } else { "split" }.to_string(),
+                        |s, value| s.unified_diff = value == "unified",
+                    ),
                 ),
-            )),
+                SettingItem::new(
+                    "Whitespace changes",
+                    choice(
+                        [("show", "Show"), ("ignore", "Ignore")].map(|(key, label)| (key.to_string(), label.to_string())),
+                        |s| if s.ignore_whitespace { "ignore" } else { "show" }.to_string(),
+                        |s, value| s.ignore_whitespace = value == "ignore",
+                    ),
+                )
+                .description("Also the Ignore Whitespace button above every diff."),
+            ]),
             SettingGroup::new().title("Log").item(
                 SettingItem::new(
                     "Commits loaded at a time",
