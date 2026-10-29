@@ -23,6 +23,7 @@ use crate::log_view::panel_header;
 use crate::model::{RepoEvent, RepoModel};
 use crate::settings::Settings;
 use crate::ui::{selection_bg, confirm, prompt_text, status_color};
+use crate::i18n::tr;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum Group {
@@ -45,9 +46,11 @@ impl Group {
 
     fn title(&self) -> String {
         match self {
-            Group::Conflicts => "Merge Conflicts".into(),
+            Group::Conflicts => tr!("Merge Conflicts").into(),
+            // The default list's name is shown in the interface language.
+            Group::List(name) if name == crate::changelists::DEFAULT => tr!("Changes").to_string(),
             Group::List(name) => name.clone(),
-            Group::Unversioned => "Unversioned Files".into(),
+            Group::Unversioned => tr!("Unversioned Files").into(),
         }
     }
 }
@@ -81,7 +84,7 @@ impl ChangesView {
     pub fn new(model: Entity<RepoModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let message = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Commit Message")
+                .placeholder(tr!("Commit Message"))
                 .auto_grow(4, 12)
         });
         let diff = cx.new(DiffPane::new);
@@ -194,7 +197,7 @@ impl ChangesView {
             .as_ref()
             .and_then(|p| self.model.read(cx).status.iter().find(|e| &e.path == p).cloned())
         else {
-            self.diff.update(cx, |diff, cx| diff.show_message(None, "No local changes", cx));
+            self.diff.update(cx, |diff, cx| diff.show_message(None, tr!("No local changes"), cx));
             return;
         };
         let repo = self.model.read(cx).repo.clone();
@@ -325,7 +328,7 @@ impl ChangesView {
     fn commit(&mut self, push: bool, window: &mut Window, cx: &mut Context<Self>) {
         let message = self.message.read(cx).value().trim().to_string();
         if message.is_empty() {
-            self.model.update(cx, |_, cx| cx.emit(RepoEvent::OpFailed("Commit message is empty".into())));
+            self.model.update(cx, |_, cx| cx.emit(RepoEvent::OpFailed(tr!("Commit message is empty").into())));
             return;
         }
         let model = self.model.read(cx);
@@ -338,7 +341,7 @@ impl ChangesView {
         }
         let merging = model.state != RepoState::Clean;
         if paths.is_empty() && !self.amend && !merging {
-            self.model.update(cx, |_, cx| cx.emit(RepoEvent::OpFailed("No changes selected to commit".into())));
+            self.model.update(cx, |_, cx| cx.emit(RepoEvent::OpFailed(tr!("No changes selected to commit").into())));
             return;
         }
         let partial: Vec<(String, Vec<ChangedLine>)> = self
@@ -352,7 +355,7 @@ impl ChangesView {
             .filter(|p| !partial.iter().any(|(path, _)| path == p))
             .collect();
         let amend = self.amend;
-        let label = if push { "Commit and Push" } else { "Commit" };
+        let label = if push { tr!("Commit and Push") } else { tr!("Commit") };
         Settings::add_message(message.clone());
         self.excluded.clear();
         self.model.update(cx, |model, cx| {
@@ -388,12 +391,12 @@ impl ChangesView {
         let model = self.model.clone();
         let count = entries.len();
         confirm(
-            "Rollback Changes",
-            format!("Discard local changes in {count} file(s)? This cannot be undone."),
-            "Rollback",
+            tr!("Rollback Changes"),
+            tr!("Discard local changes in {} file(s)? This cannot be undone.", count),
+            tr!("Rollback"),
             move |_, cx| {
                 let entries = entries.clone();
-                model.update(cx, |m, cx| m.run("Rollback", move |repo| repo.rollback(&entries), cx));
+                model.update(cx, |m, cx| m.run(tr!("Rollback"), move |repo| repo.rollback(&entries), cx));
             },
             window,
             cx,
@@ -414,7 +417,7 @@ impl ChangesView {
                     .icon(IconName::RefreshCw)
                     .ghost()
                     .xsmall()
-                    .tooltip("Refresh")
+                    .tooltip(tr!("Refresh"))
                     .on_click(cx.listener(|this, _, _, cx| this.model.update(cx, |m, cx| m.refresh(cx)))),
             )
             .child(
@@ -422,7 +425,7 @@ impl ChangesView {
                     .icon(IconName::Undo2)
                     .ghost()
                     .xsmall()
-                    .tooltip("Rollback Selected Changes")
+                    .tooltip(tr!("Rollback Selected Changes"))
                     .on_click(cx.listener(|this, _, window, cx| {
                         let paths: Vec<String> = this.included.iter().cloned().collect();
                         this.rollback(paths, window, cx)
@@ -433,15 +436,15 @@ impl ChangesView {
                     .icon(IconName::Archive)
                     .ghost()
                     .xsmall()
-                    .tooltip("Stash Changes...")
+                    .tooltip(tr!("Stash Changes..."))
                     .on_click(move |_, window, cx| {
                         let model = model.clone();
                         prompt_text(
-                            "Stash Changes",
-                            "Create Stash",
+                            tr!("Stash Changes"),
+                            tr!("Create Stash"),
                             "WIP",
                             move |message, _, cx| {
-                                model.update(cx, |m, cx| m.run("Stash", move |repo| repo.stash(&message), cx));
+                                model.update(cx, |m, cx| m.run(tr!("Stash"), move |repo| repo.stash(&message), cx));
                             },
                             window,
                             cx,
@@ -453,7 +456,7 @@ impl ChangesView {
                     .icon(IconName::FileText)
                     .ghost()
                     .xsmall()
-                    .tooltip("Apply Patch...")
+                    .tooltip(tr!("Apply Patch..."))
                     .on_click(cx.listener(|this, _, _, cx| crate::actions::apply_patch(&this.model, cx))),
             )
             .child(
@@ -461,11 +464,11 @@ impl ChangesView {
                     .icon(IconName::Inbox)
                     .ghost()
                     .xsmall()
-                    .tooltip("Shelve Selected Changes...")
+                    .tooltip(tr!("Shelve Selected Changes..."))
                     .on_click(cx.listener(|this, _, window, cx| {
                         let paths: Vec<String> = this.included.iter().cloned().collect();
                         if paths.is_empty() {
-                            this.model.update(cx, |_, cx| cx.emit(RepoEvent::OpFailed("No changes selected to shelve".into())));
+                            this.model.update(cx, |_, cx| cx.emit(RepoEvent::OpFailed(tr!("No changes selected to shelve").into())));
                         } else {
                             prompt_shelve(&this.model, paths, window, cx);
                         }
@@ -476,7 +479,7 @@ impl ChangesView {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!("{} of {} selected", self.included.len(), self.change_count(cx))),
+                    .child(tr!("{} of {} selected", self.included.len(), self.change_count(cx))),
             )
         .into_any_element()
     }
@@ -523,7 +526,7 @@ impl ChangesView {
                         .font_normal()
                         .bg(cx.theme().secondary)
                         .text_color(cx.theme().secondary_foreground)
-                        .child("active"),
+                        .child(tr!("active")),
                 )
             })
             .child(
@@ -616,7 +619,7 @@ impl ChangesView {
                     let lists = model.read(cx).changelists.clone();
                     if !untracked {
                         let (model, path) = (model.clone(), path.clone());
-                        menu = menu.submenu("Move to Another Changelist", window, cx, move |mut sub, _, _| {
+                        menu = menu.submenu(tr!("Move to Another Changelist"), window, cx, move |mut sub, _, _| {
                             let current = lists.list_of(&path).to_string();
                             for name in lists.names().iter().filter(|n| **n != current).cloned() {
                                 let (model, path) = (model.clone(), path.clone());
@@ -625,9 +628,9 @@ impl ChangesView {
                                 }));
                             }
                             let (model, path) = (model.clone(), path.clone());
-                            sub.separator().item(PopupMenuItem::new("New Changelist...").on_click(move |_, window, cx| {
+                            sub.separator().item(PopupMenuItem::new(tr!("New Changelist...")).on_click(move |_, window, cx| {
                                 let (model, path) = (model.clone(), path.clone());
-                                prompt_text("New Changelist", "Create", "", move |name, _, cx| {
+                                prompt_text(tr!("New Changelist"), tr!("Create"), "", move |name, _, cx| {
                                     model.update(cx, |m, cx| m.change_lists(|l| l.move_to(&[path.clone()], &name), cx))
                                 }, window, cx);
                             }))
@@ -635,7 +638,7 @@ impl ChangesView {
                     }
                     let (shelve_model, shelve_path) = (model.clone(), path.clone());
                     menu = menu
-                        .item(PopupMenuItem::new("Shelve...").on_click(move |_, window, cx| {
+                        .item(PopupMenuItem::new(tr!("Shelve...")).on_click(move |_, window, cx| {
                             prompt_shelve(&shelve_model, vec![shelve_path.clone()], window, cx)
                         }))
                         .separator();
@@ -644,22 +647,22 @@ impl ChangesView {
                     let merge_model = model.clone();
                     let merge_path = path.clone();
                     menu = menu
-                        .item(PopupMenuItem::new("Merge...").on_click(move |_, window, cx| {
+                        .item(PopupMenuItem::new(tr!("Merge...")).on_click(move |_, window, cx| {
                             crate::merge_tool::open(merge_model.clone(), merge_path.clone(), window, cx)
                         }))
                         .separator();
-                    for (label, ours) in [("Accept Yours", Some(true)), ("Accept Theirs", Some(false)), ("Mark as Resolved", None)] {
+                    for (label, ours) in [(tr!("Accept Yours"), Some(true)), (tr!("Accept Theirs"), Some(false)), (tr!("Mark as Resolved"), None)] {
                         let model = model.clone();
                         let path = path.clone();
                         menu = menu.item(PopupMenuItem::new(label).on_click(move |_, _, cx| {
                             let path = path.clone();
                             model.update(cx, |m, cx| {
-                                m.run(format!("Resolve {path}"), move |repo| repo.resolve_conflict(&path, ours), cx)
+                                m.run(tr!("Resolve {}", path), move |repo| repo.resolve_conflict(&path, ours), cx)
                             });
                         }));
                     }
                 } else if !untracked {
-                    for (label, annotate) in [("Show History", false), ("Annotate", true)] {
+                    for (label, annotate) in [(tr!("Show History"), false), (tr!("Annotate"), true)] {
                         let model = model.clone();
                         let path = path.clone();
                         menu = menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
@@ -673,7 +676,7 @@ impl ChangesView {
                     menu = menu.separator();
                     let view = view.clone();
                     let path = path.clone();
-                    menu = menu.item(PopupMenuItem::new("Rollback...").on_click(move |_, window, cx| {
+                    menu = menu.item(PopupMenuItem::new(tr!("Rollback...")).on_click(move |_, window, cx| {
                         let path = path.clone();
                         view.update(cx, |this, cx| this.rollback(vec![path], window, cx)).ok();
                     }));
@@ -682,24 +685,24 @@ impl ChangesView {
                     let path = path.clone();
                     let ignore_model = model.clone();
                     let ignore_path = path.clone();
-                    menu = menu.item(PopupMenuItem::new("Add to VCS").on_click(move |_, _, cx| {
+                    menu = menu.item(PopupMenuItem::new(tr!("Add to VCS")).on_click(move |_, _, cx| {
                         let path = path.clone();
-                        model.update(cx, |m, cx| m.run(format!("Add {path}"), move |repo| repo.git(&["add", "--", &path]), cx));
+                        model.update(cx, |m, cx| m.run(tr!("Add {}", path), move |repo| repo.git(&["add", "--", &path]), cx));
                     }));
-                    menu = menu.item(PopupMenuItem::new("Add to .gitignore").on_click(move |_, _, cx| {
+                    menu = menu.item(PopupMenuItem::new(tr!("Add to .gitignore")).on_click(move |_, _, cx| {
                         let path = ignore_path.clone();
                         ignore_model.update(cx, |m, cx| {
-                            m.run(format!("Ignore {path}"), move |repo| repo.add_to_gitignore(&path), cx)
+                            m.run(tr!("Ignore {}", path), move |repo| repo.add_to_gitignore(&path), cx)
                         });
                     }));
                 }
                 let copy_path = full_path.clone();
                 let reveal_path = full_path.clone();
                 menu.separator()
-                    .item(PopupMenuItem::new("Copy Path").on_click(move |_, _, cx| {
+                    .item(PopupMenuItem::new(tr!("Copy Path")).on_click(move |_, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(copy_path.to_string_lossy().into_owned()))
                     }))
-                    .item(PopupMenuItem::new(REVEAL_LABEL).on_click(move |_, _, cx| {
+                    .item(PopupMenuItem::new(reveal_label()).on_click(move |_, _, cx| {
                         cx.reveal_path(&reveal_path)
                     }))
             })
@@ -735,7 +738,7 @@ impl ChangesView {
                             .icon(if expanded { IconName::ChevronDown } else { IconName::ChevronRight })
                             .ghost()
                             .xsmall()
-                            .tooltip(if expanded { "Hide lines" } else { "Choose lines" })
+                            .tooltip(if expanded { tr!("Hide lines") } else { tr!("Choose lines") })
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 cx.stop_propagation();
                                 this.toggle_expanded(header.clone(), cx)
@@ -746,9 +749,9 @@ impl ChangesView {
                             .checked(included > 0)
                             .on_click(cx.listener(move |this, _: &bool, _, cx| this.toggle_hunk(&toggle, cx))),
                     )
-                    .child(div().flex_none().text_color(muted).child(format!("Line {line}")))
+                    .child(div().flex_none().text_color(muted).child(tr!("Line {}", line)))
                     .child(div().flex_1().min_w_0().truncate().child(if context.is_empty() {
-                        format!("Change {}", ix + 1)
+                        tr!("Change {}", ix + 1)
                     } else {
                         context.to_string()
                     }))
@@ -814,7 +817,7 @@ impl ChangesView {
                     .pt_1()
                     .text_xs()
                     .text_color(muted)
-                    .child("Changes to commit in this file"),
+                    .child(tr!("Changes to commit in this file")),
             )
             .child(div().id("hunks").max_h(px(240.)).overflow_y_scroll().py_1().children(rows))
             .into_any_element()
@@ -827,11 +830,11 @@ impl ChangesView {
             .icon(IconName::Clock)
             .ghost()
             .xsmall()
-            .tooltip("Commit Message History")
+            .tooltip(tr!("Commit Message History"))
             .dropdown_menu(move |mut menu, _, _| {
                 let messages = Settings::get().messages;
                 if messages.is_empty() {
-                    return menu.item(PopupMenuItem::new("No recent messages").disabled(true));
+                    return menu.item(PopupMenuItem::new(tr!("No recent messages")).disabled(true));
                 }
                 for message in messages {
                     let subject = message.lines().next().unwrap_or_default();
@@ -868,7 +871,7 @@ impl ChangesView {
         let resolve = |ours: bool, model: Entity<RepoModel>, path: String| {
             move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
                 let path = path.clone();
-                let label = format!("Accept {} for {path}", if ours { "yours" } else { "theirs" });
+                let label = if ours { tr!("Accept yours for {}", path) } else { tr!("Accept theirs for {}", path) };
                 model.update(cx, |m, cx| m.run(label, move |repo| repo.resolve_conflict(&path, Some(ours)), cx));
             }
         };
@@ -887,29 +890,29 @@ impl ChangesView {
                     .flex_1()
                     .min_w_0()
                     .gap_0p5()
-                    .child(div().text_sm().font_semibold().child(format!("{path} has merge conflicts")))
+                    .child(div().text_sm().font_semibold().child(tr!("{} has merge conflicts", path)))
                     .child(
                         div()
                             .text_xs()
                             .truncate()
                             .text_color(cx.theme().muted_foreground)
-                            .child(format!("Yours ({ours_name}): {ours}  ·  Theirs ({theirs_name}): {theirs}")),
+                            .child(tr!("Yours ({}): {}  ·  Theirs ({}): {}", ours_name, ours, theirs_name, theirs)),
                     ),
             )
             .child(
                 Button::new("card-yours")
-                    .label("Accept Yours")
+                    .label(tr!("Accept Yours"))
                     .small()
                     .on_click(resolve(true, self.model.clone(), path.clone())),
             )
             .child(
                 Button::new("card-theirs")
-                    .label("Accept Theirs")
+                    .label(tr!("Accept Theirs"))
                     .small()
                     .on_click(resolve(false, self.model.clone(), path.clone())),
             )
             .when(entry.can_merge_text(), |row| {
-                row.child(Button::new("card-merge").label("Merge…").primary().small().on_click(
+                row.child(Button::new("card-merge").label(tr!("Merge…")).primary().small().on_click(
                     move |_, window, cx| crate::merge_tool::open(merge_model.clone(), merge_path.clone(), window, cx),
                 ))
             })
@@ -929,7 +932,7 @@ impl ChangesView {
                     .gap_2()
                     .child(
                         Checkbox::new("amend")
-                            .label("Amend")
+                            .label(tr!("Amend"))
                             .checked(self.amend)
                             .on_click(cx.listener(|this, checked: &bool, window, cx| this.set_amend(*checked, window, cx))),
                     )
@@ -937,13 +940,13 @@ impl ChangesView {
                     .child(div().flex_1())
                     .child(
                         Button::new("commit-push")
-                            .label("Commit and Push")
+                            .label(tr!("Commit and Push"))
                             .small()
                             .on_click(cx.listener(|this, _, window, cx| this.commit(true, window, cx))),
                     )
                     .child(
                         Button::new("commit")
-                            .label("Commit")
+                            .label(tr!("Commit"))
                             .primary()
                             .small()
                             .on_click(cx.listener(|this, _, window, cx| this.commit(false, window, cx))),
@@ -984,7 +987,7 @@ impl Render for ChangesView {
                 .justify_center()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child("No local changes")
+                .child(tr!("No local changes"))
                 .into_any_element()
         } else {
             div()
@@ -1003,7 +1006,7 @@ impl Render for ChangesView {
                     v_flex()
                         .size_full()
                         .bg(cx.theme().sidebar)
-                        .child(panel_header("Local Changes", cx))
+                        .child(panel_header(tr!("Local Changes"), cx))
                         .child(self.render_toolbar(cx))
                         .child(list)
                         .child(self.render_commit_box(cx)),
@@ -1022,13 +1025,15 @@ impl Render for ChangesView {
 }
 
 /// The file manager's name for showing a file in its folder.
-const REVEAL_LABEL: &str = if cfg!(target_os = "macos") {
-    "Reveal in Finder"
-} else if cfg!(windows) {
-    "Show in Explorer"
-} else {
-    "Open Containing Folder"
-};
+fn reveal_label() -> &'static str {
+    if cfg!(target_os = "macos") {
+        tr!("Reveal in Finder")
+    } else if cfg!(windows) {
+        tr!("Show in Explorer")
+    } else {
+        tr!("Open Containing Folder")
+    }
+}
 
 /// Every changed line of `hunks`.
 fn changed_lines(hunks: &[Hunk]) -> HashSet<ChangedLine> {
@@ -1051,8 +1056,8 @@ fn prompt_shelve(model: &Entity<RepoModel>, paths: Vec<String>, window: &mut Win
     };
     let model = model.clone();
     prompt_text(
-        if paths.len() == 1 { "Shelve 1 File".to_string() } else { format!("Shelve {} Files", paths.len()) },
-        "Shelve",
+        if paths.len() == 1 { tr!("Shelve 1 File").to_string() } else { tr!("Shelve {} Files", paths.len()) },
+        tr!("Shelve"),
         default,
         move |name, _, cx| model.update(cx, |m, cx| m.shelve(name, paths.clone(), cx)),
         window,
@@ -1075,37 +1080,37 @@ fn changelist_menu(
     if !active {
         let name = name.to_string();
         menu = menu.item(item(
-            "Set as Active Changelist",
+            tr!("Set as Active Changelist"),
             Box::new(move |model, _, cx| model.update(cx, |m, cx| m.change_lists(|l| l.set_active(&name), cx))),
         ));
     }
     menu = menu.item(item(
-        "New Changelist...",
+        tr!("New Changelist..."),
         Box::new(|model, window, cx| {
             let model = model.clone();
-            prompt_text("New Changelist", "Create", "", move |new, _, cx| {
+            prompt_text(tr!("New Changelist"), tr!("Create"), "", move |new, _, cx| {
                 model.update(cx, |m, cx| m.change_lists(|l| l.create(&new), cx))
             }, window, cx);
         }),
     ));
     let old = name.to_string();
     menu = menu.item(item(
-        "Rename Changelist...",
+        tr!("Rename Changelist..."),
         Box::new(move |model, window, cx| {
             let (model, old) = (model.clone(), old.clone());
-            prompt_text("Rename Changelist", "Rename", old.clone(), move |new, _, cx| {
+            prompt_text(tr!("Rename Changelist"), tr!("Rename"), old.clone(), move |new, _, cx| {
                 model.update(cx, |m, cx| m.change_lists(|l| l.rename(&old, &new), cx))
             }, window, cx);
         }),
     ));
     let gone = name.to_string();
     menu = menu.item(item(
-        "Delete Changelist",
+        tr!("Delete Changelist"),
         Box::new(move |model, _, cx| model.update(cx, |m, cx| m.change_lists(|l| l.delete(&gone), cx))),
     ));
     if !paths.is_empty() {
         menu = menu.separator().item(item(
-            "Shelve Changes...",
+            tr!("Shelve Changes..."),
             Box::new(move |model, window, cx| prompt_shelve(model, paths.clone(), window, cx)),
         ));
     }

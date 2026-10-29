@@ -18,6 +18,7 @@ use crate::git::Shelf;
 use crate::log_view::panel_header;
 use crate::model::{RepoEvent, RepoModel};
 use crate::ui::{confirm, format_time, prompt_text, selection_bg};
+use crate::i18n::tr;
 
 pub struct ShelfView {
     model: Entity<RepoModel>,
@@ -78,7 +79,7 @@ impl ShelfView {
 
     fn load_diff(&mut self, cx: &mut Context<Self>) {
         let (Some(id), Some(file)) = (self.selected.clone(), self.file.clone()) else {
-            let message = if self.shelves(cx).is_empty() { "Nothing shelved" } else { "Select a file" };
+            let message = if self.shelves(cx).is_empty() { tr!("Nothing shelved") } else { tr!("Select a file") };
             self.diff.update(cx, |diff, cx| diff.show_message(None, message, cx));
             return;
         };
@@ -120,7 +121,7 @@ impl ShelfView {
                         }))
                         .context_menu(move |menu, _, _| {
                             let (model, id, path) = (model.clone(), id.clone(), path.clone());
-                            menu.item(PopupMenuItem::new("Unshelve This File").on_click(move |_, _, cx| {
+                            menu.item(PopupMenuItem::new(tr!("Unshelve This File")).on_click(move |_, _, cx| {
                                 let (id, path) = (id.clone(), path.clone());
                                 model.update(cx, |m, cx| m.unshelve(id, Some(vec![path]), cx))
                             }))
@@ -155,7 +156,7 @@ impl ShelfView {
                                     .text_xs()
                                     .truncate()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(format!(
+                                    .child(tr!(
                                         "{} · from {} · {}",
                                         crate::ui::file_count(shelf.files.len()),
                                         shelf.changelist,
@@ -184,27 +185,27 @@ fn shelf_menu(
     let (unshelve_model, unshelve_id) = (model.clone(), id.clone());
     let (rename_model, rename_id, old) = (model.clone(), id.clone(), name.clone());
     let (delete_model, delete_id) = (model.clone(), id);
-    menu.item(PopupMenuItem::new("Unshelve").on_click(move |_, _, cx| {
+    menu.item(PopupMenuItem::new(tr!("Unshelve")).on_click(move |_, _, cx| {
         let id = unshelve_id.clone();
         unshelve_model.update(cx, |m, cx| m.unshelve(id, None, cx))
     }))
-    .item(PopupMenuItem::new("Rename...").on_click(move |_, window, cx| {
+    .item(PopupMenuItem::new(tr!("Rename...")).on_click(move |_, window, cx| {
         let (model, id) = (rename_model.clone(), rename_id.clone());
-        prompt_text("Rename Shelf", "Rename", old.clone(), move |new, _, cx| {
+        prompt_text(tr!("Rename Shelf"), tr!("Rename"), old.clone(), move |new, _, cx| {
             let id = id.clone();
-            model.update(cx, |m, cx| m.run("Rename shelf", move |repo| repo.rename_shelf(&id, &new), cx))
+            model.update(cx, |m, cx| m.run(tr!("Rename shelf"), move |repo| repo.rename_shelf(&id, &new), cx))
         }, window, cx);
     }))
     .separator()
-    .item(PopupMenuItem::new("Delete...").on_click(move |_, window, cx| {
+    .item(PopupMenuItem::new(tr!("Delete...")).on_click(move |_, window, cx| {
         let (model, id) = (delete_model.clone(), delete_id.clone());
         confirm(
-            "Delete Shelf",
-            format!("Delete the shelf \"{name}\"? Its changes are lost."),
-            "Delete",
+            tr!("Delete Shelf"),
+            tr!("Delete the shelf '{}'? Its changes are lost.", name),
+            tr!("Delete"),
             move |_, cx| {
                 let id = id.clone();
-                model.update(cx, |m, cx| m.run("Delete shelf", move |repo| repo.delete_shelf(&id), cx))
+                model.update(cx, |m, cx| m.run(tr!("Delete shelf"), move |repo| repo.delete_shelf(&id), cx))
             },
             window,
             cx,
@@ -226,12 +227,12 @@ impl Render for ShelfView {
                 .p_4()
                 .text_color(cx.theme().muted_foreground)
                 .child(Icon::new(IconName::Inbox).large())
-                .child(div().text_sm().child("Nothing shelved"))
+                .child(div().text_sm().child(tr!("Nothing shelved")))
                 .child(
                     div()
                         .text_xs()
                         .text_center()
-                        .child("Shelve changes from the Commit tab to put them aside and bring them back later."),
+                        .child(tr!("Shelve changes from the Commit tab to put them aside and bring them back later.")),
                 )
                 .into_any_element()
         } else {
@@ -246,11 +247,11 @@ impl Render for ShelfView {
             .border_color(cx.theme().border)
             .child(
                 Button::new("unshelve")
-                    .label("Unshelve")
+                    .label(tr!("Unshelve"))
                     .icon(IconName::Undo2)
                     .small()
                     .ghost()
-                    .tooltip("Bring the selected shelf back into its changelist")
+                    .tooltip(tr!("Bring the selected shelf back into its changelist"))
                     .disabled(selected.is_none())
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(id) = this.selected.clone() {
@@ -264,7 +265,7 @@ impl Render for ShelfView {
                     v_flex()
                         .size_full()
                         .bg(cx.theme().sidebar)
-                        .child(panel_header("Shelf", cx))
+                        .child(panel_header(tr!("Shelf"), cx))
                         .child(toolbar)
                         .child(list),
                 ),

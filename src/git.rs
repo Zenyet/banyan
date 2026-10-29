@@ -5,6 +5,8 @@ use std::process::Command;
 
 use anyhow::{Context as _, Result, anyhow, bail};
 
+use crate::i18n::tr;
+
 const FIELD: char = '\x1f';
 const RECORD: char = '\x1e';
 
@@ -255,18 +257,18 @@ impl RepoState {
     pub fn noun(self) -> &'static str {
         match self {
             RepoState::Clean => "",
-            RepoState::Merging => "Merge",
-            RepoState::Rebasing => "Rebase",
-            RepoState::CherryPicking => "Cherry-Pick",
-            RepoState::Reverting => "Revert",
+            RepoState::Merging => tr!("Merge"),
+            RepoState::Rebasing => tr!("Rebase"),
+            RepoState::CherryPicking => tr!("Cherry-Pick"),
+            RepoState::Reverting => tr!("Revert"),
         }
     }
 
     /// The label of the button that finishes the operation.
     pub fn continue_label(self) -> String {
         match self {
-            RepoState::Merging => "Commit Merge".into(),
-            state => format!("Continue {}", state.noun()),
+            RepoState::Merging => tr!("Commit Merge").into(),
+            state => tr!("Continue {}", state.noun()),
         }
     }
 }
@@ -1216,34 +1218,34 @@ impl Repo {
                 let theirs = read("MERGE_MSG")
                     .and_then(|message| merged_name(&message))
                     .or_else(|| read("MERGE_HEAD").map(|id| self.describe(&id)))
-                    .unwrap_or_else(|| "the other branch".into());
-                operation(format!("Merging {theirs} into {head}"), head, theirs)
+                    .unwrap_or_else(|| tr!("the other branch").into());
+                operation(tr!("Merging {} into {}", theirs, head), head, theirs)
             }
             RepoState::Rebasing => {
                 let dir = if git_dir.join("rebase-merge").exists() { "rebase-merge" } else { "rebase-apply" };
                 let branch = read(&format!("{dir}/head-name"))
                     .map(|name| name.trim_start_matches("refs/heads/").to_string())
-                    .unwrap_or_else(|| "detached HEAD".into());
+                    .unwrap_or_else(|| tr!("detached HEAD").into());
                 let onto = read(&format!("{dir}/onto"))
                     .map(|id| self.describe(&id))
-                    .unwrap_or_else(|| "upstream".into());
+                    .unwrap_or_else(|| tr!("upstream").into());
                 let (step, total) = if dir == "rebase-merge" { ("msgnum", "end") } else { ("next", "last") };
                 let progress = match (read(&format!("{dir}/{step}")), read(&format!("{dir}/{total}"))) {
-                    (Some(step), Some(total)) => format!(" (commit {step} of {total})"),
+                    (Some(step), Some(total)) => tr!(" (commit {} of {})", step, total),
                     _ => String::new(),
                 };
                 let applying = read("REBASE_HEAD")
                     .map(|id| self.commit_label(&id))
                     .unwrap_or_else(|| branch.clone());
-                operation(format!("Rebasing {branch} onto {onto}{progress}"), onto, applying)
+                operation(tr!("Rebasing {} onto {}{}", branch, onto, progress), onto, applying)
             }
             RepoState::CherryPicking => {
                 let commit = read("CHERRY_PICK_HEAD").map(|id| self.commit_label(&id)).unwrap_or_default();
-                operation(format!("Cherry-picking {commit}"), head, commit)
+                operation(tr!("Cherry-picking {}", commit), head, commit)
             }
             RepoState::Reverting => {
                 let commit = read("REVERT_HEAD").map(|id| self.commit_label(&id)).unwrap_or_default();
-                operation(format!("Reverting {commit}"), head, format!("revert of {commit}"))
+                operation(tr!("Reverting {}", commit), head, tr!("revert of {}", commit))
             }
         })
     }

@@ -14,6 +14,7 @@ use crate::diff_pane::DiffPane;
 use crate::git::FileChange;
 use crate::model::RepoModel;
 use crate::ui::{selection_bg, status_color};
+use crate::i18n::tr;
 
 /// Changes from `rev` to the work tree.
 pub fn open(model: Entity<RepoModel>, rev: String, window: &mut Window, cx: &mut App) {
@@ -30,10 +31,10 @@ pub fn open_between(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let target = to.as_deref().map(|to| short(to).to_string()).unwrap_or_else(|| "Working Tree".into());
+    let target = to.as_deref().map(|to| short(to).to_string()).unwrap_or_else(|| tr!("Working Tree").into());
     let title = match &path {
         Some(path) => format!("{path}: {} vs {target}", short(&from)),
-        None => format!("Diff between {} and {target}", short(&from)),
+        None => tr!("Diff between {} and {}", short(&from), target),
     };
     let view = cx.new(|cx| WorktreeDiff::new(model, from, to, path, cx));
     window.open_dialog(cx, move |dialog, _, _| dialog.title(title.clone()).w(px(1200.)).child(view.clone()));
@@ -53,7 +54,7 @@ struct WorktreeDiff {
 impl WorktreeDiff {
     fn new(model: Entity<RepoModel>, rev: String, to: Option<String>, path: Option<String>, cx: &mut Context<Self>) -> Self {
         let diff = cx.new(DiffPane::new);
-        diff.update(cx, |diff, cx| diff.show_message(None, "Loading…", cx));
+        diff.update(cx, |diff, cx| diff.show_message(None, tr!("Loading…"), cx));
         let repo = model.read(cx).repo.clone();
         let (load_from, load_to) = (rev.clone(), to.clone());
         let task = cx.spawn(async move |this, cx| {
@@ -76,7 +77,7 @@ impl WorktreeDiff {
                     Ok(files) => {
                         this.files = files;
                         if this.files.is_empty() {
-                            this.diff.update(cx, |d, cx| d.show_message(None, "No differences", cx));
+                            this.diff.update(cx, |d, cx| d.show_message(None, tr!("No differences"), cx));
                         } else {
                             this.select(0, cx);
                         }
@@ -153,7 +154,7 @@ impl Render for WorktreeDiff {
                                         .py_1()
                                         .text_xs()
                                         .text_color(cx.theme().muted_foreground)
-                                        .child(if self.loading { "Loading…".to_string() } else { crate::ui::file_count(count) }),
+                                        .child(if self.loading { tr!("Loading…").to_string() } else { crate::ui::file_count(count) }),
                                 )
                                 .child(div().id("worktree-files").flex_1().min_h_0().overflow_y_scroll().children(rows)),
                         ),

@@ -16,6 +16,7 @@ use gpui_kit::*;
 
 use crate::git::Repo;
 use crate::settings::Settings;
+use crate::i18n::tr;
 
 thread_local! {
     static WINDOW: RefCell<Option<AnyWindowHandle>> = const { RefCell::new(None) };
@@ -33,7 +34,7 @@ pub fn open(cx: &mut App) {
         ..Default::default()
     };
     let (handle, _) = gpui_kit::open_window(options, cx, |window, cx| {
-        window.set_window_title("Welcome to Banyan");
+        window.set_window_title(tr!("Welcome to Banyan"));
         cx.new(|_| Welcome)
     })
     .expect("failed to open window");
@@ -84,21 +85,21 @@ fn close(replace: Option<AnyWindowHandle>, window: &mut Window, cx: &mut App) {
 fn offer_init(dir: PathBuf, replace: Option<AnyWindowHandle>, window: &mut Window, cx: &mut App) {
     window.open_dialog(cx, move |dialog, _, cx| {
         let dir = dir.clone();
-        dialog.title("Not a Git Repository").w(px(460.)).child(
+        dialog.title(tr!("Not a Git Repository")).w(px(460.)).child(
             v_flex()
                 .gap_4()
                 .child(
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child(format!("{} is not inside a Git repository. Create one there?", tilde(&dir))),
+                        .child(tr!("{} is not inside a Git repository. Create one there?", tilde(&dir))),
                 )
                 .child(
                     h_flex()
                         .justify_end()
                         .gap_2()
-                        .child(Button::new("init-cancel").label("Cancel").on_click(|_, window, cx| window.close_dialog(cx)))
-                        .child(Button::new("init-create").label("Create Repository").primary().on_click(
+                        .child(Button::new("init-cancel").label(tr!("Cancel")).on_click(|_, window, cx| window.close_dialog(cx)))
+                        .child(Button::new("init-create").label(tr!("Create Repository")).primary().on_click(
                             move |_, window, cx| {
                                 window.close_dialog(cx);
                                 match Repo::init(&dir) {
@@ -147,12 +148,12 @@ impl Welcome {
                     .pt_4()
                     .pb_6()
                     .child(img("images/banyan.png").size(px(88.)))
-                    .child(div().text_xl().font_semibold().child("Banyan"))
+                    .child(div().text_xl().font_semibold().child(tr!("Banyan")))
                     .child(
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(format!("Version {}", env!("CARGO_PKG_VERSION"))),
+                            .child(tr!("Version {}", env!("CARGO_PKG_VERSION"))),
                     ),
             )
             .child(
@@ -160,14 +161,14 @@ impl Welcome {
                     .primary()
                     .w_full()
                     .icon(IconName::FolderOpen)
-                    .label("Open Repository…")
+                    .label(tr!("Open Repository…"))
                     .on_click(|_, window, cx| crate::prompt_open_repo(Some(window.window_handle()), cx)),
             )
             .child(
                 Button::new("welcome-clone")
                     .w_full()
                     .icon(IconName::Download)
-                    .label("Clone Repository…")
+                    .label(tr!("Clone Repository…"))
                     .on_click(|_, window, cx| crate::clone_dialog::open(Some(window.window_handle()), window, cx)),
             )
             .child(div().flex_1())
@@ -176,7 +177,7 @@ impl Welcome {
                     .ghost()
                     .small()
                     .icon(IconName::Settings)
-                    .label("Settings")
+                    .label(tr!("Settings"))
                     .on_click(|_, _, cx| crate::settings_window::open(cx)),
             )
     }
@@ -189,7 +190,7 @@ impl Welcome {
             .text_sm()
             .font_semibold()
             .text_color(cx.theme().muted_foreground)
-            .child("Recent Repositories");
+            .child(tr!("Recent Repositories"));
         let body = if recent.is_empty() {
             v_flex()
                 .flex_1()
@@ -203,8 +204,8 @@ impl Welcome {
                 .rounded(cx.theme().radius_lg)
                 .text_color(cx.theme().muted_foreground)
                 .child(Icon::new(IconName::FolderOpen).large())
-                .child(div().text_sm().child("Drag a repository folder here to open it"))
-                .child(div().text_xs().child("or choose Open Repository… or Clone Repository…"))
+                .child(div().text_sm().child(tr!("Drag a repository folder here to open it")))
+                .child(div().text_xs().child(tr!("or choose Open Repository… or Clone Repository…")))
                 .into_any_element()
         } else {
             v_flex()
@@ -230,7 +231,7 @@ impl Welcome {
                     .px_3()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Tip: drop a folder anywhere on this window to open it."),
+                    .child(tr!("Tip: drop a folder anywhere on this window to open it.")),
             )
     }
 
@@ -274,7 +275,7 @@ impl Welcome {
                             .text_xs()
                             .truncate()
                             .text_color(cx.theme().muted_foreground)
-                            .child(if exists { tilde(&path) } else { format!("{} (not found)", tilde(&path)) }),
+                            .child(if exists { tilde(&path) } else { tr!("{} (not found)", tilde(&path)) }),
                     ),
             )
             .child(
@@ -283,7 +284,7 @@ impl Welcome {
                         .icon(IconName::Close)
                         .ghost()
                         .xsmall()
-                        .tooltip("Remove from Recent")
+                        .tooltip(tr!("Remove from Recent"))
                         .on_click(cx.listener(move |_, _, _, cx| {
                             cx.stop_propagation();
                             Settings::remove_recent(&path);
@@ -329,7 +330,7 @@ impl Render for Welcome {
                         .border_color(cx.theme().primary)
                         .bg(cx.theme().background.opacity(0.92))
                         .child(Icon::new(IconName::FolderOpen).large().text_color(cx.theme().primary))
-                        .child(div().text_lg().font_semibold().child("Drop to open the repository")),
+                        .child(div().text_lg().font_semibold().child(tr!("Drop to open the repository"))),
                 )
             })
     }

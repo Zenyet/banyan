@@ -12,6 +12,7 @@ use gpui_kit::*;
 
 use crate::git::git_version;
 use crate::settings::{Settings, ThemeChoice};
+use crate::i18n::tr;
 
 thread_local! {
     static OPEN: Cell<Option<AnyWindowHandle>> = const { Cell::new(None) };
@@ -29,7 +30,7 @@ pub fn open(cx: &mut App) {
         ..Default::default()
     };
     let window = gpui_kit::open_window(options, cx, |window, cx| {
-        window.set_window_title("Settings");
+        window.set_window_title(tr!("Settings"));
         cx.new(SettingsWindow::new)
     });
     if let Ok(window) = window {
@@ -40,6 +41,7 @@ pub fn open(cx: &mut App) {
 /// Theme and font size from the settings, for all windows.
 pub fn apply_appearance(cx: &mut App) {
     let (theme, font_size) = Settings::read(|s| (s.theme, s.font_size));
+    crate::i18n::apply(&Settings::read(|s| s.language.clone()));
     match theme {
         ThemeChoice::System => Theme::sync_system_appearance(None, cx),
         ThemeChoice::Light => Theme::change(ThemeMode::Light, None, cx),
@@ -78,7 +80,7 @@ impl SettingsWindow {
         if self.git_check.as_ref().is_some_and(|(checked, _)| *checked == program) {
             return;
         }
-        self.git_check = Some((program.clone(), Ok("Checking…".into())));
+        self.git_check = Some((program.clone(), Ok(tr!("Checking…").into())));
         self._check = Some(cx.spawn(async move |this, cx| {
             let checked = program.clone();
             let result = cx
@@ -94,36 +96,46 @@ impl SettingsWindow {
     }
 
     fn appearance_page() -> SettingPage {
-        SettingPage::new("Appearance").icon(IconName::Palette).groups([
-            SettingGroup::new().title("Theme").items([
+        SettingPage::new(tr!("Appearance")).icon(IconName::Palette).groups([
+            SettingGroup::new().title(tr!("Theme")).items([
                 SettingItem::new(
-                    "Theme",
+                    tr!("Theme"),
                     choice(
-                        ThemeChoice::ALL.iter().map(|t| (t.label().to_string(), t.label().to_string())),
-                        |s| s.theme.label().to_string(),
+                        ThemeChoice::ALL.iter().map(|t| (t.key().to_string(), t.label().to_string())),
+                        |s| s.theme.key().to_string(),
                         |s, value| {
-                            if let Some(theme) = ThemeChoice::ALL.into_iter().find(|t| t.label() == value) {
+                            if let Some(theme) = ThemeChoice::ALL.into_iter().find(|t| t.key() == value) {
                                 s.theme = theme;
                             }
                         },
                     ),
                 )
-                .description("Sync with OS follows the macOS appearance."),
+                .description(tr!("Sync with OS follows the macOS appearance.")),
                 SettingItem::new(
-                    "Font size",
+                    tr!("Font size"),
                     choice(
                         (12..=20).map(|size| (size.to_string(), format!("{size} px"))),
                         |s| s.font_size.to_string(),
                         |s, value| s.font_size = value.parse().unwrap_or(s.font_size),
                     ),
                 )
-                .description("Size of the interface text; diffs scale with it."),
-            ]),
-            SettingGroup::new().title("Log").item(
+                .description(tr!("Size of the interface text; diffs scale with it.")),
                 SettingItem::new(
-                    "Commit dates",
+                    tr!("Language"),
                     choice(
-                        [("relative", "Relative (3 minutes ago)"), ("absolute", "Date and time")]
+                        [("system", tr!("Same as the system")), ("en", "English"), ("zh", "简体中文")]
+                            .map(|(key, label)| (key.to_string(), label.to_string())),
+                        |s| s.language.clone(),
+                        |s, value| s.language = value.to_string(),
+                    ),
+                )
+                .description(tr!("Menus in the menu bar change after a restart.")),
+            ]),
+            SettingGroup::new().title(tr!("Log")).item(
+                SettingItem::new(
+                    tr!("Commit dates"),
+                    choice(
+                        [("relative", tr!("Relative (3 minutes ago)")), ("absolute", tr!("Date and time"))]
                             .map(|(key, label)| (key.to_string(), label.to_string())),
                         |s| if s.relative_dates { "relative" } else { "absolute" }.to_string(),
                         |s, value| s.relative_dates = value == "relative",
@@ -136,13 +148,13 @@ impl SettingsWindow {
     fn git_page(&self) -> SettingPage {
         let version: SharedString = match &self.git_check {
             Some((_, Ok(version))) => version.clone().into(),
-            Some((_, Err(err))) => format!("Not usable: {err}").into(),
+            Some((_, Err(err))) => tr!("Not usable: {}", err).into(),
             None => "".into(),
         };
-        SettingPage::new("Version Control").icon(IconName::GitBranch).groups([
-            SettingGroup::new().title("Git").items([
+        SettingPage::new(tr!("Version Control")).icon(IconName::GitBranch).groups([
+            SettingGroup::new().title(tr!("Git")).items([
                 SettingItem::new(
-                    "Path to Git executable",
+                    tr!("Path to Git executable"),
                     SettingField::input(
                         |_| Settings::read(|s| s.git_path.clone()).into(),
                         |value: SharedString, cx| {
@@ -151,28 +163,28 @@ impl SettingsWindow {
                         },
                     ),
                 )
-                .description(format!("Leave empty to use git from the PATH. {version}"))
+                .description(tr!("Leave empty to use git from the PATH. {}", version))
                 .layout(Axis::Vertical),
             ]),
-            SettingGroup::new().title("Update and Fetch").items([
+            SettingGroup::new().title(tr!("Update and Fetch")).items([
                 SettingItem::new(
-                    "Update Project",
+                    tr!("Update Project"),
                     choice(
-                        [("merge", "Merge incoming changes"), ("rebase", "Rebase onto incoming changes")]
+                        [("merge", tr!("Merge incoming changes")), ("rebase", tr!("Rebase onto incoming changes"))]
                             .map(|(key, label)| (key.to_string(), label.to_string())),
                         |s| if s.update_rebase { "rebase" } else { "merge" }.to_string(),
                         |s, value| s.update_rebase = value == "rebase",
                     ),
                 )
-                .description("The default in the Update Project dialog."),
+                .description(tr!("The default in the Update Project dialog.")),
                 SettingItem::new(
-                    "Fetch in the background",
+                    tr!("Fetch in the background"),
                     choice(
                         [0, 5, 10, 15, 30, 60].map(|minutes| {
                             let label = match minutes {
-                                0 => "Never".to_string(),
-                                60 => "Every hour".to_string(),
-                                m => format!("Every {m} minutes"),
+                                0 => tr!("Never").to_string(),
+                                60 => tr!("Every hour").to_string(),
+                                m => tr!("Every {} minutes", m),
                             };
                             (minutes.to_string(), label)
                         }),
@@ -180,43 +192,43 @@ impl SettingsWindow {
                         |s, value| s.auto_fetch_minutes = value.parse().unwrap_or(0),
                     ),
                 )
-                .description("Keeps remote branches current. Never asks for credentials; stored ones are used."),
+                .description(tr!("Keeps remote branches current. Never asks for credentials; stored ones are used.")),
             ]),
         ])
     }
 
     fn diff_log_page() -> SettingPage {
-        SettingPage::new("Diff and Log").icon(IconName::GitCompare).groups([
-            SettingGroup::new().title("Diff").items([
+        SettingPage::new(tr!("Diff and Log")).icon(IconName::GitCompare).groups([
+            SettingGroup::new().title(tr!("Diff")).items([
                 SettingItem::new(
-                    "Show diffs",
+                    tr!("Show diffs"),
                     choice(
-                        [("split", "Side by side"), ("unified", "Unified")]
+                        [("split", tr!("Side by side")), ("unified", tr!("Unified"))]
                             .map(|(key, label)| (key.to_string(), label.to_string())),
                         |s| if s.unified_diff { "unified" } else { "split" }.to_string(),
                         |s, value| s.unified_diff = value == "unified",
                     ),
                 ),
                 SettingItem::new(
-                    "Whitespace changes",
+                    tr!("Whitespace changes"),
                     choice(
-                        [("show", "Show"), ("ignore", "Ignore")].map(|(key, label)| (key.to_string(), label.to_string())),
+                        [("show", tr!("Show")), ("ignore", tr!("Ignore"))].map(|(key, label)| (key.to_string(), label.to_string())),
                         |s| if s.ignore_whitespace { "ignore" } else { "show" }.to_string(),
                         |s, value| s.ignore_whitespace = value == "ignore",
                     ),
                 )
-                .description("Also the Ignore Whitespace button above every diff."),
+                .description(tr!("Also the Ignore Whitespace button above every diff.")),
             ]),
-            SettingGroup::new().title("Log").item(
+            SettingGroup::new().title(tr!("Log")).item(
                 SettingItem::new(
-                    "Commits loaded at a time",
+                    tr!("Commits loaded at a time"),
                     choice(
                         [1000, 2000, 5000, 10000, 20000].map(|n| (n.to_string(), n.to_string())),
                         |s| s.log_page_size.to_string(),
                         |s, value| s.log_page_size = value.parse().unwrap_or(s.log_page_size),
                     ),
                 )
-                .description("More are loaded when you scroll to the end. Applies from the next refresh."),
+                .description(tr!("More are loaded when you scroll to the end. Applies from the next refresh.")),
             ),
         ])
     }

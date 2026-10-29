@@ -107,6 +107,7 @@ the way git branches grow apart and merge back.
 - A **Git console** tab showing every git command your actions run, with output and timing.
 - Refreshes automatically when files, the index or refs change. Git-ignored files are skipped.
 - Light and dark themes, or follow macOS.
+- English or Simplified Chinese (简体中文), following the system language or chosen in Settings.
 
 ## Installation
 

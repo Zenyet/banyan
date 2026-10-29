@@ -15,6 +15,7 @@ use crate::diff_pane::DiffPane;
 use crate::git::{BlameLine, FileRevision};
 use crate::model::{RepoEvent, RepoModel};
 use crate::ui::{format_time, lane_color, selection_bg};
+use crate::i18n::tr;
 
 const ROW_HEIGHT: Pixels = px(24.);
 
@@ -22,7 +23,7 @@ pub fn show_history(model: Entity<RepoModel>, path: String, window: &mut Window,
     let view = cx.new(|cx| HistoryView::new(model, path.clone(), cx));
     window.open_dialog(cx, move |dialog, _, _| {
         dialog
-            .title(format!("History for {path}"))
+            .title(tr!("History for {}", path))
             .w(px(1200.))
             .child(view.clone())
     });
@@ -32,7 +33,7 @@ pub fn annotate(model: Entity<RepoModel>, rev: String, path: String, window: &mu
     let view = cx.new(|cx| AnnotateView::new(model, rev.clone(), path.clone(), cx));
     window.open_dialog(cx, move |dialog, _, _| {
         dialog
-            .title(format!("Annotate {path} at {}", short(&rev)))
+            .title(tr!("Annotate {} at {}", path, short(&rev)))
             .w(px(1200.))
             .child(view.clone())
     });
@@ -56,7 +57,7 @@ struct HistoryView {
 impl HistoryView {
     fn new(model: Entity<RepoModel>, path: String, cx: &mut Context<Self>) -> Self {
         let diff = cx.new(DiffPane::new);
-        diff.update(cx, |diff, cx| diff.show_message(None, "Loading history…", cx));
+        diff.update(cx, |diff, cx| diff.show_message(None, tr!("Loading history…"), cx));
         let repo = model.read(cx).repo.clone();
         let file = path.clone();
         let task = cx.spawn(async move |this, cx| {
@@ -90,7 +91,7 @@ impl HistoryView {
 
     fn select(&mut self, ix: usize, cx: &mut Context<Self>) {
         let Some(revision) = self.revisions.get(ix).cloned() else {
-            self.diff.update(cx, |diff, cx| diff.show_message(None, "No history", cx));
+            self.diff.update(cx, |diff, cx| diff.show_message(None, tr!("No history"), cx));
             return;
         };
         self.selected = Some(ix);
@@ -157,12 +158,12 @@ impl Render for HistoryView {
                                 let id = id.clone();
                                 let path = path.clone();
                                 let (m, i, p) = (model.clone(), id.clone(), path.clone());
-                                menu.item(PopupMenuItem::new("Annotate at This Revision").on_click(
+                                menu.item(PopupMenuItem::new(tr!("Annotate at This Revision")).on_click(
                                     move |_, window, cx| {
                                         annotate(model.clone(), id.clone(), path.clone(), window, cx)
                                     },
                                 ))
-                                .item(PopupMenuItem::new("Compare with Local").on_click(move |_, window, cx| {
+                                .item(PopupMenuItem::new(tr!("Compare with Local")).on_click(move |_, window, cx| {
                                     crate::worktree_diff::open_between(
                                         m.clone(),
                                         i.clone(),
@@ -192,9 +193,9 @@ impl Render for HistoryView {
                     .border_b_1()
                     .border_color(cx.theme().border)
                     .child(if self.loading {
-                        "Loading…".to_string()
+                        tr!("Loading…").to_string()
                     } else {
-                        format!("{count} revisions of {}", self.path)
+                        tr!("{} revisions of {}", count, self.path)
                     }),
             )
             .child(div().flex_1().min_h_0().child(list));
@@ -332,7 +333,7 @@ impl Render for AnnotateView {
             .border_color(cx.theme().border)
             .rounded(cx.theme().radius)
             .overflow_hidden()
-            .when(self.loading, |el| el.child(div().p_3().text_sm().child("Loading…")))
+            .when(self.loading, |el| el.child(div().p_3().text_sm().child(tr!("Loading…"))))
             .child(list)
     }
 }

@@ -17,6 +17,7 @@ use gpui_kit::*;
 
 use crate::model::RepoModel;
 use crate::ui::format_full_time;
+use crate::i18n::tr;
 
 const MAX_ENTRIES: usize = 500;
 const MAX_OUTPUT: usize = 8000;
@@ -179,7 +180,7 @@ impl Render for ConsoleView {
                             .icon(IconName::Trash)
                             .ghost()
                             .xsmall()
-                            .tooltip("Clear")
+                            .tooltip(tr!("Clear"))
                             .on_click(cx.listener(move |_, _, _, cx| {
                                 clear(&root);
                                 cx.notify();
@@ -194,7 +195,7 @@ impl Render for ConsoleView {
                     .justify_center()
                     .text_sm()
                     .text_color(muted)
-                    .child("Git commands run by your actions appear here")
+                    .child(tr!("Git commands run by your actions appear here"))
                     .into_any_element()
             } else {
                 div()

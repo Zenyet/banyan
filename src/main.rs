@@ -25,6 +25,7 @@ mod edit_history;
 mod git;
 mod graph;
 mod history;
+mod i18n;
 mod log_view;
 mod merge_tool;
 mod model;
@@ -51,6 +52,7 @@ use gpui_kit::*;
 use crate::git::Repo;
 use crate::model::RepoModel;
 use crate::workspace::Workspace;
+use crate::i18n::tr;
 
 actions!(banyan, [Quit, OpenRepository, CloseWindow, OpenSettings]);
 
@@ -98,35 +100,35 @@ fn main() {
             ]);
             cx.set_menus(vec![
                 Menu {
-                    name: "Banyan".into(),
+                    name: tr!("Banyan").into(),
                     items: vec![
-                        MenuItem::action("Settings…", OpenSettings),
+                        MenuItem::action(tr!("Settings…"), OpenSettings),
                         MenuItem::separator(),
-                        MenuItem::action("Quit Banyan", Quit),
+                        MenuItem::action(tr!("Quit Banyan"), Quit),
                     ],
                     disabled: false,
                 },
                 Menu {
-                    name: "Git".into(),
+                    name: tr!("Git").into(),
                     items: vec![
-                        MenuItem::action("Commit…", workspace::CommitChanges),
-                        MenuItem::action("Push…", workspace::PushCommits),
-                        MenuItem::action("Update Project", workspace::UpdateProject),
-                        MenuItem::action("Apply Patch…", workspace::ApplyPatch),
+                        MenuItem::action(tr!("Commit…"), workspace::CommitChanges),
+                        MenuItem::action(tr!("Push…"), workspace::PushCommits),
+                        MenuItem::action(tr!("Update Project"), workspace::UpdateProject),
+                        MenuItem::action(tr!("Apply Patch…"), workspace::ApplyPatch),
                         MenuItem::separator(),
-                        MenuItem::action("Show Log", workspace::ShowLog),
-                        MenuItem::action("Show Commit", workspace::ShowCommitTab),
-                        MenuItem::action("Show Console", workspace::ShowConsole),
-                        MenuItem::action("Refresh", workspace::RefreshRepository),
+                        MenuItem::action(tr!("Show Log"), workspace::ShowLog),
+                        MenuItem::action(tr!("Show Commit"), workspace::ShowCommitTab),
+                        MenuItem::action(tr!("Show Console"), workspace::ShowConsole),
+                        MenuItem::action(tr!("Refresh"), workspace::RefreshRepository),
                     ],
                     disabled: false,
                 },
                 Menu {
-                    name: "File".into(),
+                    name: tr!("File").into(),
                     items: vec![
-                        MenuItem::action("Open Repository…", OpenRepository),
+                        MenuItem::action(tr!("Open Repository…"), OpenRepository),
                         MenuItem::separator(),
-                        MenuItem::action("Close Window", CloseWindow),
+                        MenuItem::action(tr!("Close Window"), CloseWindow),
                     ],
                     disabled: false,
                 },
@@ -215,7 +217,7 @@ pub fn prompt_open_repo(replace: Option<AnyWindowHandle>, cx: &mut App) {
         files: false,
         directories: true,
         multiple: false,
-        prompt: Some("Open Repository".into()),
+        prompt: Some(tr!("Open Repository").into()),
     });
     cx.spawn(async move |cx| {
         let Ok(Ok(Some(paths))) = paths.await else { return };

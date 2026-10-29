@@ -14,6 +14,7 @@ use gpui_kit::*;
 
 use crate::git::Repo;
 use crate::settings::Settings;
+use crate::i18n::tr;
 
 /// `replace` is closed once the clone opens (the welcome window).
 pub fn open(replace: Option<AnyWindowHandle>, window: &mut Window, cx: &mut App) {
@@ -24,7 +25,7 @@ pub fn open(replace: Option<AnyWindowHandle>, window: &mut Window, cx: &mut App)
         if needs_focus.replace(false) {
             focus.focus_handle(cx).focus(window, cx);
         }
-        dialog.title("Clone Repository").w(px(560.)).child(view.clone())
+        dialog.title(tr!("Clone Repository")).w(px(560.)).child(view.clone())
     });
 }
 
@@ -97,7 +98,7 @@ impl CloneDialog {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some("Clone Into".into()),
+            prompt: Some(tr!("Clone Into").into()),
         });
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = paths.await else { return };
@@ -119,7 +120,7 @@ impl CloneDialog {
             return;
         }
         if dest.exists() && dest.read_dir().is_ok_and(|mut entries| entries.next().is_some()) {
-            self.error = Some(format!("{} already exists and is not empty", dest.display()).into());
+            self.error = Some(tr!("{} already exists and is not empty", dest.display()).into());
             cx.notify();
             return;
         }
@@ -162,14 +163,14 @@ impl Render for CloneDialog {
             .gap_3()
             .child(label("URL"))
             .child(Input::new(&self.url))
-            .child(label("Directory"))
+            .child(label(tr!("Directory")))
             .child(
                 h_flex()
                     .gap_2()
                     .child(div().flex_1().child(Input::new(&self.dir)))
                     .child(
                         Button::new("clone-browse")
-                            .label("Browse…")
+                            .label(tr!("Browse…"))
                             .small()
                             .on_click(cx.listener(|this, _, window, cx| this.browse(window, cx))),
                     ),
@@ -182,17 +183,17 @@ impl Render for CloneDialog {
                     .gap_2()
                     .justify_end()
                     .when(self.cloning, |row| {
-                        row.child(div().text_sm().text_color(cx.theme().muted_foreground).child("Cloning…"))
+                        row.child(div().text_sm().text_color(cx.theme().muted_foreground).child(tr!("Cloning…")))
                     })
                     .child(
                         Button::new("clone-cancel")
-                            .label("Cancel")
+                            .label(tr!("Cancel"))
                             .small()
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
                         Button::new("clone-confirm")
-                            .label("Clone")
+                            .label(tr!("Clone"))
                             .primary()
                             .small()
                             .disabled(self.cloning)

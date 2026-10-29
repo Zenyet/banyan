@@ -13,6 +13,7 @@ use crate::diff_pane::DiffPane;
 use crate::git::{Commit, CommitDetails};
 use crate::model::RepoModel;
 use crate::ui::{format_time, selection_bg, status_color};
+use crate::i18n::tr;
 
 pub struct CommitBrowser {
     model: Entity<RepoModel>,
@@ -36,7 +37,7 @@ impl CommitBrowser {
             details: None,
             selected_file: None,
             diff,
-            empty_message: "No commits".into(),
+            empty_message: tr!("No commits").into(),
             details_task: None,
         }
     }
@@ -74,7 +75,7 @@ impl CommitBrowser {
                     if has_files {
                         this.select_file(0, cx);
                     } else {
-                        this.diff.update(cx, |diff, cx| diff.show_message(None, "No changed files", cx));
+                        this.diff.update(cx, |diff, cx| diff.show_message(None, tr!("No changed files"), cx));
                     }
                     cx.notify();
                 }

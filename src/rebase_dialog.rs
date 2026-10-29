@@ -16,6 +16,7 @@ use crate::actions::short;
 use crate::git::{Commit, RebaseAction};
 use crate::model::{RepoEvent, RepoModel};
 use crate::ui::{prompt_text, selection_bg};
+use crate::i18n::tr;
 
 pub fn open(model: Entity<RepoModel>, from: String, window: &mut Window, cx: &mut App) {
     let repo = model.read(cx).repo.clone();
@@ -33,7 +34,7 @@ pub fn open(model: Entity<RepoModel>, from: String, window: &mut Window, cx: &mu
                         let view = cx.new(|_| RebaseDialog::new(model, from, commits));
                         window.open_dialog(cx, move |dialog, _, _| {
                             dialog
-                                .title("Interactive Rebase")
+                                .title(tr!("Interactive Rebase"))
                                 .w(px(860.))
                                 .child(view.clone())
                         });
@@ -41,7 +42,7 @@ pub fn open(model: Entity<RepoModel>, from: String, window: &mut Window, cx: &mu
                     .ok();
             }
             Err(err) => model.update(cx, |_, cx| {
-                cx.emit(RepoEvent::OpFailed(format!("Cannot rebase: {err:#}").into()))
+                cx.emit(RepoEvent::OpFailed(format!("{}: {err:#}", tr!("Cannot rebase")).into()))
             }),
         });
     })
@@ -68,7 +69,7 @@ impl RebaseDialog {
             .first()
             .and_then(|c| c.parents.first())
             .map(|p| short(p).to_string())
-            .unwrap_or_else(|| "the root".into());
+            .unwrap_or_else(|| tr!("the root").into());
         Self {
             model,
             from,
@@ -105,7 +106,7 @@ impl RebaseDialog {
     fn validation_error(&self) -> Option<&'static str> {
         let first_kept = self.entries.iter().find(|e| e.action != RebaseAction::Drop)?;
         if matches!(first_kept.action, RebaseAction::Squash | RebaseAction::Fixup) {
-            return Some("The first commit cannot be squashed or fixed up");
+            return Some(tr!("The first commit cannot be squashed or fixed up"));
         }
         None
     }
@@ -127,7 +128,7 @@ impl RebaseDialog {
         let from = self.from.clone();
         window.close_dialog(cx);
         self.model.update(cx, |model, cx| {
-            model.run("Interactive rebase", move |repo| repo.interactive_rebase(&from, &plan), cx)
+            model.run(tr!("Interactive rebase"), move |repo| repo.interactive_rebase(&from, &plan), cx)
         });
     }
 
@@ -136,11 +137,11 @@ impl RebaseDialog {
         let selected = self.selected == ix;
         let view = cx.entity().downgrade();
         let (label, color): (&str, Hsla) = match entry.action {
-            RebaseAction::Pick => ("Pick", cx.theme().foreground),
-            RebaseAction::Reword(_) => ("Reword", rgb(0x4d8ee8).into()),
-            RebaseAction::Squash => ("Squash", rgb(0x9a6ad6).into()),
-            RebaseAction::Fixup => ("Fixup", rgb(0x9a6ad6).into()),
-            RebaseAction::Drop => ("Drop", cx.theme().danger),
+            RebaseAction::Pick => (tr!("Pick"), cx.theme().foreground),
+            RebaseAction::Reword(_) => (tr!("Reword"), rgb(0x4d8ee8).into()),
+            RebaseAction::Squash => (tr!("Squash"), rgb(0x9a6ad6).into()),
+            RebaseAction::Fixup => (tr!("Fixup"), rgb(0x9a6ad6).into()),
+            RebaseAction::Drop => (tr!("Drop"), cx.theme().danger),
         };
         let dropped = entry.action == RebaseAction::Drop;
         let subject = match &entry.action {
@@ -171,10 +172,10 @@ impl RebaseDialog {
                     .dropdown_caret(true)
                     .dropdown_menu(move |mut menu, _, _| {
                         for (name, action) in [
-                            ("Pick", RebaseAction::Pick),
-                            ("Squash", RebaseAction::Squash),
-                            ("Fixup", RebaseAction::Fixup),
-                            ("Drop", RebaseAction::Drop),
+                            (tr!("Pick"), RebaseAction::Pick),
+                            (tr!("Squash"), RebaseAction::Squash),
+                            (tr!("Fixup"), RebaseAction::Fixup),
+                            (tr!("Drop"), RebaseAction::Drop),
                         ] {
                             let view = view.clone();
                             menu = menu.item(PopupMenuItem::new(name).on_click(move |_, _, cx| {
@@ -184,11 +185,11 @@ impl RebaseDialog {
                         }
                         let view = view.clone();
                         let original = original_subject.clone();
-                        menu.item(PopupMenuItem::new("Reword...").on_click(move |_, window, cx| {
+                        menu.item(PopupMenuItem::new(tr!("Reword...")).on_click(move |_, window, cx| {
                             let view = view.clone();
                             prompt_text(
-                                "Reword Commit",
-                                "Reword",
+                                tr!("Reword Commit"),
+                                tr!("Reword"),
                                 original.clone(),
                                 move |message, _, cx| {
                                     view.update(cx, |this, cx| {
@@ -243,7 +244,7 @@ impl Render for RebaseDialog {
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!(
+                    .child(tr!(
                         "{} commits, oldest first. Rebasing onto {}.",
                         self.entries.len(),
                         self.onto
@@ -266,14 +267,14 @@ impl Render for RebaseDialog {
                         Button::new("move-up")
                             .icon(IconName::ArrowUp)
                             .small()
-                            .tooltip("Move Up")
+                            .tooltip(tr!("Move Up"))
                             .on_click(cx.listener(|this, _, _, cx| this.move_selected(-1, cx))),
                     )
                     .child(
                         Button::new("move-down")
                             .icon(IconName::ArrowDown)
                             .small()
-                            .tooltip("Move Down")
+                            .tooltip(tr!("Move Down"))
                             .on_click(cx.listener(|this, _, _, cx| this.move_selected(1, cx))),
                     )
                     .when_some(error, |row, error| {
@@ -282,13 +283,13 @@ impl Render for RebaseDialog {
                     .child(div().flex_1())
                     .child(
                         Button::new("rebase-cancel")
-                            .label("Cancel")
+                            .label(tr!("Cancel"))
                             .small()
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
                         Button::new("rebase-start")
-                            .label("Start Rebasing")
+                            .label(tr!("Start Rebasing"))
                             .primary()
                             .small()
                             .disabled(!can_start)

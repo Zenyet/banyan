@@ -63,7 +63,11 @@ mod tests {
     fn every_icon_used_is_bundled() {
         let mut missing = Vec::new();
         for entry in std::fs::read_dir("src").unwrap() {
-            let source = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                continue;
+            }
+            let source = std::fs::read_to_string(path).unwrap();
             for (start, prefix) in source.match_indices("IconName::") {
                 let rest = &source[start + prefix.len()..];
                 let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric()).collect();

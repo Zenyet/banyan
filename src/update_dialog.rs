@@ -9,13 +9,14 @@ use gpui_kit::*;
 
 use crate::model::RepoModel;
 use crate::settings::Settings;
+use crate::i18n::tr;
 
 pub fn open(model: Entity<RepoModel>, window: &mut Window, cx: &mut App) {
     let view = cx.new(|_| UpdateDialog {
         model,
         rebase: Settings::get().update_rebase,
     });
-    window.open_dialog(cx, move |dialog, _, _| dialog.title("Update Project").w(px(440.)).child(view.clone()));
+    window.open_dialog(cx, move |dialog, _, _| dialog.title(tr!("Update Project")).w(px(440.)).child(view.clone()));
 }
 
 struct UpdateDialog {
@@ -29,7 +30,7 @@ impl UpdateDialog {
         Settings::update(|settings| settings.update_rebase = rebase);
         window.close_dialog(cx);
         self.model.update(cx, |model, cx| {
-            model.run("Update Project", move |repo| repo.update_project(rebase), cx)
+            model.run(tr!("Update Project"), move |repo| repo.update_project(rebase), cx)
         });
     }
 
@@ -60,18 +61,18 @@ impl Render for UpdateDialog {
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!("Fetch and update {branch} from its tracked branch. Local changes are stashed and restored.")),
+                    .child(tr!("Fetch and update {} from its tracked branch. Local changes are stashed and restored.", branch)),
             )
-            .child(self.option("update-merge", false, "Merge incoming changes", "Creates a merge commit if both sides changed", cx))
-            .child(self.option("update-rebase", true, "Rebase onto incoming changes", "Replays your local commits on top, keeping history linear", cx))
+            .child(self.option("update-merge", false, tr!("Merge incoming changes"), tr!("Creates a merge commit if both sides changed"), cx))
+            .child(self.option("update-rebase", true, tr!("Rebase onto incoming changes"), tr!("Replays your local commits on top, keeping history linear"), cx))
             .child(
                 h_flex()
                     .justify_end()
                     .gap_2()
-                    .child(Button::new("update-cancel").label("Cancel").small().on_click(|_, window, cx| window.close_dialog(cx)))
+                    .child(Button::new("update-cancel").label(tr!("Cancel")).small().on_click(|_, window, cx| window.close_dialog(cx)))
                     .child(
                         Button::new("update-ok")
-                            .label("Update")
+                            .label(tr!("Update"))
                             .primary()
                             .small()
                             .on_click(cx.listener(|this, _, window, cx| this.update(window, cx))),

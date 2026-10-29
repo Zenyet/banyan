@@ -17,12 +17,13 @@ use gpui_kit::*;
 
 use crate::git::RefKind;
 use crate::settings::Settings;
+use crate::i18n::tr;
 
 pub const FILE_PREFIX: &str = "f:";
 
 /// "1 file", "3 files".
 pub fn file_count(n: usize) -> String {
-    if n == 1 { "1 file".into() } else { format!("{n} files") }
+    if n == 1 { crate::i18n::tr!("1 file").into() } else { crate::i18n::tr!("{} files", n) }
 }
 
 /// Graph lane colors, close to the JetBrains palette.
@@ -71,13 +72,13 @@ pub fn format_time(timestamp: i64) -> String {
     if delta.num_seconds() < 0 || !Settings::read(|s| s.relative_dates) {
         time.format("%Y/%m/%d %H:%M").to_string()
     } else if delta.num_minutes() < 1 {
-        "Moments ago".into()
+        tr!("Moments ago").into()
     } else if delta.num_hours() < 1 {
-        format!("{} minutes ago", delta.num_minutes())
+        tr!("{} minutes ago", delta.num_minutes())
     } else if time.date_naive() == now.date_naive() {
-        format!("Today {}", time.format("%H:%M"))
+        tr!("Today {}", time.format("%H:%M"))
     } else if delta.num_days() < 2 {
-        format!("Yesterday {}", time.format("%H:%M"))
+        tr!("Yesterday {}", time.format("%H:%M"))
     } else {
         time.format("%Y/%m/%d %H:%M").to_string()
     }
@@ -323,7 +324,7 @@ fn dialog_buttons(
         .gap_2()
         .child(
             Button::new("dialog-cancel")
-                .label("Cancel")
+                .label(tr!("Cancel"))
                 .on_click(|_, window, cx| window.close_dialog(cx)),
         )
         .child(if danger { ok.danger() } else { ok.primary() })

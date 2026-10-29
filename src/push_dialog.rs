@@ -16,11 +16,12 @@ use gpui_kit::*;
 use crate::git::{Commit, FileChange, PushTarget};
 use crate::model::RepoModel;
 use crate::ui::{format_time, selection_bg, status_color};
+use crate::i18n::tr;
 
 pub fn open(model: Entity<RepoModel>, window: &mut Window, cx: &mut App) {
     let view = cx.new(|cx| PushDialog::new(model, cx));
     window.open_dialog(cx, move |dialog, _, _| {
-        dialog.title("Push Commits").w(px(900.)).child(view.clone())
+        dialog.title(tr!("Push Commits")).w(px(900.)).child(view.clone())
     });
 }
 
@@ -102,7 +103,7 @@ impl PushDialog {
         let Some(target) = self.target.clone() else { return };
         let (force, tags) = (self.force, self.tags);
         window.close_dialog(cx);
-        let label = if force { "Force Push" } else { "Push" };
+        let label = if force { tr!("Force Push") } else { tr!("Push") };
         self.model.update(cx, |model, cx| {
             model.run(label, move |repo| repo.push_to(&target, force, tags), cx)
         });
@@ -128,10 +129,10 @@ impl Render for PushDialog {
                             .text_xs()
                             .bg(rgb(0x5f9e5f))
                             .text_color(white())
-                            .child("New"),
+                            .child(tr!("New")),
                     )
                 }),
-            _ => div().text_color(muted).child("Loading…"),
+            _ => div().text_color(muted).child(tr!("Loading…")),
         };
 
         let commits = uniform_list(
@@ -201,7 +202,7 @@ impl Render for PushDialog {
                             .justify_center()
                             .text_sm()
                             .text_color(muted)
-                            .child("Nothing to push")
+                            .child(tr!("Nothing to push"))
                             .into_any_element()
                     } else {
                         h_resizable("push")
@@ -215,7 +216,7 @@ impl Render for PushDialog {
                     .gap_2()
                     .child(
                         Checkbox::new("force-push")
-                            .label("Force push (--force-with-lease)")
+                            .label(tr!("Force push (--force-with-lease)"))
                             .checked(self.force)
                             .on_click(cx.listener(|this, checked: &bool, _, cx| {
                                 this.force = *checked;
@@ -224,7 +225,7 @@ impl Render for PushDialog {
                     )
                     .child(
                         Checkbox::new("push-tags")
-                            .label("Push tags")
+                            .label(tr!("Push tags"))
                             .checked(self.tags)
                             .on_click(cx.listener(|this, checked: &bool, _, cx| {
                                 this.tags = *checked;
@@ -234,13 +235,13 @@ impl Render for PushDialog {
                     .child(div().flex_1())
                     .child(
                         Button::new("push-cancel")
-                            .label("Cancel")
+                            .label(tr!("Cancel"))
                             .small()
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
                         Button::new("push-confirm")
-                            .label(if self.force { "Force Push" } else { "Push" })
+                            .label(if self.force { tr!("Force Push") } else { tr!("Push") })
                             .small()
                             .map(|button| if self.force { button.danger() } else { button.primary() })
                             .disabled(!can_push)

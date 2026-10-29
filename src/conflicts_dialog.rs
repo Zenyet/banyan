@@ -14,10 +14,11 @@ use gpui_kit::*;
 use crate::git::StatusEntry;
 use crate::model::RepoModel;
 use crate::ui::{confirm, selection_bg};
+use crate::i18n::tr;
 
 pub fn open(model: Entity<RepoModel>, window: &mut Window, cx: &mut App) {
     let view = cx.new(|cx| ConflictsDialog::new(model, cx));
-    window.open_dialog(cx, move |dialog, _, _| dialog.title("Conflicts").w(px(760.)).child(view.clone()))
+    window.open_dialog(cx, move |dialog, _, _| dialog.title(tr!("Conflicts")).w(px(760.)).child(view.clone()))
 }
 
 /// Ask, then abort the stopped operation.
@@ -26,15 +27,15 @@ pub fn abort(model: Entity<RepoModel>, window: &mut Window, cx: &mut App) {
     let state = operation.state;
     let noun = state.noun().to_lowercase();
     confirm(
-        format!("Abort {}", state.noun()),
-        format!(
-            "{}. Abort it and go back to how things were before the {noun} started? \
-             Conflicts resolved so far are lost.",
-            operation.title
+        tr!("Abort {}", state.noun()),
+        tr!(
+            "{}. Abort it and go back to how things were before the {} started? Conflicts resolved so far are lost.",
+            operation.title,
+            noun
         ),
-        format!("Abort {}", state.noun()),
+        tr!("Abort {}", state.noun()),
         move |_, cx| {
-            model.update(cx, |m, cx| m.run(format!("Abort {noun}"), move |repo| repo.abort(state), cx))
+            model.update(cx, |m, cx| m.run(tr!("Abort {}", noun), move |repo| repo.abort(state), cx))
         },
         window,
         cx,
@@ -60,9 +61,9 @@ pub fn render_banner(model: &Entity<RepoModel>, cx: &mut App) -> Option<AnyEleme
         (IconName::CircleCheck, theme.success)
     };
     let detail = match conflicts {
-        0 => "All conflicts resolved".to_string(),
-        1 => "1 file has conflicts".to_string(),
-        n => format!("{n} files have conflicts"),
+        0 => tr!("All conflicts resolved").to_string(),
+        1 => tr!("1 file has conflicts").to_string(),
+        n => tr!("{} files have conflicts", n),
     };
     let resolve_model = model.clone();
     let proceed_model = model.clone();
@@ -84,7 +85,7 @@ pub fn render_banner(model: &Entity<RepoModel>, cx: &mut App) -> Option<AnyEleme
                 if conflicts > 0 {
                     row.child(
                         Button::new("banner-resolve")
-                            .label("Resolve Conflicts…")
+                            .label(tr!("Resolve Conflicts…"))
                             .primary()
                             .small()
                             .on_click(move |_, window, cx| open(resolve_model.clone(), window, cx)),
@@ -102,7 +103,7 @@ pub fn render_banner(model: &Entity<RepoModel>, cx: &mut App) -> Option<AnyEleme
             })
             .child(
                 Button::new("banner-abort")
-                    .label(format!("Abort {}", operation.state.noun()))
+                    .label(tr!("Abort {}", operation.state.noun()))
                     .danger()
                     .small()
                     .disabled(busy)
@@ -128,7 +129,7 @@ impl ConflictsDialog {
     }
 
     fn resolve(&self, path: String, ours: bool, cx: &mut Context<Self>) {
-        let label = format!("Accept {} for {path}", if ours { "yours" } else { "theirs" });
+        let label = if ours { tr!("Accept yours for {}", path) } else { tr!("Accept theirs for {}", path) };
         self.model
             .update(cx, |m, cx| m.run(label, move |repo| repo.resolve_conflict(&path, Some(ours)), cx));
     }
@@ -177,7 +178,7 @@ impl Render for ConflictsDialog {
                 let model = model.clone();
                 row.child(
                     Button::new("conflicts-abort")
-                        .label(format!("Abort {}", operation.state.noun()))
+                        .label(tr!("Abort {}", operation.state.noun()))
                         .danger()
                         .small()
                         .disabled(busy)
@@ -187,7 +188,7 @@ impl Render for ConflictsDialog {
             .child(div().flex_1())
             .child(
                 Button::new("conflicts-close")
-                    .label("Close")
+                    .label(tr!("Close"))
                     .small()
                     .on_click(|_, window, cx| window.close_dialog(cx)),
             );
@@ -195,7 +196,7 @@ impl Render for ConflictsDialog {
         let intro = operation
             .as_ref()
             .map(|op| op.title.clone())
-            .unwrap_or_else(|| "Conflicts".into());
+            .unwrap_or_else(|| tr!("Conflicts").into());
 
         if conflicts.is_empty() {
             let footer = footer.when_some(operation.clone(), |row, operation| {
@@ -219,14 +220,14 @@ impl Render for ConflictsDialog {
                         .gap_2()
                         .text_sm()
                         .child(Icon::new(IconName::CircleCheck).text_color(cx.theme().success))
-                        .child(format!("All conflicts are resolved. {intro}.")),
+                        .child(tr!("All conflicts are resolved. {}.", intro)),
                 )
                 .when(operation.is_some(), |col| {
                     col.child(
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Review the result in the Commit tab, then finish the operation."),
+                            .child(tr!("Review the result in the Commit tab, then finish the operation.")),
                     )
                 })
                 .child(footer)
@@ -249,7 +250,7 @@ impl Render for ConflictsDialog {
 
         v_flex()
             .gap_3()
-            .child(div().text_sm().child(format!("{intro}. Resolve each file to continue:")))
+            .child(div().text_sm().child(tr!("{}. Resolve each file to continue:", intro)))
             .child(
                 h_flex()
                     .items_start()
@@ -271,9 +272,9 @@ impl Render for ConflictsDialog {
                                     .border_b_1()
                                     .border_color(cx.theme().border)
                                     .child(div().w(px(12.)))
-                                    .child(div().flex_1().child("Name"))
-                                    .child(div().flex_none().w(px(130.)).truncate().child(format!("Yours ({ours_label})")))
-                                    .child(div().flex_none().w(px(130.)).truncate().child(format!("Theirs ({theirs_label})"))),
+                                    .child(div().flex_1().child(tr!("Name")))
+                                    .child(div().flex_none().w(px(130.)).truncate().child(tr!("Yours ({})", ours_label)))
+                                    .child(div().flex_none().w(px(130.)).truncate().child(tr!("Theirs ({})", theirs_label))),
                             )
                             .child(
                                 v_flex()
@@ -289,7 +290,7 @@ impl Render for ConflictsDialog {
                             .flex_none()
                             .w(px(130.))
                             .gap_2()
-                            .child(side_button("conflicts-yours", "Accept Yours").on_click(cx.listener({
+                            .child(side_button("conflicts-yours", tr!("Accept Yours")).on_click(cx.listener({
                                 let path = selected_path.clone();
                                 move |this, _, _, cx| {
                                     if let Some(path) = path.clone() {
@@ -297,7 +298,7 @@ impl Render for ConflictsDialog {
                                     }
                                 }
                             })))
-                            .child(side_button("conflicts-theirs", "Accept Theirs").on_click(cx.listener({
+                            .child(side_button("conflicts-theirs", tr!("Accept Theirs")).on_click(cx.listener({
                                 let path = selected_path.clone();
                                 move |this, _, _, cx| {
                                     if let Some(path) = path.clone() {
@@ -306,7 +307,7 @@ impl Render for ConflictsDialog {
                                 }
                             })))
                             .child(
-                                side_button("conflicts-merge", "Merge…")
+                                side_button("conflicts-merge", tr!("Merge…"))
                                     .primary()
                                     .disabled(!mergeable || busy)
                                     .on_click(cx.listener({
@@ -325,7 +326,7 @@ impl Render for ConflictsDialog {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("One side deleted this file, so it can only be resolved by accepting a side."),
+                        .child(tr!("One side deleted this file, so it can only be resolved by accepting a side.")),
                 )
             })
             .child(footer)

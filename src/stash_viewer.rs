@@ -11,10 +11,11 @@ use crate::commit_browser::CommitBrowser;
 use crate::git::Stash;
 use crate::model::{RepoEvent, RepoModel};
 use crate::ui::confirm;
+use crate::i18n::tr;
 
 pub fn open(model: Entity<RepoModel>, window: &mut Window, cx: &mut App) {
     let view = cx.new(|cx| StashViewer::new(model, cx));
-    window.open_dialog(cx, move |dialog, _, _| dialog.title("Stashes").w(px(1200.)).child(view.clone()))
+    window.open_dialog(cx, move |dialog, _, _| dialog.title(tr!("Stashes")).w(px(1200.)).child(view.clone()))
 }
 
 struct StashViewer {
@@ -58,7 +59,7 @@ impl StashViewer {
             })
             .collect();
         self.browser
-            .update(cx, |browser, cx| browser.set_commits(commits, "No stashes", cx));
+            .update(cx, |browser, cx| browser.set_commits(commits, tr!("No stashes"), cx));
         cx.notify();
     }
 
@@ -84,7 +85,7 @@ impl StashViewer {
             });
         };
         if kind == StashOp::Drop {
-            confirm("Drop Stash", "Drop this stash? This cannot be undone.", "Drop", run, window, cx);
+            confirm(tr!("Drop Stash"), tr!("Drop this stash? This cannot be undone."), tr!("Drop"), run, window, cx);
         } else {
             run(window, cx);
         }
@@ -101,9 +102,9 @@ enum StashOp {
 impl StashOp {
     fn label(self) -> &'static str {
         match self {
-            StashOp::Pop => "Pop",
-            StashOp::Apply => "Apply",
-            StashOp::Drop => "Drop",
+            StashOp::Pop => tr!("Pop"),
+            StashOp::Apply => tr!("Apply"),
+            StashOp::Drop => tr!("Drop"),
         }
     }
 }
@@ -138,7 +139,7 @@ impl Render for StashViewer {
                     .child(div().flex_1())
                     .child(
                         Button::new("stash-close")
-                            .label("Close")
+                            .label(tr!("Close"))
                             .small()
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     ),

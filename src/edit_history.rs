@@ -10,6 +10,7 @@ use crate::actions::short;
 use crate::git::Rewrite;
 use crate::model::RepoModel;
 use crate::ui::{confirm, prompt_message};
+use crate::i18n::tr;
 
 pub fn reword(model: &Entity<RepoModel>, id: String, window: &mut Window, cx: &mut App) {
     let rewrite = Rewrite::Reword { id: id.clone(), message: String::new() };
@@ -18,13 +19,13 @@ pub fn reword(model: &Entity<RepoModel>, id: String, window: &mut Window, cx: &m
         let model = model.clone();
         let id = id.clone();
         prompt_message(
-            format!("Edit Commit Message of {}", short(&id)),
+            tr!("Edit Commit Message of {}", short(&id)),
             "",
-            "Save",
+            tr!("Save"),
             current,
             move |message, _, cx| {
                 let rewrite = Rewrite::Reword { id: id.clone(), message };
-                run(&model, format!("Edit message of {}", short(&id)), rewrite, cx);
+                run(&model, tr!("Edit message of {}", short(&id)), rewrite, cx);
             },
             window,
             cx,
@@ -42,13 +43,13 @@ pub fn squash(model: &Entity<RepoModel>, ids: Vec<String>, window: &mut Window, 
         let ids = ids.clone();
         let count = ids.len();
         prompt_message(
-            format!("Squash {count} Commits"),
-            "The commits become one, with this message:",
-            "Squash",
+            tr!("Squash {} Commits", count),
+            tr!("The commits become one, with this message:"),
+            tr!("Squash"),
             combined.join("\n\n"),
             move |message, _, cx| {
                 let rewrite = Rewrite::Squash { ids: ids.clone(), message };
-                run(&model, format!("Squash {count} commits"), rewrite, cx);
+                run(&model, tr!("Squash {} commits", count), rewrite, cx);
             },
             window,
             cx,
@@ -60,13 +61,13 @@ pub fn squash_into_parent(model: &Entity<RepoModel>, id: String, window: &mut Wi
     let parent = model.read(cx).repo.git(&["rev-parse", "--verify", "-q", &format!("{id}^")]);
     match parent {
         Ok(parent) => squash(model, vec![id, parent.trim().to_string()], window, cx),
-        Err(_) => notify(window, cx, "The first commit has no parent to squash into."),
+        Err(_) => notify(window, cx, tr!("The first commit has no parent to squash into.")),
     }
 }
 
 pub fn fixup_into_parent(model: &Entity<RepoModel>, id: String, window: &mut Window, cx: &mut App) {
     let rewrite = Rewrite::FixupIntoParent { id: id.clone() };
-    let label = format!("Fixup {} into its parent", short(&id));
+    let label = tr!("Fixup {} into its parent", short(&id));
     let check = rewrite.clone();
     with_checks(model, &check, None, window, cx, move |model, _, cx| run(model, label.clone(), rewrite.clone(), cx));
 }
@@ -74,12 +75,12 @@ pub fn fixup_into_parent(model: &Entity<RepoModel>, id: String, window: &mut Win
 pub fn drop(model: &Entity<RepoModel>, ids: Vec<String>, window: &mut Window, cx: &mut App) {
     let count = ids.len();
     let question = if count == 1 {
-        format!("Remove commit {} from the branch? Its changes are lost.", short(&ids[0]))
+        tr!("Remove commit {} from the branch? Its changes are lost.", short(&ids[0]))
     } else {
-        format!("Remove these {count} commits from the branch? Their changes are lost.")
+        tr!("Remove these {} commits from the branch? Their changes are lost.", count)
     };
     let rewrite = Rewrite::Drop { ids };
-    let label = if count == 1 { "Drop commit".to_string() } else { format!("Drop {count} commits") };
+    let label = if count == 1 { tr!("Drop commit").to_string() } else { tr!("Drop {} commits", count) };
     let check = rewrite.clone();
     with_checks(model, &check, Some(question), window, cx, move |model, _, cx| {
         run(model, label.clone(), rewrite.clone(), cx)
@@ -94,9 +95,9 @@ pub fn undo_commit(model: &Entity<RepoModel>, id: String, window: &mut Window, c
     let undo = move |_: &mut Window, cx: &mut App| model.update(cx, |m, cx| m.undo_commit(cx));
     match pushed {
         Some(upstream) => confirm(
-            "Undo Pushed Commit",
-            format!("This commit is already in {upstream}. Undoing it here means force pushing later."),
-            "Undo Commit",
+            tr!("Undo Pushed Commit"),
+            tr!("This commit is already in {}. Undoing it here means force pushing later.", upstream),
+            tr!("Undo Commit"),
             undo,
             window,
             cx,
@@ -122,14 +123,15 @@ fn with_checks(
     };
     let warning = repo
         .pushed_to(&base)
-        .map(|upstream| format!("These commits are already in {upstream}; rewriting them means force pushing later."));
+        .map(|upstream| tr!("These commits are already in {}; rewriting them means force pushing later.", upstream));
     let model = model.clone();
+    let dropping = question.is_some();
     match (question, warning) {
         (None, None) => proceed(&model, window, cx),
         (question, warning) => {
             let message = [question, warning].into_iter().flatten().collect::<Vec<_>>().join(" ");
-            let title = if message.starts_with("Remove") { "Drop Commits" } else { "Rewrite Pushed Commits" };
-            confirm(title, message, "Continue", move |window, cx| proceed(&model, window, cx), window, cx);
+            let title = if dropping { tr!("Drop Commits") } else { tr!("Rewrite Pushed Commits") };
+            confirm(title, message, tr!("Continue"), move |window, cx| proceed(&model, window, cx), window, cx);
         }
     }
 }

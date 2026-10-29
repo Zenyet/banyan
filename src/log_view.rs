@@ -26,6 +26,7 @@ use crate::graph::{self, GraphRow, Half};
 use crate::model::{RepoEvent, RepoModel};
 use crate::settings::Settings;
 use crate::ui::{cached, SubView, selection_bg, FILE_PREFIX, file_tree, format_full_time, format_time, lane_color, path_tree, ref_colors, status_color};
+use crate::i18n::tr;
 
 const ROW_HEIGHT: Pixels = px(24.);
 const LANE_WIDTH: Pixels = px(14.);
@@ -37,13 +38,17 @@ actions!(
     [SelectPrevCommit, SelectNextCommit, SelectFirstCommit, SelectLastCommit, PageUpCommits, PageDownCommits]
 );
 
-/// Labels and `git log --since` values of the Date filter.
-const DATE_FILTERS: [(&str, &str); 4] = [
-    ("Last 24 Hours", "24.hours.ago"),
-    ("Last 7 Days", "7.days.ago"),
-    ("Last 30 Days", "30.days.ago"),
-    ("Last Year", "1.year.ago"),
-];
+/// `git log --since` values of the Date filter, and their labels.
+const DATE_FILTERS: [&str; 4] = ["24.hours.ago", "7.days.ago", "30.days.ago", "1.year.ago"];
+
+fn date_filter_label(ix: usize) -> &'static str {
+    match ix {
+        0 => tr!("Last 24 Hours"),
+        1 => tr!("Last 7 Days"),
+        2 => tr!("Last 30 Days"),
+        _ => tr!("Last Year"),
+    }
+}
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
@@ -102,7 +107,7 @@ pub struct LogView {
 impl LogView {
     pub fn new(model: Entity<RepoModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let filter = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Text or hash")
+            InputState::new(window, cx).placeholder(tr!("Text or hash"))
         });
         let branch_tree = cx.new(|cx| TreeState::new(cx));
         let file_tree = cx.new(|cx| TreeState::new(cx));
@@ -195,7 +200,7 @@ impl LogView {
     pub fn reload(&mut self, cx: &mut Context<Self>) {
         let repo = self.model.read(cx).repo.clone();
         let refs = self.branch_filter.clone();
-        let since = self.date_filter.map(|ix| DATE_FILTERS[ix].1);
+        let since = self.date_filter.map(|ix| DATE_FILTERS[ix]);
         let path = self.path_filter.clone();
         let limit = self.limit;
         self.loading = true;
@@ -250,7 +255,7 @@ impl LogView {
             lookup.insert(id.clone(), head.clone());
             groups.push(TreeItem::new(id, format!("HEAD ({})", head.name)));
         }
-        for (label, kind) in [("Local", RefKind::Local), ("Remote", RefKind::Remote), ("Tags", RefKind::Tag)] {
+        for (label, kind) in [(tr!("Local"), RefKind::Local), (tr!("Remote"), RefKind::Remote), (tr!("Tags"), RefKind::Tag)] {
             let branches: Vec<&Branch> = model.branches_of(kind.clone()).collect();
             if branches.is_empty() {
                 continue;
@@ -324,7 +329,7 @@ impl LogView {
             files: true,
             directories: true,
             multiple: false,
-            prompt: Some("Filter".into()),
+            prompt: Some(tr!("Filter").into()),
         });
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = paths.await else { return };
@@ -334,7 +339,7 @@ impl LogView {
             this.update(cx, |this, cx| match path.strip_prefix(&root) {
                 Ok(relative) if relative.as_os_str().is_empty() => this.set_path_filter(None, cx),
                 Ok(relative) => this.set_path_filter(Some(relative.to_string_lossy().into_owned()), cx),
-                Err(_) => this.report(anyhow::anyhow!("{} is not inside the repository", path.display()), cx),
+                Err(_) => this.report(anyhow::anyhow!("{}", tr!("{} is not inside the repository", path.display())), cx),
             })
             .ok();
         })
@@ -495,7 +500,7 @@ impl LogView {
                         let first = first_file_index(&this.files, &this.file_tree, cx);
                         this.file_tree.update(cx, |tree, cx| tree.set_selected_index(first, cx));
                         if first.is_none() {
-                            this.diff.update(cx, |diff, cx| diff.show_message(None, "No changed files", cx));
+                            this.diff.update(cx, |diff, cx| diff.show_message(None, tr!("No changed files"), cx));
                         }
                     }
                     cx.notify();
@@ -529,7 +534,7 @@ impl LogView {
         v_flex()
             .size_full()
             .bg(cx.theme().sidebar)
-            .child(panel_header("Branches", cx))
+            .child(panel_header(tr!("Branches"), cx))
             .child(
                 div().flex_1().min_h_0().child(
                     tree(&self.branch_tree, move |ix, entry, _selected, _, cx| {
@@ -589,8 +594,8 @@ impl LogView {
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let view = cx.entity().downgrade();
         let label = match &self.branch_filter {
-            Some(branch) => format!("Branch: {branch}"),
-            None => "Branch: All".into(),
+            Some(branch) => tr!("Branch: {}", branch),
+            None => tr!("Branch: All").into(),
         };
         h_flex()
             .flex_none()
@@ -616,7 +621,7 @@ impl LogView {
                     .dropdown_menu(move |mut menu, _, cx| {
                         let names = view.upgrade().map(|view| view.read(cx).branch_names(cx)).unwrap_or_default();
                         let view = view.clone();
-                        menu = menu.item(PopupMenuItem::new("All").on_click({
+                        menu = menu.item(PopupMenuItem::new(tr!("All")).on_click({
                             let view = view.clone();
                             move |_, _, cx| {
                                 view.update(cx, |this, cx| this.set_branch_filter(None, cx)).ok();
@@ -638,8 +643,8 @@ impl LogView {
                 let view = cx.entity().downgrade();
                 Button::new("author-filter")
                     .label(match &self.author_filter {
-                        Some(author) => format!("User: {author}"),
-                        None => "User: All".into(),
+                        Some(author) => tr!("User: {}", author),
+                        None => tr!("User: All").into(),
                     })
                     .ghost()
                     .xsmall()
@@ -648,7 +653,7 @@ impl LogView {
                         let authors = view.upgrade().map(|view| view.read(cx).authors()).unwrap_or_default();
                         let all = view.clone();
                         menu = menu
-                            .item(PopupMenuItem::new("All").on_click(move |_, _, cx| {
+                            .item(PopupMenuItem::new(tr!("All")).on_click(move |_, _, cx| {
                                 all.update(cx, |this, cx| this.set_author_filter(None, cx)).ok();
                             }))
                             .separator();
@@ -667,8 +672,8 @@ impl LogView {
                 let view = cx.entity().downgrade();
                 Button::new("date-filter")
                     .label(match self.date_filter {
-                        Some(ix) => format!("Date: {}", DATE_FILTERS[ix].0),
-                        None => "Date: All".into(),
+                        Some(ix) => tr!("Date: {}", date_filter_label(ix)),
+                        None => tr!("Date: All").into(),
                     })
                     .ghost()
                     .xsmall()
@@ -676,13 +681,13 @@ impl LogView {
                     .dropdown_menu(move |mut menu, _, _| {
                         let all = view.clone();
                         menu = menu
-                            .item(PopupMenuItem::new("All").on_click(move |_, _, cx| {
+                            .item(PopupMenuItem::new(tr!("All")).on_click(move |_, _, cx| {
                                 all.update(cx, |this, cx| this.set_date_filter(None, cx)).ok();
                             }))
                             .separator();
-                        for (ix, (label, _)) in DATE_FILTERS.iter().enumerate() {
+                        for ix in 0..DATE_FILTERS.len() {
                             let view = view.clone();
-                            menu = menu.item(PopupMenuItem::new(*label).on_click(move |_, _, cx| {
+                            menu = menu.item(PopupMenuItem::new(date_filter_label(ix)).on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| this.set_date_filter(Some(ix), cx)).ok();
                             }));
                         }
@@ -693,8 +698,8 @@ impl LogView {
                 let view = cx.entity().downgrade();
                 Button::new("path-filter")
                     .label(match &self.path_filter {
-                        Some(path) => format!("Paths: {path}"),
-                        None => "Paths: All".into(),
+                        Some(path) => tr!("Paths: {}", path),
+                        None => tr!("Paths: All").into(),
                     })
                     .ghost()
                     .xsmall()
@@ -702,30 +707,30 @@ impl LogView {
                     .dropdown_menu(move |menu, _, _| {
                         let all = view.clone();
                         let choose = view.clone();
-                        menu.item(PopupMenuItem::new("All").on_click(move |_, _, cx| {
+                        menu.item(PopupMenuItem::new(tr!("All")).on_click(move |_, _, cx| {
                             all.update(cx, |this, cx| this.set_path_filter(None, cx)).ok();
                         }))
-                        .item(PopupMenuItem::new("Select File or Folder…").on_click(move |_, window, cx| {
+                        .item(PopupMenuItem::new(tr!("Select File or Folder…")).on_click(move |_, window, cx| {
                             choose.update(cx, |this, cx| this.choose_path_filter(window, cx)).ok();
                         }))
                     })
             })
             .child(div().flex_1())
             .when(self.loading, |row| {
-                row.child(div().text_xs().text_color(cx.theme().muted_foreground).child("Loading…"))
+                row.child(div().text_xs().text_color(cx.theme().muted_foreground).child(tr!("Loading…")))
             })
             .child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!("{} commits", self.rows.len())),
+                    .child(tr!("{} commits", self.rows.len())),
             )
             .child(
                 Button::new("log-refresh")
                     .icon(IconName::RefreshCw)
                     .ghost()
                     .xsmall()
-                    .tooltip("Refresh")
+                    .tooltip(tr!("Refresh"))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.model.update(cx, |model, cx| model.refresh(cx));
                         this.reload(cx);
@@ -805,9 +810,9 @@ impl LogView {
             .text_color(cx.theme().link)
             .hover(|style| style.bg(cx.theme().list_hover))
             .child(if self.loading {
-                "Loading…".to_string()
+                tr!("Loading…").to_string()
             } else {
-                format!("Showing the first {} commits. Load more…", self.limit)
+                tr!("Showing the first {} commits. Load more…", self.limit)
             })
             .on_click(cx.listener(|this, _, _, cx| this.load_more(cx)))
             .into_any_element()
@@ -910,7 +915,7 @@ impl LogView {
         let changed = self.details.as_ref().map(|d| d.files.len()).unwrap_or(0);
         let files_panel = v_flex()
             .size_full()
-            .child(panel_header(format!("Changed Files ({changed})"), cx))
+            .child(panel_header(tr!("Changed Files ({})", changed), cx))
             .child(div().flex_1().min_h_0().child(tree(
                 &self.file_tree,
                 move |ix, entry, _, _, cx| {
@@ -946,26 +951,26 @@ impl LogView {
                 };
                 let path = change.path.clone();
                 let (m, p) = (model.clone(), path.clone());
-                let menu = menu.item(PopupMenuItem::new("Show History").on_click(move |_, window, cx| {
+                let menu = menu.item(PopupMenuItem::new(tr!("Show History")).on_click(move |_, window, cx| {
                     crate::history::show_history(m.clone(), p.clone(), window, cx)
                 }));
                 let (m, p, r) = (model.clone(), path.clone(), rev.clone());
-                let menu = menu.item(PopupMenuItem::new("Compare with Local").on_click(move |_, window, cx| {
+                let menu = menu.item(PopupMenuItem::new(tr!("Compare with Local")).on_click(move |_, window, cx| {
                     crate::worktree_diff::open_between(m.clone(), r.clone(), None, Some(p.clone()), window, cx)
                 }));
                 let (m, p, r) = (model.clone(), path.clone(), rev.clone());
-                let menu = menu.item(PopupMenuItem::new("Get from Revision").on_click(move |_, window, cx| {
+                let menu = menu.item(PopupMenuItem::new(tr!("Get from Revision")).on_click(move |_, window, cx| {
                     let (model, path, rev) = (m.clone(), p.clone(), r.clone());
                     let run = move |_: &mut Window, cx: &mut App| {
                         let (path, rev) = (path.clone(), rev.clone());
-                        let label = format!("Get {path} from {}", crate::actions::short(&rev));
+                        let label = tr!("Get {} from {}", path, crate::actions::short(&rev));
                         model.update(cx, |m, cx| m.run(label, move |repo| repo.get_from_revision(&rev, &path), cx));
                     };
                     if m.read(cx).status.iter().any(|e| e.path == p) {
                         crate::ui::confirm(
-                            "Get from Revision",
-                            format!("{p} has local changes. Replace it with its version in {}?", crate::actions::short(&r)),
-                            "Replace",
+                            tr!("Get from Revision"),
+                            tr!("{} has local changes. Replace it with its version in {}?", p, crate::actions::short(&r)),
+                            tr!("Replace"),
                             run,
                             window,
                             cx,
@@ -978,7 +983,7 @@ impl LogView {
                     return menu;
                 }
                 let m = model.clone();
-                menu.item(PopupMenuItem::new("Annotate at This Revision").on_click(move |_, window, cx| {
+                menu.item(PopupMenuItem::new(tr!("Annotate at This Revision")).on_click(move |_, window, cx| {
                     crate::history::annotate(m.clone(), rev.clone(), path.clone(), window, cx)
                 }))
             })));
@@ -988,7 +993,7 @@ impl LogView {
                 .p_3()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child("No commit selected")
+                .child(tr!("No commit selected"))
                 .into_any_element(),
             Some(details) => {
                 let muted = cx.theme().muted_foreground;
@@ -999,7 +1004,7 @@ impl LogView {
                         details.branches[..6].join(", ")
                     )
                 } else {
-                    format!("In {} branches: {}", details.branches.len(), details.branches.join(", "))
+                    tr!("In {} branches: {}", details.branches.len(), details.branches.join(", "))
                 };
                 div()
                     .id("commit-info")
@@ -1027,14 +1032,14 @@ impl LogView {
                                     ))),
                             )
                             .when(details.committer != details.author || details.commit_time != details.author_time, |col| {
-                                col.child(div().text_xs().text_color(muted).child(format!(
+                                col.child(div().text_xs().text_color(muted).child(tr!(
                                     "Committed by {} on {}",
                                     details.committer,
                                     format_full_time(details.commit_time)
                                 )))
                             })
                             .when(details.parents.len() > 1, |col| {
-                                col.child(div().text_xs().text_color(muted).child(format!(
+                                col.child(div().text_xs().text_color(muted).child(tr!(
                                     "Merge of {}",
                                     details.parents.iter().map(|p| short(p)).collect::<Vec<_>>().join(", ")
                                 )))

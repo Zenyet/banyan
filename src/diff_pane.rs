@@ -13,6 +13,7 @@ use gpui_kit::*;
 use std::sync::Arc;
 
 use crate::settings::Settings;
+use crate::i18n::tr;
 
 /// Makes the patch shown, again whenever a diff option changes.
 type Loader = Arc<dyn Fn() -> anyhow::Result<String> + Send + Sync>;
@@ -76,7 +77,7 @@ impl DiffPane {
     fn set_patch(&mut self, patch: &str, cx: &mut Context<Self>) {
         match DiffFile::parse(patch) {
             Ok(files) if files.is_empty() => {
-                self.message = Some("No differences".into());
+                self.message = Some(tr!("No differences").into());
                 self.state.update(cx, |state, cx| state.set_files(Vec::new(), cx));
             }
             Ok(files) => {
@@ -85,7 +86,7 @@ impl DiffPane {
                 self.relayout_after_resize(cx);
             }
             Err(err) => {
-                self.message = Some(format!("Cannot show diff: {err:?}").into());
+                self.message = Some(format!("{}: {err:?}", tr!("Cannot show diff")).into());
                 self.state.update(cx, |state, cx| state.set_files(Vec::new(), cx));
             }
         }
@@ -130,7 +131,7 @@ impl DiffPane {
     }
 
     pub fn clear(&mut self, cx: &mut Context<Self>) {
-        self.show_message(None, "Select a file to see its changes", cx);
+        self.show_message(None, tr!("Select a file to see its changes"), cx);
     }
 
     /// Remember `mode` for every diff, as the setting it is.
@@ -169,14 +170,14 @@ impl Render for DiffPane {
                     .min_w_0()
                     .truncate()
                     .text_sm()
-                    .child(self.title.clone().unwrap_or_else(|| "Diff".into())),
+                    .child(self.title.clone().unwrap_or_else(|| tr!("Diff").into())),
             )
             .child(
                 Button::new("diff-prev")
                     .icon(IconName::ArrowUp)
                     .ghost()
                     .xsmall()
-                    .tooltip("Previous Change")
+                    .tooltip(tr!("Previous Change"))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.state.update(cx, |state, cx| state.previous_change(cx))
                     })),
@@ -186,27 +187,27 @@ impl Render for DiffPane {
                     .icon(IconName::ArrowDown)
                     .ghost()
                     .xsmall()
-                    .tooltip("Next Change")
+                    .tooltip(tr!("Next Change"))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.state.update(cx, |state, cx| state.next_change(cx))
                     })),
             )
             .child(
                 Button::new("diff-whitespace")
-                    .label("Ignore Whitespace")
+                    .label(tr!("Ignore Whitespace"))
                     // Toggled ghost buttons hardly show it in the dark theme.
                     .when(ignore_whitespace, |button| button.icon(IconName::Check))
                     .ghost()
                     .xsmall()
                     .toggled(ignore_whitespace)
-                    .tooltip("Leave out changes that only touch whitespace")
+                    .tooltip(tr!("Leave out changes that only touch whitespace"))
                     .on_click(|_, _, cx| {
                         crate::settings_window::change(cx, |s| s.ignore_whitespace = !s.ignore_whitespace)
                     }),
             )
             .child(
                 Button::new("diff-split")
-                    .label("Side-by-side")
+                    .label(tr!("Side-by-side"))
                     .ghost()
                     .xsmall()
                     .toggled(mode == DiffMode::Split)
@@ -214,7 +215,7 @@ impl Render for DiffPane {
             )
             .child(
                 Button::new("diff-unified")
-                    .label("Unified")
+                    .label(tr!("Unified"))
                     .ghost()
                     .xsmall()
                     .toggled(mode == DiffMode::Unified)

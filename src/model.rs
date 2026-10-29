@@ -11,6 +11,7 @@ use crate::changelists::Changelists;
 use crate::git::{Branch, Operation, RefKind, Repo, RepoState, Shelf, StatusEntry, Stash};
 use crate::settings::Settings;
 use crate::watcher::RepoWatcher;
+use crate::i18n::tr;
 
 pub enum RepoEvent {
     /// Refs, HEAD or the working tree may have changed.
@@ -223,7 +224,7 @@ impl RepoModel {
         self.run_with(
             label,
             op,
-            move |err| RepoEvent::OpFailed(format!("{failed} failed\n{err:#}").into()),
+            move |err| RepoEvent::OpFailed(format!("{}\n{err:#}", tr!("{} failed", failed)).into()),
             cx,
         );
     }
@@ -254,16 +255,16 @@ impl RepoModel {
             }
             _ => self.changelists.active().to_string(),
         };
-        self.run(format!("Shelve {name}"), move |repo| repo.shelve(&name, &changelist, &paths), cx);
+        self.run(tr!("Shelve {}", name), move |repo| repo.shelve(&name, &changelist, &paths), cx);
     }
 
     /// Unshelve all of shelf `id`, or `paths` of it, back into its changelist.
     pub fn unshelve(&mut self, id: String, paths: Option<Vec<String>>, cx: &mut Context<Self>) {
         self.run_then(
-            "Unshelve",
+            tr!("Unshelve"),
             move |repo| repo.unshelve(&id, paths.as_deref()),
             |this, (shelf, files), cx| this.change_lists(|lists| lists.move_to(&files, &shelf.changelist), cx),
-            |err| RepoEvent::OpFailed(format!("Unshelve failed\n{err:#}").into()),
+            |err| RepoEvent::OpFailed(format!("{}\n{err:#}", tr!("Unshelve failed")).into()),
             cx,
         );
     }
@@ -271,10 +272,10 @@ impl RepoModel {
     /// Undo the last commit, keeping its changes and offering its message again.
     pub fn undo_commit(&mut self, cx: &mut Context<Self>) {
         self.run_then(
-            "Undo commit",
+            tr!("Undo commit"),
             |repo| repo.undo_commit(),
             |_, message, cx| cx.emit(RepoEvent::MessageRestored(message)),
-            |err| RepoEvent::OpFailed(format!("Undo commit failed\n{err:#}").into()),
+            |err| RepoEvent::OpFailed(format!("{}\n{err:#}", tr!("Undo commit failed")).into()),
             cx,
         );
     }
@@ -282,7 +283,7 @@ impl RepoModel {
     /// Check out a branch or revision, offering Smart Checkout when local
     /// changes are in the way.
     pub fn checkout(&mut self, target: String, remote: bool, cx: &mut Context<Self>) {
-        let label = format!("Checkout {}", crate::actions::short(&target));
+        let label = tr!("Checkout {}", crate::actions::short(&target));
         let op_target = target.clone();
         let failed = label.clone();
         self.run_with(
@@ -296,7 +297,7 @@ impl RepoModel {
                         message: format!("{err:#}").into(),
                     }
                 } else {
-                    RepoEvent::OpFailed(format!("{failed} failed\n{err:#}").into())
+                    RepoEvent::OpFailed(format!("{}\n{err:#}", tr!("{} failed", failed)).into())
                 }
             },
             cx,
@@ -325,7 +326,7 @@ impl RepoModel {
     ) {
         let label = label.into();
         if let Some(busy) = &self.busy {
-            cx.emit(RepoEvent::OpFailed(format!("Another operation is running: {busy}").into()));
+            cx.emit(RepoEvent::OpFailed(tr!("Another operation is running: {}", busy).into()));
             return;
         }
         self.busy = Some(label.clone());
@@ -345,7 +346,7 @@ impl RepoModel {
                 this.busy = None;
                 match result {
                     Ok(value) => {
-                        cx.emit(RepoEvent::OpSucceeded(format!("{label}: done").into()));
+                        cx.emit(RepoEvent::OpSucceeded(tr!("{}: done", label).into()));
                         on_ok(this, value, cx);
                     }
                     Err(_) if conflicted => cx.emit(RepoEvent::Conflicts(label)),

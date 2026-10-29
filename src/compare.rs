@@ -11,12 +11,13 @@ use gpui_kit::*;
 use crate::commit_browser::CommitBrowser;
 use crate::git::Commit;
 use crate::model::RepoModel;
+use crate::i18n::tr;
 
 pub fn open(model: Entity<RepoModel>, branch: String, window: &mut Window, cx: &mut App) {
     let view = cx.new(|cx| CompareView::new(model, branch.clone(), cx));
     window.open_dialog(cx, move |dialog, _, _| {
         dialog
-            .title(format!("Compare {branch} with Current Branch"))
+            .title(tr!("Compare {} with Current Branch", branch))
             .w(px(1200.))
             .child(view.clone())
     });
@@ -80,12 +81,12 @@ impl CompareView {
         let (commits, empty) = if incoming {
             (
                 self.incoming.clone(),
-                format!("{} has no commits that {} lacks", self.branch, self.current),
+                tr!("{} has no commits that {} lacks", self.branch, self.current),
             )
         } else {
             (
                 self.outgoing.clone(),
-                format!("{} has no commits that {} lacks", self.current, self.branch),
+                tr!("{} has no commits that {} lacks", self.current, self.branch),
             )
         };
         self.browser.update(cx, |browser, cx| browser.set_commits(commits, empty, cx));
@@ -95,13 +96,13 @@ impl CompareView {
 
 impl Render for CompareView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let incoming_label = format!(
+        let incoming_label = tr!(
             "In {} but not in {} ({})",
             self.branch,
             self.current,
             self.incoming.len()
         );
-        let outgoing_label = format!(
+        let outgoing_label = tr!(
             "In {} but not in {} ({})",
             self.current,
             self.branch,
@@ -133,7 +134,7 @@ impl Render for CompareView {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(if self.loading { "Loading…" } else { "" }),
+                            .child(if self.loading { tr!("Loading…") } else { "" }),
                     ),
             )
             .child(

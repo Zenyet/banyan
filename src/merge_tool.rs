@@ -20,6 +20,7 @@ use gpui_kit::*;
 
 use crate::conflict::{self, Conflict, Resolution, Segment};
 use crate::model::{RepoEvent, RepoModel};
+use crate::i18n::tr;
 
 const LINE_HEIGHT: Pixels = px(20.);
 const GUTTER: Pixels = px(30.);
@@ -47,7 +48,7 @@ pub fn open(model: Entity<RepoModel>, path: String, window: &mut Window, cx: &mu
     let tool = cx.new(|_| MergeTool::new(model, path.clone(), ours, theirs, segments, theme));
     window.open_dialog(cx, move |dialog, _, _| {
         dialog
-            .title(format!("Merge Revisions for {path}"))
+            .title(tr!("Merge Revisions for {}", path))
             .w(px(1280.))
             .child(tool.clone())
     });
@@ -236,7 +237,7 @@ impl MergeTool {
         window.close_dialog(cx);
         self.model.update(cx, |model, cx| {
             model.run(
-                format!("Resolve {path}"),
+                tr!("Resolve {}", path),
                 move |repo| {
                     std::fs::write(repo.root().join(&path), text)?;
                     repo.resolve_conflict(&path, None)
@@ -329,7 +330,7 @@ impl MergeTool {
                     .text_color(muted)
                     .cursor_pointer()
                     .hover(|s| s.text_color(cx.theme().foreground))
-                    .child(format!("⋯ {hidden} lines without conflicts"))
+                    .child(tr!("⋯ {} lines without conflicts", hidden))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.unfolded.insert(segment);
                         cx.notify();
@@ -367,7 +368,7 @@ impl MergeTool {
                 .bg(bg)
                 .opacity(if used { 1. } else { 0.45 })
                 .when(lines.is_empty(), |col| {
-                    col.child(div().h(LINE_HEIGHT).pl_2().italic().text_color(muted).child("(no lines)"))
+                    col.child(div().h(LINE_HEIGHT).pl_2().italic().text_color(muted).child(tr!("(no lines)")))
                 })
                 .children(self.render_lines(lines, None, fg, cx))
         };
@@ -394,7 +395,7 @@ impl MergeTool {
                         .justify_end()
                         .child(
                             Button::new(SharedString::from(format!("edit-cancel-{conflict}")))
-                                .label("Cancel")
+                                .label(tr!("Cancel"))
                                 .ghost()
                                 .xsmall()
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -404,7 +405,7 @@ impl MergeTool {
                         )
                         .child(
                             Button::new(SharedString::from(format!("edit-done-{conflict}")))
-                                .label("Done")
+                                .label(tr!("Done"))
                                 .primary()
                                 .xsmall()
                                 .on_click(cx.listener(|this, _, _, cx| this.finish_edit(cx))),
@@ -415,13 +416,13 @@ impl MergeTool {
                 .child(self.conflict_toolbar(conflict, true, cx))
                 .children(self.render_lines(&c.resolved(resolution), Some(first_line), fg, cx))
                 .when(c.resolved(resolution).is_empty(), |col| {
-                    col.child(div().h(LINE_HEIGHT).pl_2().italic().text_color(muted).child("(no lines)"))
+                    col.child(div().h(LINE_HEIGHT).pl_2().italic().text_color(muted).child(tr!("(no lines)")))
                 }),
             (_, None) => v_flex()
                 .bg(unresolved_bg)
                 .child(self.conflict_toolbar(conflict, false, cx))
                 .when(c.base.is_empty(), |col| {
-                    col.child(div().h(LINE_HEIGHT).pl_2().italic().text_color(muted).child("(not in the common ancestor)"))
+                    col.child(div().h(LINE_HEIGHT).pl_2().italic().text_color(muted).child(tr!("(not in the common ancestor)")))
                 })
                 .children(self.render_lines(&c.base, None, muted, cx)),
         };
@@ -430,9 +431,9 @@ impl MergeTool {
             .items_stretch()
             .my_1()
             .child(side(&c.ours, uses_ours, ours_bg, cx))
-            .child(arrow("take-ours", IconName::ChevronsRight, "Accept Yours", true, cx))
+            .child(arrow("take-ours", IconName::ChevronsRight, tr!("Accept Yours"), true, cx))
             .child(middle.flex_1().min_w_0())
-            .child(arrow("take-theirs", IconName::ChevronsLeft, "Accept Theirs", false, cx))
+            .child(arrow("take-theirs", IconName::ChevronsLeft, tr!("Accept Theirs"), false, cx))
             .child(side(&c.theirs, uses_theirs, theirs_bg, cx))
             .into_any_element()
     }
@@ -449,15 +450,15 @@ impl MergeTool {
                     .flex_1()
                     .pl_1()
                     .text_color(if resolved { cx.theme().success } else { cx.theme().danger })
-                    .child(if resolved { "Resolved" } else { "Conflict · base shown" }),
+                    .child(if resolved { tr!("Resolved") } else { tr!("Conflict · base shown") }),
             )
             .when(!resolved, |row| {
                 row.child(
                     Button::new(SharedString::from(format!("both-{conflict}")))
-                        .label("Accept Both")
+                        .label(tr!("Accept Both"))
                         .ghost()
                         .xsmall()
-                        .tooltip("Yours, then theirs")
+                        .tooltip(tr!("Yours, then theirs"))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.set(conflict, Some(Resolution::OursThenTheirs), cx)
                         })),
@@ -468,7 +469,7 @@ impl MergeTool {
                     .icon(Icon::new(IconName::Pencil))
                     .ghost()
                     .xsmall()
-                    .tooltip("Edit the Result")
+                    .tooltip(tr!("Edit the Result"))
                     .on_click(cx.listener(move |this, _, window, cx| this.edit(conflict, window, cx))),
             )
             .when(resolved, |row| {
@@ -477,7 +478,7 @@ impl MergeTool {
                         .icon(Icon::new(IconName::Undo2).text_color(muted))
                         .ghost()
                         .xsmall()
-                        .tooltip("Undo")
+                        .tooltip(tr!("Undo"))
                         .on_click(cx.listener(move |this, _, _, cx| this.set(conflict, None, cx))),
                 )
             })
@@ -495,21 +496,21 @@ impl MergeTool {
         };
         h_flex()
             .pb_1()
-            .child(title("Yours", &self.ours, cx))
+            .child(title(tr!("Yours"), &self.ours, cx))
             .child(div().flex_none().w(GUTTER))
             .child(
                 h_flex()
                     .flex_1()
                     .min_w_0()
                     .gap_1()
-                    .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("Result"))
+                    .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(tr!("Result")))
                     .child(div().flex_1())
                     .child(
                         Button::new("prev-conflict")
                             .icon(Icon::new(IconName::ArrowUp))
                             .ghost()
                             .xsmall()
-                            .tooltip("Previous Conflict")
+                            .tooltip(tr!("Previous Conflict"))
                             .on_click(cx.listener(|this, _, _, cx| this.go(false, cx))),
                     )
                     .child(
@@ -517,12 +518,12 @@ impl MergeTool {
                             .icon(Icon::new(IconName::ArrowDown))
                             .ghost()
                             .xsmall()
-                            .tooltip("Next Conflict")
+                            .tooltip(tr!("Next Conflict"))
                             .on_click(cx.listener(|this, _, _, cx| this.go(true, cx))),
                     ),
             )
             .child(div().flex_none().w(GUTTER))
-            .child(title("Theirs", &self.theirs, cx))
+            .child(title(tr!("Theirs"), &self.theirs, cx))
     }
 }
 
@@ -552,9 +553,9 @@ impl Render for MergeTool {
         }
 
         let status = if total == 0 {
-            "No conflicts left; the changes merged cleanly".to_string()
+            tr!("No conflicts left; the changes merged cleanly").to_string()
         } else {
-            format!("{resolved} of {total} conflicts resolved")
+            tr!("{} of {} conflicts resolved", resolved, total)
         };
         v_flex()
             .gap_2()
@@ -577,16 +578,16 @@ impl Render for MergeTool {
                     .gap_2()
                     .child(
                         Button::new("accept-yours")
-                            .label("Accept Yours")
+                            .label(tr!("Accept Yours"))
                             .small()
-                            .tooltip("Take your side for every conflict")
+                            .tooltip(tr!("Take your side for every conflict"))
                             .on_click(cx.listener(|this, _, _, cx| this.accept_all(true, cx))),
                     )
                     .child(
                         Button::new("accept-theirs")
-                            .label("Accept Theirs")
+                            .label(tr!("Accept Theirs"))
                             .small()
-                            .tooltip("Take their side for every conflict")
+                            .tooltip(tr!("Take their side for every conflict"))
                             .on_click(cx.listener(|this, _, _, cx| this.accept_all(false, cx))),
                     )
                     .child(
@@ -598,13 +599,13 @@ impl Render for MergeTool {
                     )
                     .child(
                         Button::new("merge-cancel")
-                            .label("Cancel")
+                            .label(tr!("Cancel"))
                             .small()
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
                         Button::new("merge-apply")
-                            .label("Apply")
+                            .label(tr!("Apply"))
                             .primary()
                             .small()
                             .disabled(!done)

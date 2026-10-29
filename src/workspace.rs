@@ -23,6 +23,7 @@ use crate::log_view::LogView;
 use crate::model::{RepoEvent, RepoModel};
 use crate::settings::{Settings, ThemeChoice};
 use crate::ui::{SubView, cached, confirm, prompt_text};
+use crate::i18n::tr;
 
 actions!(
     workspace,
@@ -79,7 +80,7 @@ impl Workspace {
                 }
                 RepoEvent::Conflicts(label) => {
                     window.push_notification(
-                        Notification::warning(format!("{label} stopped: resolve the conflicts to continue")),
+                        Notification::warning(tr!("{} stopped: resolve the conflicts to continue", label)),
                         cx,
                     );
                     if !window.has_active_dialog(cx) {
@@ -144,11 +145,11 @@ impl Workspace {
         let state = self.model.read(cx);
         let label = match (&state.current_branch, state.state) {
             (Some(branch), RepoState::Clean) => branch.clone(),
-            (Some(branch), RepoState::Merging) => format!("{branch} (Merging)"),
-            (Some(branch), RepoState::Rebasing) => format!("{branch} (Rebasing)"),
+            (Some(branch), RepoState::Merging) => tr!("{} (Merging)", branch),
+            (Some(branch), RepoState::Rebasing) => tr!("{} (Rebasing)", branch),
             (Some(branch), _) => branch.clone(),
-            (None, RepoState::Rebasing) => "Rebasing".into(),
-            (None, _) => "Detached HEAD".into(),
+            (None, RepoState::Rebasing) => tr!("Rebasing").into(),
+            (None, _) => tr!("Detached HEAD").into(),
         };
         Button::new("branch-popup")
             .icon(IconName::GitBranch)
@@ -158,16 +159,16 @@ impl Workspace {
             .dropdown_caret(true)
             .dropdown_menu(move |mut menu, window, cx| {
                 let m = model.clone();
-                menu = menu.item(PopupMenuItem::new("New Branch...").icon(IconName::Plus).on_click(
+                menu = menu.item(PopupMenuItem::new(tr!("New Branch...")).icon(IconName::Plus).on_click(
                     move |_, window, cx| new_branch(&m, "HEAD".into(), window, cx),
                 ));
                 let m = model.clone();
-                menu = menu.item(PopupMenuItem::new("Checkout Tag or Revision...").on_click(
+                menu = menu.item(PopupMenuItem::new(tr!("Checkout Tag or Revision...")).on_click(
                     move |_, window, cx| {
                         let m = m.clone();
                         prompt_text(
-                            "Checkout Tag or Revision",
-                            "Checkout",
+                            tr!("Checkout Tag or Revision"),
+                            tr!("Checkout"),
                             "",
                             move |rev, _, cx| {
                                 m.update(cx, |m, cx| m.checkout(rev, false, cx));
@@ -178,7 +179,7 @@ impl Workspace {
                     },
                 ));
                 let branches = model.read(cx).branches.clone();
-                for (title, kind) in [("Local", RefKind::Local), ("Remote", RefKind::Remote)] {
+                for (title, kind) in [(tr!("Local"), RefKind::Local), (tr!("Remote"), RefKind::Remote)] {
                     let group: Vec<_> = branches.iter().filter(|b| b.kind == kind).cloned().collect();
                     if group.is_empty() {
                         continue;
@@ -205,18 +206,18 @@ impl Workspace {
         let count = self.model.read(cx).stashes.len();
         Button::new("stashes")
             .icon(IconName::Archive)
-            .label(format!("Stashes ({count})"))
+            .label(tr!("Stashes ({})", count))
             .ghost()
             .small()
             .dropdown_caret(true)
             .dropdown_menu(move |mut menu, window, cx| {
                 let stashes = model.read(cx).stashes.clone();
                 if stashes.is_empty() {
-                    return menu.label("No stashes");
+                    return menu.label(tr!("No stashes"));
                 }
                 let m = model.clone();
                 menu = menu
-                    .item(PopupMenuItem::new("Show Stashes…").on_click(move |_, window, cx| {
+                    .item(PopupMenuItem::new(tr!("Show Stashes…")).on_click(move |_, window, cx| {
                         crate::stash_viewer::open(m.clone(), window, cx)
                     }))
                     .separator();
@@ -228,7 +229,7 @@ impl Workspace {
                         cx,
                         move |menu, _, _| {
                             let mut menu = menu;
-                            for (label, kind) in [("Pop", 0), ("Apply", 1), ("Drop", 2)] {
+                            for (label, kind) in [(tr!("Pop"), 0), (tr!("Apply"), 1), (tr!("Drop"), 2)] {
                                 let m = m.clone();
                                 let name = stash.name.clone();
                                 menu = menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
@@ -249,7 +250,7 @@ impl Workspace {
                                         });
                                     };
                                     if kind == 2 {
-                                        confirm("Drop Stash", "Drop this stash? This cannot be undone.", "Drop", run, window, cx);
+                                        confirm(tr!("Drop Stash"), tr!("Drop this stash? This cannot be undone."), tr!("Drop"), run, window, cx);
                                     } else {
                                         run(window, cx);
                                     }
@@ -270,21 +271,21 @@ impl Workspace {
             .small()
             .px_2()
             .selected_index(self.tab)
-            .child(Tab::new().label("Log").prefix(Icon::new(IconName::GitGraph).small()))
+            .child(Tab::new().label(tr!("Log")).prefix(Icon::new(IconName::GitGraph).small()))
             .child(
                 Tab::new()
-                    .label(format!("Commit ({changes})"))
+                    .label(tr!("Commit ({})", changes))
                     .prefix(Icon::new(IconName::GitCommitHorizontal).small()),
             )
             .child(
                 Tab::new()
                     .label(match self.model.read(cx).shelves.len() {
-                        0 => "Shelf".to_string(),
-                        n => format!("Shelf ({n})"),
+                        0 => tr!("Shelf").to_string(),
+                        n => tr!("Shelf ({})", n),
                     })
                     .prefix(Icon::new(IconName::Inbox).small()),
             )
-            .child(Tab::new().label("Console").prefix(Icon::new(IconName::SquareTerminal).small()))
+            .child(Tab::new().label(tr!("Console")).prefix(Icon::new(IconName::SquareTerminal).small()))
             .on_click(cx.listener(|this, ix: &usize, _, cx| {
                 this.set_tab(*ix, cx);
             }))
@@ -307,7 +308,7 @@ impl Workspace {
                     .read(cx)
                     .current_branch
                     .clone()
-                    .unwrap_or_else(|| "Detached HEAD".into()),
+                    .unwrap_or_else(|| tr!("Detached HEAD").into()),
             )
             .font_normal()
     }
@@ -336,18 +337,18 @@ impl Workspace {
                     .dropdown_caret(true)
                     .dropdown_menu(move |mut menu, _, _| {
                         menu = menu.item(
-                            PopupMenuItem::new("Open Repository…")
+                            PopupMenuItem::new(tr!("Open Repository…"))
                                 .icon(IconName::FolderOpen)
                                 .on_click(|_, _, cx| crate::prompt_open_repo(None, cx)),
                         );
                         menu = menu.item(
-                            PopupMenuItem::new("Clone Repository…")
+                            PopupMenuItem::new(tr!("Clone Repository…"))
                                 .icon(IconName::Download)
                                 .on_click(|_, window, cx| crate::clone_dialog::open(None, window, cx)),
                         );
                         let m = repo_model.clone();
                         menu = menu.item(
-                            PopupMenuItem::new("Manage Remotes…")
+                            PopupMenuItem::new(tr!("Manage Remotes…"))
                                 .icon(IconName::Globe)
                                 .on_click(move |_, window, cx| crate::remotes_dialog::open(m.clone(), window, cx)),
                         );
@@ -357,7 +358,7 @@ impl Workspace {
                             .filter(|path| path.display().to_string() != root)
                             .collect();
                         if !recent.is_empty() {
-                            menu = menu.separator().label("Recent Repositories");
+                            menu = menu.separator().label(tr!("Recent Repositories"));
                             for path in recent {
                                 let label = recent_label(&path);
                                 menu = menu.item(PopupMenuItem::new(label).on_click(move |_, _, cx| {
@@ -373,18 +374,18 @@ impl Workspace {
             .child(
                 Button::new("fetch")
                     .icon(IconName::RefreshCcw)
-                    .label("Fetch")
+                    .label(tr!("Fetch"))
                     .ghost()
                     .small()
-                    .on_click(cx.listener(|this, _, _, cx| this.run("Fetch", |repo| repo.fetch(), cx))),
+                    .on_click(cx.listener(|this, _, _, cx| this.run(tr!("Fetch"), |repo| repo.fetch(), cx))),
             )
             .child(
                 Button::new("pull")
                     .icon(IconName::ArrowDownToLine)
-                    .label("Update")
+                    .label(tr!("Update"))
                     .ghost()
                     .small()
-                    .tooltip("Update Project (⌘T)")
+                    .tooltip(tr!("Update Project (⌘T)"))
                     .on_click(cx.listener(|this, _, window, cx| {
                         crate::update_dialog::open(this.model.clone(), window, cx)
                     })),
@@ -392,7 +393,7 @@ impl Workspace {
             .child(
                 Button::new("push")
                     .icon(IconName::ArrowUpFromLine)
-                    .label("Push")
+                    .label(tr!("Push"))
                     .ghost()
                     .small()
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -416,7 +417,7 @@ impl Workspace {
                     .icon(if is_dark { IconName::Sun } else { IconName::Moon })
                     .ghost()
                     .small()
-                    .tooltip("Toggle Theme")
+                    .tooltip(tr!("Toggle Theme"))
                     .on_click(move |_, _, cx| {
                         let theme = if is_dark { ThemeChoice::Light } else { ThemeChoice::Dark };
                         crate::settings_window::change(cx, |settings| settings.theme = theme);
@@ -523,12 +524,12 @@ fn offer_smart_checkout(
         let smart = (model.clone(), target.clone());
         let force = (model.clone(), target.clone());
         dialog
-            .title("Git Checkout Problem")
+            .title(tr!("Git Checkout Problem"))
             .w(px(520.))
             .child(
                 v_flex()
                     .gap_3()
-                    .child(div().text_sm().child(format!(
+                    .child(div().text_sm().child(tr!(
                         "Your local changes to these files would be overwritten by checking out {}:",
                         crate::actions::short(&target)
                     )))
@@ -546,7 +547,7 @@ fn offer_smart_checkout(
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Smart Checkout stashes the changes, checks out and restores them."),
+                            .child(tr!("Smart Checkout stashes the changes, checks out and restores them.")),
                     )
                     .child(
                         h_flex()
@@ -554,29 +555,29 @@ fn offer_smart_checkout(
                             .gap_2()
                             .child(
                                 Button::new("checkout-cancel")
-                                    .label("Cancel")
+                                    .label(tr!("Cancel"))
                                     .on_click(|_, window, cx| window.close_dialog(cx)),
                             )
-                            .child(Button::new("checkout-force").label("Force Checkout").danger().on_click(
+                            .child(Button::new("checkout-force").label(tr!("Force Checkout")).danger().on_click(
                                 move |_, window, cx| {
                                     window.close_dialog(cx);
                                     let (model, target) = force.clone();
                                     model.update(cx, |m, cx| {
                                         m.run(
-                                            format!("Force checkout {}", crate::actions::short(&target)),
+                                            tr!("Force checkout {}", crate::actions::short(&target)),
                                             move |repo| repo.force_checkout(&target, remote),
                                             cx,
                                         )
                                     });
                                 },
                             ))
-                            .child(Button::new("checkout-smart").label("Smart Checkout").primary().on_click(
+                            .child(Button::new("checkout-smart").label(tr!("Smart Checkout")).primary().on_click(
                                 move |_, window, cx| {
                                     window.close_dialog(cx);
                                     let (model, target) = smart.clone();
                                     model.update(cx, |m, cx| {
                                         m.run(
-                                            format!("Smart checkout {}", crate::actions::short(&target)),
+                                            tr!("Smart checkout {}", crate::actions::short(&target)),
                                             move |repo| repo.smart_checkout(&target, remote),
                                             cx,
                                         )

@@ -14,11 +14,12 @@ use gpui_kit::*;
 use crate::git::Remote;
 use crate::model::{RepoEvent, RepoModel};
 use crate::ui::confirm;
+use crate::i18n::tr;
 
 pub fn open(model: Entity<RepoModel>, window: &mut Window, cx: &mut App) {
     let view = cx.new(|cx| RemotesDialog::new(model, window, cx));
     window.open_dialog(cx, move |dialog, _, _| {
-        dialog.title("Git Remotes").w(px(720.)).child(view.clone())
+        dialog.title(tr!("Git Remotes")).w(px(720.)).child(view.clone())
     });
 }
 
@@ -88,9 +89,9 @@ impl RemotesDialog {
         }
         let editing = self.editing.take();
         self.model.update(cx, |model, cx| match editing {
-            None => model.run(format!("Add remote {name}"), move |repo| repo.add_remote(&name, &url), cx),
+            None => model.run(tr!("Add remote {}", name), move |repo| repo.add_remote(&name, &url), cx),
             Some(old) => model.run(
-                format!("Update remote {name}"),
+                tr!("Update remote {}", name),
                 move |repo| {
                     if old != name {
                         repo.rename_remote(&old, &name)?;
@@ -106,13 +107,13 @@ impl RemotesDialog {
     fn remove(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
         let model = self.model.clone();
         confirm(
-            "Remove Remote",
-            format!("Remove remote '{name}' and its remote-tracking branches?"),
-            "Remove",
+            tr!("Remove Remote"),
+            tr!("Remove remote '{}' and its remote-tracking branches?", name),
+            tr!("Remove"),
             move |_, cx| {
                 let name = name.clone();
                 model.update(cx, |model, cx| {
-                    model.run(format!("Remove remote {name}"), move |repo| repo.remove_remote(&name), cx)
+                    model.run(tr!("Remove remote {}", name), move |repo| repo.remove_remote(&name), cx)
                 });
             },
             window,
@@ -161,7 +162,7 @@ impl Render for RemotesDialog {
                             .icon(IconName::Pencil)
                             .ghost()
                             .xsmall()
-                            .tooltip("Edit")
+                            .tooltip(tr!("Edit"))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.edit(Some(&edit_remote), window, cx)
                             })),
@@ -171,7 +172,7 @@ impl Render for RemotesDialog {
                             .icon(IconName::Trash)
                             .ghost()
                             .xsmall()
-                            .tooltip("Remove")
+                            .tooltip(tr!("Remove"))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.remove(name.clone(), window, cx)
                             })),
@@ -192,7 +193,7 @@ impl Render for RemotesDialog {
                     .border_color(cx.theme().border)
                     .rounded(cx.theme().radius)
                     .when(rows.is_empty(), |list| {
-                        list.child(div().p_3().text_sm().text_color(muted).child("No remotes"))
+                        list.child(div().p_3().text_sm().text_color(muted).child(tr!("No remotes")))
                     })
                     .children(rows),
             )
@@ -201,8 +202,8 @@ impl Render for RemotesDialog {
                     .text_sm()
                     .text_color(muted)
                     .child(match &editing {
-                        Some(name) => format!("Edit remote '{name}'"),
-                        None => "Add a remote".to_string(),
+                        Some(name) => tr!("Edit remote '{}'", name),
+                        None => tr!("Add a remote").to_string(),
                     }),
             )
             .child(
@@ -213,14 +214,14 @@ impl Render for RemotesDialog {
                     .when(editing.is_some(), |row| {
                         row.child(
                             Button::new("remote-cancel-edit")
-                                .label("Cancel")
+                                .label(tr!("Cancel"))
                                 .small()
                                 .on_click(cx.listener(|this, _, window, cx| this.edit(None, window, cx))),
                         )
                     })
                     .child(
                         Button::new("remote-save")
-                            .label(if editing.is_some() { "Save" } else { "Add" })
+                            .label(if editing.is_some() { tr!("Save") } else { tr!("Add") })
                             .primary()
                             .small()
                             .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
@@ -229,7 +230,7 @@ impl Render for RemotesDialog {
             .child(
                 h_flex().justify_end().child(
                     Button::new("remotes-close")
-                        .label("Close")
+                        .label(tr!("Close"))
                         .small()
                         .on_click(|_, window, cx| window.close_dialog(cx)),
                 ),
