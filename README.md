@@ -55,9 +55,13 @@ the way git branches grow apart and merge back.
 - Branch popup in the toolbar: checkout (with Smart Checkout when local changes are in the way),
   new branch from, merge into current, rebase current onto, rename, and delete local, remote and tag refs.
 - **Interactive rebase** from any commit: reorder, pick, reword, squash, fixup, drop.
-- **Merge tool**: resolve conflicts hunk by hunk (accept yours / theirs / both).
-  The merge message is pre-filled from `MERGE_MSG`.
-  Continue or abort a merge, rebase or cherry-pick from the Commit tab.
+- **Conflict handling**: when a merge, rebase, cherry-pick, revert or pull stops on conflicts, a **Conflicts**
+  dialog lists the files with what each side did, offering Accept Yours / Accept Theirs / Merge…
+  A banner above the tabs stays until the operation is finished, with **Resolve Conflicts…**, then
+  **Commit Merge** / **Continue Rebase**, and **Abort** at any time, also for operations started outside Banyan.
+- **Merge tool**: yours, the result and theirs side by side. Changes that merge cleanly are applied already;
+  each conflict takes yours (»), theirs («), both, or text you type, and shows the common ancestor until resolved.
+  Files deleted on one side are resolved by accepting a side.
 - **File history** and **Annotate** (git blame shaded by age).
 - **Compare with Current** for any branch, and a **stash viewer** showing each stash's files and diff.
 

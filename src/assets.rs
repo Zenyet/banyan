@@ -17,6 +17,8 @@ const EXTRA: &[(&str, &[u8])] = &[
     icon!("archive.svg"),
     icon!("arrow-down-to-line.svg"),
     icon!("arrow-up-from-line.svg"),
+    icon!("chevrons-left.svg"),
+    icon!("chevrons-right.svg"),
     icon!("clock.svg"),
     icon!("download.svg"),
     icon!("folder-git-2.svg"),

@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Context as _, Result, bail};
+use anyhow::{Context as _, Result, anyhow, bail};
 
 const FIELD: char = '\x1f';
 const RECORD: char = '\x1e';
@@ -108,6 +108,16 @@ pub fn blocked_files(message: &str) -> Vec<String> {
         .collect()
 }
 
+/// The branch or commit a merge message names: `feature` in
+/// "Merge branch 'feature' into main" or "Merge remote-tracking branch 'origin/x'".
+fn merged_name(message: &str) -> Option<String> {
+    let first = message.lines().next()?;
+    let rest = ["Merge branch '", "Merge remote-tracking branch '", "Merge tag '", "Merge commit '"]
+        .iter()
+        .find_map(|prefix| first.strip_prefix(prefix))?;
+    rest.split('\'').next().filter(|name| !name.is_empty()).map(str::to_string)
+}
+
 #[derive(Clone, Debug)]
 pub struct CommitDetails {
     pub id: String,
@@ -178,6 +188,51 @@ impl StatusEntry {
             'M'
         }
     }
+
+    /// What each side of a conflict did to the file: (yours, theirs).
+    pub fn conflict_sides(&self) -> Option<(ConflictSide, ConflictSide)> {
+        use ConflictSide::*;
+        Some(match (self.index, self.worktree) {
+            ('U', 'U') => (Modified, Modified),
+            ('A', 'A') => (Added, Added),
+            ('D', 'U') => (Deleted, Modified),
+            ('U', 'D') => (Modified, Deleted),
+            ('A', 'U') => (Added, Absent),
+            ('U', 'A') => (Absent, Added),
+            ('D', 'D') => (Deleted, Deleted),
+            _ => return None,
+        })
+    }
+
+    /// Whether both sides have content to merge line by line.
+    pub fn can_merge_text(&self) -> bool {
+        self.conflict_sides()
+            .is_some_and(|(ours, theirs)| ours.has_content() && theirs.has_content())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConflictSide {
+    Modified,
+    Added,
+    Deleted,
+    /// The side never had the file.
+    Absent,
+}
+
+impl ConflictSide {
+    pub fn label(self) -> &'static str {
+        match self {
+            ConflictSide::Modified => "Modified",
+            ConflictSide::Added => "Added",
+            ConflictSide::Deleted => "Deleted",
+            ConflictSide::Absent => "—",
+        }
+    }
+
+    fn has_content(self) -> bool {
+        matches!(self, ConflictSide::Modified | ConflictSide::Added)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -189,6 +244,43 @@ pub enum RepoState {
     CherryPicking,
     Reverting,
 }
+
+impl RepoState {
+    /// The operation's name for buttons, e.g. "Abort Merge".
+    pub fn noun(self) -> &'static str {
+        match self {
+            RepoState::Clean => "",
+            RepoState::Merging => "Merge",
+            RepoState::Rebasing => "Rebase",
+            RepoState::CherryPicking => "Cherry-Pick",
+            RepoState::Reverting => "Revert",
+        }
+    }
+
+    /// The label of the button that finishes the operation.
+    pub fn continue_label(self) -> String {
+        match self {
+            RepoState::Merging => "Commit Merge".into(),
+            state => format!("Continue {}", state.noun()),
+        }
+    }
+}
+
+/// A merge, rebase, cherry-pick or revert that stopped, as the operation
+/// banner and the merge tool describe it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Operation {
+    pub state: RepoState,
+    /// e.g. "Merging feature into main".
+    pub title: String,
+    /// Names of git's "ours" and "theirs" sides of a conflict.
+    pub ours: String,
+    pub theirs: String,
+}
+
+/// Conflict markers longer than git's usual seven, so that markers already
+/// in a file's content are not mistaken for ours.
+pub const MARKER_SIZE: usize = 12;
 
 #[derive(Clone, Copy, Debug)]
 pub enum ResetMode {
@@ -918,11 +1010,125 @@ impl Repo {
         result
     }
 
+    /// Take one side of a conflicted file, or with `None` mark it resolved as it is.
+    /// Taking the side that deleted the file deletes it.
     pub fn resolve_conflict(&self, path: &str, ours: Option<bool>) -> Result<String> {
         if let Some(ours) = ours {
+            if !self.conflict_stages(path)?.contains(&if ours { 2 } else { 3 }) {
+                return self.git(&["rm", "--quiet", "--", path]);
+            }
             self.git(&["checkout", if ours { "--ours" } else { "--theirs" }, "--", path])?;
         }
-        self.git(&["add", "--", path])
+        self.git(&["add", "-A", "--", path])
+    }
+
+    /// Which index stages a conflicted file has: 1 base, 2 ours, 3 theirs.
+    fn conflict_stages(&self, path: &str) -> Result<Vec<u8>> {
+        Ok(self
+            .git(&["ls-files", "-u", "--", path])?
+            .lines()
+            .filter_map(|line| line.split('\t').next()?.rsplit(' ').next()?.parse().ok())
+            .collect())
+    }
+
+    /// git's three-way merge of a conflicted file's yours, base and theirs
+    /// versions, with diff3-style markers of [`MARKER_SIZE`] around what
+    /// still conflicts. Changes that merged cleanly are already applied.
+    pub fn merge_conflict_text(&self, path: &str) -> Result<String> {
+        /// git knows the empty blob in every repository.
+        const EMPTY_BLOB: &str = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
+        let stages = self.conflict_stages(path)?;
+        if !stages.contains(&2) || !stages.contains(&3) {
+            bail!("{path} was deleted on one side; choose Accept Yours or Accept Theirs");
+        }
+        let ours = format!(":2:{path}");
+        let theirs = format!(":3:{path}");
+        let base = if stages.contains(&1) { format!(":1:{path}") } else { EMPTY_BLOB.to_string() };
+        let marker_size = MARKER_SIZE.to_string();
+        let args = [
+            "merge-file", "-p", "--object-id", "--zdiff3", "--marker-size", &marker_size,
+            "-L", "yours", "-L", "base", "-L", "theirs", &ours, &base, &theirs,
+        ];
+        let output = command(&self.root, &args).output().context("failed to run git")?;
+        // The exit code is the number of conflicts; errors are negative.
+        if !output.status.code().is_some_and(|code| (0..128).contains(&code)) {
+            bail!("Cannot merge {path}: {}", String::from_utf8_lossy(&output.stderr).trim());
+        }
+        let text = String::from_utf8(output.stdout).map_err(|_| anyhow!("{path} is not UTF-8 text"))?;
+        if text.contains('\0') {
+            bail!("{path} is a binary file; choose Accept Yours or Accept Theirs");
+        }
+        Ok(text)
+    }
+
+    /// The stopped merge, rebase, cherry-pick or revert, if any.
+    pub fn operation(&self) -> Option<Operation> {
+        let state = self.repo_state();
+        if state == RepoState::Clean {
+            return None;
+        }
+        let git_dir = self.git_dir().ok()?;
+        let read = |name: &str| {
+            std::fs::read_to_string(git_dir.join(name))
+                .ok()
+                .map(|text| text.trim().to_string())
+                .filter(|text| !text.is_empty())
+        };
+        let head = self
+            .current_branch()
+            .or_else(|| self.head().map(|id| id[..id.len().min(8)].to_string()))
+            .unwrap_or_else(|| "HEAD".into());
+        let operation = |title: String, ours: String, theirs: String| Operation { state, title, ours, theirs };
+        Some(match state {
+            RepoState::Clean => return None,
+            RepoState::Merging => {
+                let theirs = read("MERGE_MSG")
+                    .and_then(|message| merged_name(&message))
+                    .or_else(|| read("MERGE_HEAD").map(|id| self.describe(&id)))
+                    .unwrap_or_else(|| "the other branch".into());
+                operation(format!("Merging {theirs} into {head}"), head, theirs)
+            }
+            RepoState::Rebasing => {
+                let dir = if git_dir.join("rebase-merge").exists() { "rebase-merge" } else { "rebase-apply" };
+                let branch = read(&format!("{dir}/head-name"))
+                    .map(|name| name.trim_start_matches("refs/heads/").to_string())
+                    .unwrap_or_else(|| "detached HEAD".into());
+                let onto = read(&format!("{dir}/onto"))
+                    .map(|id| self.describe(&id))
+                    .unwrap_or_else(|| "upstream".into());
+                let (step, total) = if dir == "rebase-merge" { ("msgnum", "end") } else { ("next", "last") };
+                let progress = match (read(&format!("{dir}/{step}")), read(&format!("{dir}/{total}"))) {
+                    (Some(step), Some(total)) => format!(" (commit {step} of {total})"),
+                    _ => String::new(),
+                };
+                let applying = read("REBASE_HEAD")
+                    .map(|id| self.commit_label(&id))
+                    .unwrap_or_else(|| branch.clone());
+                operation(format!("Rebasing {branch} onto {onto}{progress}"), onto, applying)
+            }
+            RepoState::CherryPicking => {
+                let commit = read("CHERRY_PICK_HEAD").map(|id| self.commit_label(&id)).unwrap_or_default();
+                operation(format!("Cherry-picking {commit}"), head, commit)
+            }
+            RepoState::Reverting => {
+                let commit = read("REVERT_HEAD").map(|id| self.commit_label(&id)).unwrap_or_default();
+                operation(format!("Reverting {commit}"), head, format!("revert of {commit}"))
+            }
+        })
+    }
+
+    /// A branch-relative name for a commit, like `feature` or `main~2`.
+    fn describe(&self, id: &str) -> String {
+        self.git(&["name-rev", "--name-only", "--no-undefined", "--exclude=refs/tags/*", id])
+            .map(|name| name.trim().trim_start_matches("remotes/").to_string())
+            .unwrap_or_else(|_| id[..id.len().min(8)].to_string())
+    }
+
+    /// "abc1234 Subject" of a commit.
+    fn commit_label(&self, id: &str) -> String {
+        self.git(&["log", "-1", "--format=%h %s", id])
+            .map(|label| label.trim().to_string())
+            .unwrap_or_else(|_| id[..id.len().min(8)].to_string())
     }
 
     pub fn fetch(&self) -> Result<String> {
@@ -1419,6 +1625,94 @@ mod tests {
         t.repo.abort(RepoState::Rebasing).unwrap();
         assert_eq!(t.repo.repo_state(), RepoState::Clean);
         assert_eq!(t.subjects(), vec!["Two", "One", "Base"]);
+    }
+
+    /// `main` and `feature` both change the one line of a.txt.
+    fn conflicting_branches(name: &str) -> TempRepo {
+        let t = TempRepo::new(name);
+        t.commit("a.txt", "start\nline\nend\n", "Base");
+        t.repo.git(&["checkout", "-q", "-b", "feature"]).unwrap();
+        t.commit("a.txt", "start\ntheirs\nend\n", "Theirs");
+        t.repo.git(&["checkout", "-q", "main"]).unwrap();
+        t.commit("a.txt", "start\nours\nend\n", "Ours");
+        t
+    }
+
+    #[test]
+    fn stopped_merge_is_described_and_merged_from_the_index() {
+        let t = conflicting_branches("merge-conflict");
+        assert!(t.repo.merge("feature").is_err());
+        let operation = t.repo.operation().unwrap();
+        assert_eq!(operation.state, RepoState::Merging);
+        assert_eq!(operation.title, "Merging feature into main");
+        assert_eq!((operation.ours.as_str(), operation.theirs.as_str()), ("main", "feature"));
+
+        // Edits to the working file don't change what the merge tool starts from.
+        t.write("a.txt", "garbage\n");
+        let segments = crate::conflict::parse(&t.repo.merge_conflict_text("a.txt").unwrap());
+        assert_eq!(
+            segments,
+            vec![
+                crate::conflict::Segment::Clean(vec!["start\n".into()]),
+                crate::conflict::Segment::Conflict(crate::conflict::Conflict {
+                    ours: vec!["ours\n".into()],
+                    base: vec!["line\n".into()],
+                    theirs: vec!["theirs\n".into()],
+                }),
+                crate::conflict::Segment::Clean(vec!["end\n".into()]),
+            ]
+        );
+
+        t.repo.resolve_conflict("a.txt", Some(false)).unwrap();
+        assert!(!t.repo.status().unwrap().iter().any(|e| e.is_conflicted()));
+        t.repo.continue_op(RepoState::Merging).unwrap();
+        assert_eq!(t.repo.operation(), None);
+        assert_eq!(std::fs::read_to_string(t.dir.join("a.txt")).unwrap(), "start\ntheirs\nend\n");
+    }
+
+    #[test]
+    fn accepting_the_side_that_deleted_a_file_deletes_it() {
+        let t = TempRepo::new("delete-conflict");
+        t.commit("a.txt", "one\n", "Base");
+        t.repo.git(&["checkout", "-q", "-b", "feature"]).unwrap();
+        t.repo.git(&["rm", "-q", "a.txt"]).unwrap();
+        t.repo.git(&["commit", "-q", "-m", "Delete"]).unwrap();
+        t.repo.git(&["checkout", "-q", "main"]).unwrap();
+        t.commit("a.txt", "two\n", "Change");
+        assert!(t.repo.merge("feature").is_err());
+        let entry = t.repo.status().unwrap().into_iter().find(|e| e.is_conflicted()).unwrap();
+        assert_eq!(entry.conflict_sides(), Some((ConflictSide::Modified, ConflictSide::Deleted)));
+        assert!(!entry.can_merge_text());
+        assert!(t.repo.merge_conflict_text("a.txt").is_err());
+        t.repo.resolve_conflict("a.txt", Some(false)).unwrap();
+        assert!(!t.dir.join("a.txt").exists());
+        assert!(t.repo.status().unwrap().iter().all(|e| !e.is_conflicted()));
+    }
+
+    #[test]
+    fn aborting_a_stopped_merge_restores_the_branch() {
+        let t = conflicting_branches("merge-abort");
+        assert!(t.repo.merge("feature").is_err());
+        t.repo.abort(RepoState::Merging).unwrap();
+        assert_eq!(t.repo.operation(), None);
+        assert_eq!(std::fs::read_to_string(t.dir.join("a.txt")).unwrap(), "start\nours\nend\n");
+    }
+
+    #[test]
+    fn stopped_rebase_names_the_branches_and_progress() {
+        let t = conflicting_branches("rebase-describe");
+        assert!(t.repo.rebase("feature").is_err());
+        let operation = t.repo.operation().unwrap();
+        assert_eq!(operation.title, "Rebasing main onto feature (commit 1 of 1)");
+        assert_eq!(operation.ours, "feature");
+        assert!(operation.theirs.ends_with(" Ours"), "{}", operation.theirs);
+    }
+
+    #[test]
+    fn merge_messages_name_the_merged_branch() {
+        assert_eq!(merged_name("Merge branch 'feature'\n\n# Conflicts:"), Some("feature".into()));
+        assert_eq!(merged_name("Merge remote-tracking branch 'origin/x' into main"), Some("origin/x".into()));
+        assert_eq!(merged_name("Squashed commit"), None);
     }
 
     #[test]

@@ -57,7 +57,9 @@ pub struct ChangesView {
     conflicted: HashSet<String>,
     /// Merge message to put into the editor on the next render.
     pending_message: Option<String>,
-    prefilled_merge_message: bool,
+    /// The merge message put into the editor, cleared again when the merge
+    /// ends if it was left as it was.
+    prefilled_merge_message: Option<String>,
     collapsed: BTreeSet<Group>,
     selected: Option<String>,
     message: Entity<TextareaState>,
@@ -101,7 +103,7 @@ impl ChangesView {
             known: HashSet::new(),
             conflicted: HashSet::new(),
             pending_message: None,
-            prefilled_merge_message: false,
+            prefilled_merge_message: None,
             collapsed: BTreeSet::new(),
             selected: None,
             message,
@@ -142,11 +144,15 @@ impl ChangesView {
         self.conflicted.retain(|p| paths.contains(p));
 
         let model = self.model.read(cx);
+        let current = self.message.read(cx).value();
         if model.state == RepoState::Clean {
-            self.prefilled_merge_message = false;
-        } else if !self.prefilled_merge_message && self.message.read(cx).value().trim().is_empty() {
-            self.prefilled_merge_message = true;
-            self.pending_message = model.repo.merge_message();
+            if self.prefilled_merge_message.take().is_some_and(|message| message == current.trim()) {
+                self.pending_message = Some(String::new());
+            }
+        } else if self.prefilled_merge_message.is_none() && current.trim().is_empty() {
+            let message = model.repo.merge_message();
+            self.prefilled_merge_message = Some(message.clone().unwrap_or_default());
+            self.pending_message = message;
         }
         self.included.retain(|p| paths.contains(p));
         self.excluded.retain(|p, _| paths.contains(p));
@@ -761,47 +767,80 @@ impl ChangesView {
             .into_any_element()
     }
 
+    fn selected_conflict(&self, cx: &App) -> Option<StatusEntry> {
+        let path = self.selected.as_ref()?;
+        self.model.read(cx).conflicts().find(|e| &e.path == path).cloned()
+    }
+
+    /// What can be done with the selected conflicted file, above its diff.
+    fn render_conflict_card(&self, entry: &StatusEntry, cx: &mut Context<Self>) -> AnyElement {
+        let path = entry.path.clone();
+        let (ours, theirs) = entry.conflict_sides().map(|(o, t)| (o.label(), t.label())).unwrap_or(("", ""));
+        let (ours_name, theirs_name) = self
+            .model
+            .read(cx)
+            .operation
+            .as_ref()
+            .map(|op| (op.ours.clone(), op.theirs.clone()))
+            .unwrap_or_else(|| ("yours".into(), "theirs".into()));
+        let resolve = |ours: bool, model: Entity<RepoModel>, path: String| {
+            move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                let path = path.clone();
+                let label = format!("Accept {} for {path}", if ours { "yours" } else { "theirs" });
+                model.update(cx, |m, cx| m.run(label, move |repo| repo.resolve_conflict(&path, Some(ours)), cx));
+            }
+        };
+        let merge_model = self.model.clone();
+        let merge_path = path.clone();
+        h_flex()
+            .flex_none()
+            .p_3()
+            .gap_3()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().warning.opacity(0.08))
+            .child(Icon::new(IconName::TriangleAlert).text_color(cx.theme().warning))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_0p5()
+                    .child(div().text_sm().font_semibold().child(format!("{path} has merge conflicts")))
+                    .child(
+                        div()
+                            .text_xs()
+                            .truncate()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("Yours ({ours_name}): {ours}  ·  Theirs ({theirs_name}): {theirs}")),
+                    ),
+            )
+            .child(
+                Button::new("card-yours")
+                    .label("Accept Yours")
+                    .small()
+                    .on_click(resolve(true, self.model.clone(), path.clone())),
+            )
+            .child(
+                Button::new("card-theirs")
+                    .label("Accept Theirs")
+                    .small()
+                    .on_click(resolve(false, self.model.clone(), path.clone())),
+            )
+            .when(entry.can_merge_text(), |row| {
+                row.child(Button::new("card-merge").label("Merge…").primary().small().on_click(
+                    move |_, window, cx| crate::merge_tool::open(merge_model.clone(), merge_path.clone(), window, cx),
+                ))
+            })
+            .into_any_element()
+    }
+
     fn render_commit_box(&self, cx: &mut Context<Self>) -> AnyElement {
-        let state = self.model.read(cx).state;
         v_flex()
             .flex_none()
             .p_2()
             .gap_2()
             .border_t_1()
             .border_color(cx.theme().border)
-            .when(state != RepoState::Clean, |col| {
-                let label = match state {
-                    RepoState::Merging => "Merging",
-                    RepoState::Rebasing => "Rebasing",
-                    RepoState::CherryPicking => "Cherry-picking",
-                    RepoState::Reverting => "Reverting",
-                    RepoState::Clean => "",
-                };
-                col.child(
-                    h_flex()
-                        .gap_2()
-                        .text_sm()
-                        .child(Icon::new(IconName::GitMerge).small().text_color(rgb(0xe0a33d)))
-                        .child(div().flex_1().child(format!("{label} in progress")))
-                        .child(
-                            Button::new("op-continue")
-                                .label("Continue")
-                                .xsmall()
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.model.update(cx, |m, cx| m.run("Continue", move |repo| repo.continue_op(state), cx))
-                                })),
-                        )
-                        .child(
-                            Button::new("op-abort")
-                                .label("Abort")
-                                .xsmall()
-                                .danger()
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.model.update(cx, |m, cx| m.run("Abort", move |repo| repo.abort(state), cx))
-                                })),
-                        ),
-                )
-            })
             .child(Textarea::new(&self.message))
             .child(
                 h_flex()
@@ -886,6 +925,7 @@ impl Render for ChangesView {
                 resizable_panel().child(
                     v_flex()
                         .size_full()
+                        .when_some(self.selected_conflict(cx), |col, entry| col.child(self.render_conflict_card(&entry, cx)))
                         .when(!self.hunks.is_empty(), |col| col.child(self.render_hunks(cx)))
                         .child(div().flex_1().min_h_0().child(crate::ui::cached(self.diff.clone()))),
                 ),

@@ -74,6 +74,15 @@ impl Workspace {
                 RepoEvent::OpFailed(message) => {
                     window.push_notification(Notification::error(message.clone()), cx)
                 }
+                RepoEvent::Conflicts(label) => {
+                    window.push_notification(
+                        Notification::warning(format!("{label} stopped: resolve the conflicts to continue")),
+                        cx,
+                    );
+                    if !window.has_active_dialog(cx) {
+                        crate::conflicts_dialog::open(model_for_events.clone(), window, cx);
+                    }
+                }
                 RepoEvent::OpSucceeded(label) => {
                     window.push_notification(Notification::success(label.clone()), cx)
                 }
@@ -443,6 +452,7 @@ impl Render for Workspace {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(div().flex_none().h(px(40.)).child(cached(chrome.toolbar)))
+            .children(crate::conflicts_dialog::render_banner(&self.model, cx))
             .child(div().flex_none().h(TAB_BAR_HEIGHT).child(cached(chrome.tabs)))
             .child(div().flex_1().min_h_0().child(content))
             .child(div().flex_none().h(px(24.)).child(cached(chrome.status_bar)))

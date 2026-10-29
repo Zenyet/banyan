@@ -5,6 +5,8 @@ mod changes_view;
 mod clone_dialog;
 mod commit_browser;
 mod compare;
+mod conflict;
+mod conflicts_dialog;
 mod console;
 mod diff_pane;
 mod git;

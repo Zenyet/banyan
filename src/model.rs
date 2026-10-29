@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use gpui_kit::*;
 
-use crate::git::{Branch, RefKind, Repo, RepoState, StatusEntry, Stash};
+use crate::git::{Branch, Operation, RefKind, Repo, RepoState, StatusEntry, Stash};
 use crate::settings::Settings;
 use crate::watcher::RepoWatcher;
 
@@ -16,6 +16,8 @@ pub enum RepoEvent {
     Changed,
     OpSucceeded(SharedString),
     OpFailed(SharedString),
+    /// The operation with this label stopped with merge conflicts.
+    Conflicts(SharedString),
     /// A checkout was refused because it would overwrite local changes.
     CheckoutBlocked {
         target: String,
@@ -29,6 +31,8 @@ pub struct RepoModel {
     pub branches: Vec<Branch>,
     pub current_branch: Option<String>,
     pub state: RepoState,
+    /// The stopped merge, rebase, cherry-pick or revert.
+    pub operation: Option<Operation>,
     pub status: Vec<StatusEntry>,
     pub stashes: Vec<Stash>,
     /// Label of the operation that is running, if any.
@@ -51,6 +55,7 @@ struct Snapshot {
     branches: Vec<Branch>,
     current_branch: Option<String>,
     state: RepoState,
+    operation: Option<Operation>,
     status: Vec<StatusEntry>,
     stashes: Vec<Stash>,
 }
@@ -62,6 +67,7 @@ impl RepoModel {
             branches: Vec::new(),
             current_branch: None,
             state: RepoState::Clean,
+            operation: None,
             status: Vec::new(),
             stashes: Vec::new(),
             busy: None,
@@ -138,6 +144,10 @@ impl RepoModel {
         }));
     }
 
+    pub fn conflicts(&self) -> impl Iterator<Item = &StatusEntry> {
+        self.status.iter().filter(|e| e.is_conflicted())
+    }
+
     pub fn branches_of(&self, kind: RefKind) -> impl Iterator<Item = &Branch> {
         self.branches.iter().filter(move |b| b.kind == kind)
     }
@@ -153,6 +163,7 @@ impl RepoModel {
                         branches: repo.branches().unwrap_or_default(),
                         current_branch: repo.current_branch(),
                         state: repo.repo_state(),
+                        operation: repo.operation(),
                         status: repo.status().unwrap_or_default(),
                         stashes: repo.stashes().unwrap_or_default(),
                     }
@@ -174,6 +185,7 @@ impl RepoModel {
                 this.branches = snapshot.branches;
                 this.current_branch = snapshot.current_branch;
                 this.state = snapshot.state;
+                this.operation = snapshot.operation;
                 this.status = snapshot.status;
                 this.stashes = snapshot.stashes;
                 cx.emit(RepoEvent::Changed);
@@ -241,14 +253,20 @@ impl RepoModel {
         cx.notify();
         let repo = self.repo.clone();
         cx.spawn(async move |this, cx| {
-            let result = cx
+            let (result, conflicted) = cx
                 .background_executor()
-                .spawn(async move { crate::console::recording(|| op(&repo)) })
+                .spawn(async move {
+                    let result = crate::console::recording(|| op(&repo));
+                    let conflicted = result.is_err()
+                        && repo.status().is_ok_and(|status| status.iter().any(|e| e.is_conflicted()));
+                    (result, conflicted)
+                })
                 .await;
             this.update(cx, |this, cx| {
                 this.busy = None;
                 match result {
                     Ok(_) => cx.emit(RepoEvent::OpSucceeded(format!("{label}: done").into())),
+                    Err(_) if conflicted => cx.emit(RepoEvent::Conflicts(label)),
                     Err(err) => cx.emit(on_error(err)),
                 }
                 this.refresh(cx);
