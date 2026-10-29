@@ -306,6 +306,41 @@ pub enum RebaseAction {
     Drop,
 }
 
+/// A working tree of the repository, from `git worktree list`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Worktree {
+    pub path: PathBuf,
+    pub head: String,
+    /// The branch checked out there; `None` when detached.
+    pub branch: Option<String>,
+    /// The repository's first working tree, which cannot be removed.
+    pub is_main: bool,
+    /// The working tree this window shows.
+    pub is_current: bool,
+    pub locked: bool,
+    /// Its folder is gone; pruning forgets it.
+    pub prunable: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SubmoduleState {
+    /// Not cloned yet.
+    Uninitialized,
+    UpToDate,
+    /// Checked out at another commit than the one recorded.
+    OutOfDate,
+    Conflict,
+}
+
+/// A submodule, from `git submodule status`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Submodule {
+    pub path: String,
+    /// The commit checked out, or recorded when not initialized.
+    pub commit: String,
+    pub state: SubmoduleState,
+}
+
 /// Changes put aside with Shelve, kept as a patch in `banyan/shelf/<id>` of
 /// the git directory, like JetBrains' shelf.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1704,6 +1739,106 @@ impl Repo {
             .collect())
     }
 
+    /// The repository's working trees, the main one first.
+    pub fn worktrees(&self) -> Result<Vec<Worktree>> {
+        let current = self.root.canonicalize().unwrap_or_else(|_| self.root.clone());
+        let mut trees: Vec<Worktree> = Vec::new();
+        for block in self.git(&["worktree", "list", "--porcelain"])?.split("\n\n") {
+            let mut tree: Option<Worktree> = None;
+            for line in block.lines() {
+                let (key, value) = line.split_once(' ').unwrap_or((line, ""));
+                match (key, tree.as_mut()) {
+                    ("worktree", _) => {
+                        let path = PathBuf::from(value);
+                        let is_current = path.canonicalize().unwrap_or_else(|_| path.clone()) == current;
+                        tree = Some(Worktree {
+                            path,
+                            head: String::new(),
+                            branch: None,
+                            is_main: trees.is_empty(),
+                            is_current,
+                            locked: false,
+                            prunable: false,
+                        });
+                    }
+                    ("HEAD", Some(tree)) => tree.head = value.to_string(),
+                    ("branch", Some(tree)) => tree.branch = Some(value.trim_start_matches("refs/heads/").to_string()),
+                    ("locked", Some(tree)) => tree.locked = true,
+                    ("prunable", Some(tree)) => tree.prunable = true,
+                    _ => {}
+                }
+            }
+            trees.extend(tree);
+        }
+        Ok(trees)
+    }
+
+    /// A new working tree at `path` with `branch` checked out: an existing
+    /// local branch, a new one tracking the remote branch of that name, or
+    /// else a new branch from HEAD.
+    pub fn add_worktree(&self, path: &Path, branch: &str) -> Result<Repo> {
+        let path_arg = path.to_string_lossy().into_owned();
+        let exists = |rev: String| self.git(&["rev-parse", "--verify", "-q", &rev]).is_ok();
+        let has_remote = self.git(&["for-each-ref", "--format=%(refname)", &format!("refs/remotes/*/{branch}")])
+            .is_ok_and(|out| !out.trim().is_empty());
+        if exists(format!("refs/heads/{branch}")) || has_remote {
+            // git creates a tracking branch from a remote branch of that name.
+            self.git(&["worktree", "add", &path_arg, branch])?;
+        } else {
+            self.git(&["worktree", "add", "-b", branch, &path_arg])?;
+        }
+        Repo::open(path)
+    }
+
+    /// Whether the working tree at `path` has local changes.
+    pub fn worktree_is_dirty(path: &Path) -> bool {
+        run(path, &["status", "--porcelain"]).is_ok_and(|out| !out.trim().is_empty())
+    }
+
+    /// Remove a working tree; with `force` even one with local changes.
+    pub fn remove_worktree(&self, path: &Path, force: bool) -> Result<String> {
+        let path = path.to_string_lossy().into_owned();
+        let mut args = vec!["worktree", "remove"];
+        if force {
+            args.push("--force");
+        }
+        args.push(&path);
+        self.git(&args)
+    }
+
+    /// Forget working trees whose folders are gone.
+    pub fn prune_worktrees(&self) -> Result<String> {
+        self.git(&["worktree", "prune"])
+    }
+
+    pub fn submodules(&self) -> Result<Vec<Submodule>> {
+        Ok(self
+            .git(&["submodule", "status"])?
+            .lines()
+            .filter_map(|line| {
+                let mut chars = line.chars();
+                let state = match chars.next()? {
+                    '-' => SubmoduleState::Uninitialized,
+                    '+' => SubmoduleState::OutOfDate,
+                    'U' => SubmoduleState::Conflict,
+                    _ => SubmoduleState::UpToDate,
+                };
+                let mut fields = line[1..].split_whitespace();
+                let commit = fields.next()?.to_string();
+                let path = fields.next()?.to_string();
+                Some(Submodule { path, commit, state })
+            })
+            .collect())
+    }
+
+    /// Clone missing submodules and check all of them (or `paths`) out at
+    /// their recorded commits, nested ones too.
+    pub fn update_submodules(&self, paths: &[String]) -> Result<String> {
+        let mut args = vec!["submodule", "update", "--init", "--recursive", "--"];
+        args.extend(paths.iter().map(String::as_str));
+        self.git(&args)
+    }
+
     fn shelf_root(&self) -> Result<PathBuf> {
         Ok(self.git_dir()?.join("banyan/shelf"))
     }
@@ -2411,6 +2546,61 @@ mod tests {
         assert!(t.repo.push_target_for("side").unwrap().is_new);
         t.repo.set_upstream("side", Some("origin/side")).unwrap();
         assert!(!t.repo.push_target_for("side").unwrap().is_new);
+    }
+
+    #[test]
+    fn worktrees_are_listed_added_and_removed() {
+        let t = TempRepo::new("worktrees");
+        t.commit("a.txt", "a\n", "First");
+        t.repo.git(&["branch", "existing"]).unwrap();
+        let new_path = t.dir.with_extension("new");
+        let existing_path = t.dir.with_extension("existing");
+        let added = t.repo.add_worktree(&new_path, "fresh").unwrap();
+        assert_eq!(added.current_branch().as_deref(), Some("fresh"));
+        t.repo.add_worktree(&existing_path, "existing").unwrap();
+
+        let trees = t.repo.worktrees().unwrap();
+        assert_eq!(trees.len(), 3);
+        assert!(trees[0].is_main && trees[0].is_current);
+        assert_eq!(trees[0].branch.as_deref(), Some("main"));
+        let fresh = trees.iter().find(|w| w.branch.as_deref() == Some("fresh")).unwrap();
+        assert!(!fresh.is_current && !fresh.is_main);
+        // The other tree sees itself as current.
+        let seen = added.worktrees().unwrap();
+        assert!(seen.iter().find(|w| w.branch.as_deref() == Some("fresh")).unwrap().is_current);
+
+        std::fs::write(new_path.join("dirty.txt"), "x").unwrap();
+        assert!(Repo::worktree_is_dirty(&new_path));
+        assert!(t.repo.remove_worktree(&new_path, false).is_err());
+        t.repo.remove_worktree(&new_path, true).unwrap();
+        std::fs::remove_dir_all(&existing_path).unwrap();
+        assert!(t.repo.worktrees().unwrap().iter().any(|w| w.prunable));
+        t.repo.prune_worktrees().unwrap();
+        assert_eq!(t.repo.worktrees().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn submodules_report_their_state_and_update() {
+        let lib = TempRepo::new("submodule-lib");
+        lib.commit("lib.txt", "v1\n", "Lib");
+        let t = TempRepo::new("submodule-host");
+        t.commit("a.txt", "a\n", "First");
+        t.repo
+            .git(&["-c", "protocol.file.allow=always", "submodule", "add", "-q", &lib.dir.display().to_string(), "lib"])
+            .unwrap();
+        t.repo.git(&["commit", "-q", "-m", "Add lib"]).unwrap();
+        let subs = t.repo.submodules().unwrap();
+        assert_eq!((subs[0].path.as_str(), subs[0].state), ("lib", SubmoduleState::UpToDate));
+
+        // A fresh clone has it uninitialized until updated.
+        let clone_dir = t.dir.with_extension("clone");
+        run(t.dir.parent().unwrap(), &["clone", "-q", &t.dir.display().to_string(), &clone_dir.display().to_string()]).unwrap();
+        let clone = Repo::open(&clone_dir).unwrap();
+        assert_eq!(clone.submodules().unwrap()[0].state, SubmoduleState::Uninitialized);
+        // Recent git refuses local file submodules unless told otherwise.
+        clone.git(&["-c", "protocol.file.allow=always", "submodule", "update", "--init", "--recursive"]).unwrap();
+        assert_eq!(clone.submodules().unwrap()[0].state, SubmoduleState::UpToDate);
+        assert!(clone_dir.join("lib/lib.txt").exists());
     }
 
     #[test]

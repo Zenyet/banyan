@@ -37,11 +37,13 @@ mod settings;
 mod settings_window;
 mod shelf_view;
 mod stash_viewer;
+mod submodules_dialog;
 mod ui;
 mod update_dialog;
 mod watcher;
 mod welcome;
 mod workspace;
+mod worktrees_dialog;
 mod worktree_diff;
 
 use std::path::{Path, PathBuf};
@@ -115,6 +117,8 @@ fn main() {
                         MenuItem::action(tr!("Push…"), workspace::PushCommits),
                         MenuItem::action(tr!("Update Project"), workspace::UpdateProject),
                         MenuItem::action(tr!("Apply Patch…"), workspace::ApplyPatch),
+                        MenuItem::action(tr!("Manage Worktrees…"), workspace::ManageWorktrees),
+                        MenuItem::action(tr!("Submodules…"), workspace::ShowSubmodules),
                         MenuItem::separator(),
                         MenuItem::action(tr!("Show Log"), workspace::ShowLog),
                         MenuItem::action(tr!("Show Commit"), workspace::ShowCommitTab),

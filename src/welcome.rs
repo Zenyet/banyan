@@ -120,7 +120,7 @@ fn offer_init(dir: PathBuf, replace: Option<AnyWindowHandle>, window: &mut Windo
 }
 
 /// `path` with the home folder shown as `~`.
-fn tilde(path: &Path) -> String {
+pub fn tilde(path: &Path) -> String {
     let text = path.display().to_string();
     match std::env::home_dir().map(|home| home.display().to_string()) {
         Some(home) if text.starts_with(&home) => format!("~{}", &text[home.len()..]),

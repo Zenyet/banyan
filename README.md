@@ -99,6 +99,10 @@ the way git branches grow apart and merge back.
 - Fetch, Update Project (merge or rebase), and a **Push dialog** that lists outgoing commits and their files,
   shows the target branch, and offers push tags and force push with lease.
 - **Clone Repository…** and **Manage Remotes…**.
+- **Worktrees** (Git menu, repository menu, or **New Worktree from** a branch): list the repository's working
+  trees, open one in its own window, add one for an existing or new branch, remove one, or forget missing ones.
+- **Submodules**: see each submodule's state, update them to the recorded commits (cloning missing ones), and
+  open one as a repository of its own.
 - **Git Authentication** dialog for HTTPS credentials and SSH passphrases
   (Banyan acts as `GIT_ASKPASS` / `SSH_ASKPASS`). Optional background fetch.
 

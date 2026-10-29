@@ -27,7 +27,7 @@ use crate::i18n::tr;
 
 actions!(
     workspace,
-    [CommitChanges, PushCommits, UpdateProject, ApplyPatch, ShowLog, ShowCommitTab, ShowConsole, RefreshRepository]
+    [CommitChanges, PushCommits, UpdateProject, ApplyPatch, ManageWorktrees, ShowSubmodules, ShowLog, ShowCommitTab, ShowConsole, RefreshRepository]
 );
 
 /// JetBrains' macOS keymap where it has an equivalent.
@@ -352,6 +352,18 @@ impl Workspace {
                                 .icon(IconName::Globe)
                                 .on_click(move |_, window, cx| crate::remotes_dialog::open(m.clone(), window, cx)),
                         );
+                        let m = repo_model.clone();
+                        menu = menu.item(
+                            PopupMenuItem::new(tr!("Manage Worktrees…"))
+                                .icon(IconName::GitBranch)
+                                .on_click(move |_, window, cx| crate::worktrees_dialog::open(m.clone(), None, window, cx)),
+                        );
+                        let m = repo_model.clone();
+                        menu = menu.item(
+                            PopupMenuItem::new(tr!("Submodules…"))
+                                .icon(IconName::FolderOpen)
+                                .on_click(move |_, window, cx| crate::submodules_dialog::open(m.clone(), window, cx)),
+                        );
                         let recent: Vec<_> = Settings::get()
                             .recent
                             .into_iter()
@@ -455,6 +467,12 @@ impl Render for Workspace {
                 crate::push_dialog::open(this.model.clone(), window, cx)
             }))
             .on_action(cx.listener(|this, _: &ApplyPatch, _, cx| crate::actions::apply_patch(&this.model, cx)))
+            .on_action(cx.listener(|this, _: &ManageWorktrees, window, cx| {
+                crate::worktrees_dialog::open(this.model.clone(), None, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ShowSubmodules, window, cx| {
+                crate::submodules_dialog::open(this.model.clone(), window, cx)
+            }))
             .on_action(cx.listener(|this, _: &UpdateProject, window, cx| {
                 crate::update_dialog::open(this.model.clone(), window, cx)
             }))

@@ -58,6 +58,14 @@ pub fn branch_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, branch: &Bran
     menu = menu.item(item(tr!("New Branch from '{}'...", name), model, move |model, window, cx| {
         new_branch(model, n.clone(), window, cx)
     }));
+    if branch.kind != RefKind::Tag && !is_current {
+        let n = name.clone();
+        menu = menu.item(item(tr!("New Worktree from '{}'...", name), model, move |model, window, cx| {
+            // A remote branch is checked out as the local branch of its name.
+            let local = n.split_once('/').filter(|_| kind_is_remote(&n, model, cx)).map(|(_, b)| b.to_string());
+            crate::worktrees_dialog::open(model.clone(), Some(local.unwrap_or_else(|| n.clone())), window, cx)
+        }));
+    }
     if branch.kind == RefKind::Local {
         let n = name.clone();
         menu = menu.item(item(tr!("Push '{}'", name), model, move |model, _, cx| {
@@ -340,6 +348,11 @@ pub fn commits_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, ids: Vec<Str
     menu.item(item(tr!("Drop {} Commits", count), model, move |model, window, cx| {
         crate::edit_history::drop(model, ids.clone(), window, cx)
     }))
+}
+
+/// Whether `name` is a remote-tracking branch of the repository.
+fn kind_is_remote(name: &str, model: &Entity<RepoModel>, cx: &App) -> bool {
+    model.read(cx).branches.iter().any(|b| b.name == name && b.kind == RefKind::Remote)
 }
 
 /// Ask where to save `ids` (oldest first) as a patch, named after `title`.
