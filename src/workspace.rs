@@ -373,8 +373,8 @@ impl Workspace {
                             menu = menu.separator().label(tr!("Recent Repositories"));
                             for path in recent {
                                 let label = recent_label(&path);
-                                menu = menu.item(PopupMenuItem::new(label).on_click(move |_, _, cx| {
-                                    crate::open_path(&path, None, cx)
+                                menu = menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
+                                    crate::welcome::open_path(&path, None, window, cx)
                                 }));
                             }
                         }

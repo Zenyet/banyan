@@ -105,7 +105,7 @@ impl SubmodulesDialog {
                     Button::new(("open-submodule", ix))
                         .label(tr!("Open"))
                         .small()
-                        .on_click(move |_, _, cx| crate::open_path(&full, None, cx)),
+                        .on_click(move |_, window, cx| crate::welcome::open_path(&full, None, window, cx)),
                 )
             })
             .into_any_element()

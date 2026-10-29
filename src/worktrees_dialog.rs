@@ -188,7 +188,7 @@ impl WorktreesDialog {
                     Button::new(("open-worktree", ix))
                         .label(tr!("Open"))
                         .small()
-                        .on_click(move |_, _, cx| crate::open_path(&open_path, None, cx)),
+                        .on_click(move |_, window, cx| crate::welcome::open_path(&open_path, None, window, cx)),
                 )
             })
             .when(removable && !tree.prunable, |row| {
