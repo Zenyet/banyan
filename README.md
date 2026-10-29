@@ -28,10 +28,12 @@ cargo run -- /path/to/repo   # or run inside a repository; with no repository a 
 - **Git Authentication** dialog for HTTPS credentials and ssh passphrases (GitBrains acts as `GIT_ASKPASS` / `SSH_ASKPASS`).
 - **Clone Repository…** and **Manage Remotes…** from the repository menu.
 - Refreshes automatically when files, the index or refs change (git-ignored files are skipped).
-- Fetch / Pull / Push, stash pop / apply / drop, light / dark theme.
-- Shortcuts: ⌘K commit (⌘↩ in the message), ⇧⌘K push, ⌘T update project, ⌘9 / ⌘0 Log / Commit, ⌘R refresh.
-- Log loads 5000 commits at a time ("Load more" at the bottom); Home / End / PageUp / PageDown in the commit list.
-- Remembers the theme and recently opened repositories (`~/Library/Application Support/GitBrains/settings`).
+- Fetch / Pull / Push, stash pop / apply / drop.
+- **Settings** (⌘,): theme (light / dark / sync with macOS), font size, relative or absolute dates, the git executable,
+  the default Update Project method, background fetch, side-by-side or unified diffs, and how many commits the log loads.
+- Shortcuts: ⌘K commit (⌘↩ in the message), ⇧⌘K push, ⌘T update project, ⌘9 / ⌘0 Log / Commit, ⌘R refresh, ⌘, settings.
+- The log loads 5000 commits at a time by default, more when you scroll to the end; Home / End / PageUp / PageDown in the commit list.
+- Settings, recently opened repositories and recent commit messages are kept in `~/Library/Application Support/GitBrains/settings`.
 
 ## Layout
 
@@ -53,7 +55,9 @@ cargo run -- /path/to/repo   # or run inside a repository; with no repository a 
 | `src/askpass.rs` | Credential prompts for git and ssh |
 | `src/clone_dialog.rs` / `src/remotes_dialog.rs` | Clone and remote management |
 | `src/watcher.rs` | File system watcher for auto-refresh |
-| `src/settings.rs` | Persisted theme and recent repositories |
+| `src/settings.rs` | Persisted settings, recent repositories and commit messages |
+| `src/settings_window.rs` | Settings window |
+| `src/assets.rs` | Icons: GPUI Kit's default bundle plus `assets/icons` (Lucide, ISC license) |
 | `src/actions.rs` | Branch / commit context menus |
 | `src/workspace.rs` | Main window, toolbar, tabs |
 
@@ -68,3 +72,6 @@ cargo test   # graph layout, ref parsing, and git operations against throwaway r
 ```sh
 scripts/bundle.sh   # builds target/release/GitBrains.app (icon, Info.plist, ad-hoc signature)
 ```
+
+The app is about 27 MB. Diffs are syntax-highlighted for common languages; to also highlight Kotlin, Swift, C#,
+Scala, SQL, PHP, Ruby and Elixir (about 25 MB more), build with `cargo build --release --features all-languages`.
