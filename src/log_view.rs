@@ -94,6 +94,8 @@ pub struct LogView {
     branches: Rc<HashMap<SharedString, Branch>>,
     selected_branch: Option<SharedString>,
     details: Option<Arc<CommitDetails>>,
+    /// Which parent of a merge commit its changes are shown against.
+    base: usize,
     file_tree: Entity<TreeState>,
     files: Rc<HashMap<SharedString, FileChange>>,
     selected_file: Option<SharedString>,
@@ -175,6 +177,7 @@ impl LogView {
             branch_tree,
             branches: Rc::default(),
             selected_branch: None,
+            base: 0,
             details: None,
             file_tree,
             files: Rc::default(),
@@ -442,6 +445,7 @@ impl LogView {
             return;
         }
         self.selected = id;
+        self.base = 0;
         self.load_details(cx);
         cx.notify();
     }
@@ -534,14 +538,15 @@ impl LogView {
             return;
         };
         let repo = self.model.read(cx).repo.clone();
+        let base = self.base;
         self.details_task = Some(cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { repo.commit_details(&id) })
+                .spawn(async move { repo.commit_details_against(&id, base) })
                 .await;
             this.update(cx, |this, cx| match result {
                 Ok(details) => {
-                    let same_commit = this.details.as_ref().is_some_and(|d| d.id == details.id);
+                    let same_commit = this.details.as_ref().is_some_and(|d| d.id == details.id && d.base == details.base);
                     let files: HashMap<SharedString, FileChange> = details
                         .files
                         .iter()
@@ -569,6 +574,33 @@ impl LogView {
             })
             .ok();
         }));
+    }
+
+    fn set_base(&mut self, base: usize, cx: &mut Context<Self>) {
+        if self.base != base {
+            self.base = base;
+            self.load_details(cx);
+        }
+    }
+
+    /// For a merge commit: which parent its changes are shown against.
+    fn render_parent_choice(&self, details: &CommitDetails, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .flex_none()
+            .px_2()
+            .py_1()
+            .gap_1()
+            .flex_wrap()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(div().text_xs().text_color(cx.theme().muted_foreground).child(tr!("Compare with")))
+            .children(details.parents.iter().enumerate().map(|(ix, parent)| {
+                let button = Button::new(("merge-parent", ix))
+                    .label(tr!("Parent {} ({})", ix + 1, short(parent)))
+                    .xsmall()
+                    .on_click(cx.listener(move |this, _, _, cx| this.set_base(ix, cx)));
+                if ix == details.base { button.primary() } else { button.ghost() }
+            }))
     }
 
     fn load_file_diff(&mut self, cx: &mut Context<Self>) {
@@ -1017,10 +1049,14 @@ impl LogView {
         let view = cx.entity().downgrade();
         let model = self.model.clone();
         let rev = self.details.as_ref().map(|d| d.id.clone());
+        let base = self.details.as_ref().and_then(|d| d.base_parent().map(str::to_string));
         let changed = self.details.as_ref().map(|d| d.files.len()).unwrap_or(0);
         let files_panel = v_flex()
             .size_full()
             .child(panel_header(tr!("Changed Files ({})", changed), cx))
+            .when_some(self.details.as_ref().filter(|d| d.parents.len() > 1), |col, details| {
+                col.child(self.render_parent_choice(details, cx))
+            })
             .child(div().flex_1().min_h_0().child(tree(
                 &self.file_tree,
                 move |ix, entry, _, _, cx| {
@@ -1069,7 +1105,7 @@ impl LogView {
                     if paths.is_empty() {
                         break;
                     }
-                    let (m, r, paths) = (model.clone(), rev.clone(), paths.clone());
+                    let (m, r, b, paths) = (model.clone(), rev.clone(), base.clone(), paths.clone());
                     menu = menu.item(PopupMenuItem::new(label).on_click(move |_, _, cx| {
                         let (rev, paths) = (r.clone(), paths.clone());
                         let label = if revert {
@@ -1077,7 +1113,10 @@ impl LogView {
                         } else {
                             tr!("Cherry-pick {} from {}", file_count(count), crate::actions::short(&rev))
                         };
-                        m.update(cx, |m, cx| m.run(label, move |repo| repo.apply_commit_changes(&rev, &paths, revert), cx));
+                        let base = b.clone();
+                        m.update(cx, |m, cx| {
+                            m.run(label, move |repo| repo.apply_commit_changes(&rev, base.as_deref(), &paths, revert), cx)
+                        });
                     }));
                 }
                 let Some(change) = menu_files.get(id) else { return menu };

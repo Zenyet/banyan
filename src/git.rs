@@ -161,9 +161,18 @@ pub struct CommitDetails {
     pub committer: String,
     pub commit_time: i64,
     pub message: String,
+    /// Changed against `parents[base]`; a merge can be seen against any parent.
+    pub base: usize,
     pub files: Vec<FileChange>,
     pub branches: Vec<String>,
     pub signature: Signature,
+}
+
+impl CommitDetails {
+    /// The parent the files are compared with, `None` for a root commit.
+    pub fn base_parent(&self) -> Option<&str> {
+        self.parents.get(self.base).map(String::as_str)
+    }
 }
 
 /// Whether a commit is signed, and how its signature checks out.
@@ -820,6 +829,11 @@ impl Repo {
     }
 
     pub fn commit_details(&self, id: &str) -> Result<CommitDetails> {
+        self.commit_details_against(id, 0)
+    }
+
+    /// Details with the changes against parent `base` (counting from 0).
+    pub fn commit_details_against(&self, id: &str, base: usize) -> Result<CommitDetails> {
         let format =
             format!("--format=%H{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%at{FIELD}%cn{FIELD}%ct{FIELD}%G?{FIELD}%GS{FIELD}%B");
         let out = self.git(&["show", "-s", &format, id])?;
@@ -834,7 +848,8 @@ impl Repo {
         let commit_time = next().parse().unwrap_or(0);
         let signature = Signature::parse(&next(), &next());
         let message = next().trim_end().to_string();
-        let files = self.commit_files(&id, parents.first().map(String::as_str))?;
+        let base = base.min(parents.len().saturating_sub(1));
+        let files = self.commit_files(&id, parents.get(base).map(String::as_str))?;
         let branches = self
             .git(&["branch", "-a", "--format=%(refname:short)", "--contains", &id])
             .map(|out| out.lines().map(str::to_string).collect())
@@ -848,13 +863,14 @@ impl Repo {
             committer,
             commit_time,
             message,
+            base,
             files,
             branches,
             signature,
         })
     }
 
-    /// Files changed by `id` against its first parent.
+    /// Files changed by `id` against `parent`.
     fn commit_files(&self, id: &str, parent: Option<&str>) -> Result<Vec<FileChange>> {
         let out = match parent {
             Some(parent) => self.git(&["diff-tree", "-r", "-M", "--name-status", "-z", parent, id])?,
@@ -884,18 +900,18 @@ impl Repo {
         self.git(&args)
     }
 
-    /// Patch of one file in a commit, against its first parent.
+    /// Patch of one file in a commit, against the parent its details compare with.
     pub fn commit_file_diff(&self, details: &CommitDetails, file: &FileChange) -> Result<String> {
         let mut paths = vec![file.path.as_str()];
         if let Some(orig) = &file.orig_path {
             paths.push(orig);
         }
         let mut args: Vec<&str> = Vec::new();
-        match details.parents.first() {
+        match details.base_parent() {
             Some(parent) => {
                 args.extend(["diff", "-M"]);
                 args.extend(whitespace_args());
-                args.extend([parent.as_str(), details.id.as_str()]);
+                args.extend([parent, details.id.as_str()]);
             }
             None => {
                 args.extend(["show", "--format=", "-M"]);
@@ -1626,12 +1642,17 @@ impl Repo {
     /// when `revert`, without committing: JetBrains' "Cherry-Pick Selected
     /// Changes" and "Revert Selected Changes". Changes that no longer fit
     /// are merged three-way, and conflicts that leaves are an error.
-    pub fn apply_commit_changes(&self, id: &str, paths: &[String], revert: bool) -> Result<String> {
+    /// `base` is the parent the changes are taken against, `None` for a root commit.
+    pub fn apply_commit_changes(&self, id: &str, base: Option<&str>, paths: &[String], revert: bool) -> Result<String> {
         if paths.is_empty() {
             bail!("no files chosen");
         }
-        // Against the first parent, as the log shows a commit's changes.
-        let mut args = vec!["diff-tree", "-p", "--binary", "--full-index", "-M", "--root", "-m", "--first-parent", id, "--"];
+        let mut args = vec!["diff-tree", "-p", "--binary", "--full-index", "-M"];
+        match base {
+            Some(base) => args.extend([base, id]),
+            None => args.extend(["--root", id]),
+        }
+        args.push("--");
         args.extend(paths.iter().map(String::as_str));
         let patch = self.git(&args)?;
         // diff-tree starts with the commit's id when it shows several files.
@@ -3214,24 +3235,44 @@ mod tests {
     }
 
     #[test]
+    fn shows_a_merge_against_either_parent() {
+        let t = TempRepo::new("merge-parents");
+        t.commit("base.txt", "base\n", "Base");
+        t.repo.git(&["checkout", "-q", "-b", "side"]).unwrap();
+        t.commit("side.txt", "side\n", "Side");
+        t.repo.git(&["checkout", "-q", "-"]).unwrap();
+        t.commit("main.txt", "main\n", "Main");
+        t.repo.git(&["merge", "-q", "--no-edit", "side"]).unwrap();
+        let paths = |base| {
+            let details = t.repo.commit_details_against("HEAD", base).unwrap();
+            details.files.into_iter().map(|f| f.path).collect::<Vec<_>>()
+        };
+        assert_eq!(paths(0), vec!["side.txt"]);
+        assert_eq!(paths(1), vec!["main.txt"]);
+        // Out of range falls back to the last parent.
+        assert_eq!(t.repo.commit_details_against("HEAD", 5).unwrap().base, 1);
+    }
+
+    #[test]
     fn applies_and_reverts_part_of_a_commit() {
         let t = TempRepo::new("selected-changes");
         t.commit("a.txt", "a\n", "Add a");
         t.write("b.txt", "b\n");
         t.commit("a.txt", "a\nmore\n", "Change a and add b");
         let id = t.repo.git(&["rev-parse", "HEAD"]).unwrap().trim().to_string();
+        let parent = t.repo.git(&["rev-parse", "HEAD~1"]).unwrap().trim().to_string();
         // Undo only a.txt's part.
-        t.repo.apply_commit_changes(&id, &["a.txt".into()], true).unwrap();
+        t.repo.apply_commit_changes(&id, Some(&parent), &["a.txt".into()], true).unwrap();
         assert_eq!(std::fs::read_to_string(t.dir.join("a.txt")).unwrap(), "a\n");
         assert!(t.dir.join("b.txt").exists());
         // And bring it back.
-        t.repo.apply_commit_changes(&id, &["a.txt".into()], false).unwrap();
+        t.repo.apply_commit_changes(&id, Some(&parent), &["a.txt".into()], false).unwrap();
         assert_eq!(std::fs::read_to_string(t.dir.join("a.txt")).unwrap(), "a\nmore\n");
         // A file changed since is left in conflict.
         t.commit("a.txt", "x\n", "Rewrite a");
-        assert!(t.repo.apply_commit_changes(&id, &["a.txt".into()], true).is_err());
+        assert!(t.repo.apply_commit_changes(&id, Some(&parent), &["a.txt".into()], true).is_err());
         assert!(t.repo.status().unwrap().iter().any(|e| e.path == "a.txt" && e.is_conflicted()));
-        assert!(t.repo.apply_commit_changes(&id, &["missing.txt".into()], false).is_err());
+        assert!(t.repo.apply_commit_changes(&id, Some(&parent), &["missing.txt".into()], false).is_err());
     }
 
     #[test]
