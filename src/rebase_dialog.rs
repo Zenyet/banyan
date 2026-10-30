@@ -142,6 +142,7 @@ impl RebaseDialog {
             RebaseAction::Squash => (tr!("Squash"), rgb(0x9a6ad6).into()),
             RebaseAction::Fixup => (tr!("Fixup"), rgb(0x9a6ad6).into()),
             RebaseAction::Drop => (tr!("Drop"), cx.theme().danger),
+            RebaseAction::Edit => (tr!("Edit"), rgb(0xd98c2b).into()),
         };
         let dropped = entry.action == RebaseAction::Drop;
         let subject = match &entry.action {
@@ -175,6 +176,7 @@ impl RebaseDialog {
                             (tr!("Pick"), RebaseAction::Pick),
                             (tr!("Squash"), RebaseAction::Squash),
                             (tr!("Fixup"), RebaseAction::Fixup),
+                            (tr!("Edit"), RebaseAction::Edit),
                             (tr!("Drop"), RebaseAction::Drop),
                         ] {
                             let view = view.clone();

@@ -262,6 +262,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Filter the Log by This File", "按此文件筛选日志"),
     ("Cherry-Pick Selected Changes", "优选所选更改"),
     ("Compare with", "比较对象"),
+    ("Stopped to edit {} while rebasing {}: amend it from the Commit tab, then continue", "变基 {1} 时已停在 {0} 以便修改：在“提交”页修订（amend）它，然后继续"),
     ("Parent {} ({})", "父提交 {}（{}）"),
     ("Revert Selected Changes", "还原所选更改"),
     ("Cherry-pick {} from {}", "从 {1} 优选 {0}"),

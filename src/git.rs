@@ -423,6 +423,8 @@ pub enum RebaseAction {
     Squash,
     Fixup,
     Drop,
+    /// Pick, then stop so the commit can be amended or split.
+    Edit,
 }
 
 /// A working tree of the repository, from `git worktree list`.
@@ -1449,7 +1451,18 @@ impl Repo {
                 let applying = read("REBASE_HEAD")
                     .map(|id| self.commit_label(&id))
                     .unwrap_or_else(|| branch.clone());
-                operation(tr!("Rebasing {} onto {}{}", branch, onto, progress), onto, applying)
+                // An "edit" step: git stopped after picking the commit, for it to be amended.
+                let editing = (dir == "rebase-merge" && git_dir.join("rebase-merge/amend").exists())
+                    .then(|| read("rebase-merge/amend").map(|id| self.commit_label(&id)))
+                    .flatten();
+                match editing {
+                    Some(commit) => operation(
+                        tr!("Stopped to edit {} while rebasing {}: amend it from the Commit tab, then continue", commit, branch),
+                        onto,
+                        applying,
+                    ),
+                    None => operation(tr!("Rebasing {} onto {}{}", branch, onto, progress), onto, applying),
+                }
             }
             RepoState::CherryPicking => {
                 let commit = read("CHERRY_PICK_HEAD").map(|id| self.commit_label(&id)).unwrap_or_default();
@@ -1840,6 +1853,7 @@ impl Repo {
                 RebaseAction::Squash => todo.push_str(&format!("squash {id}\n")),
                 RebaseAction::Fixup => todo.push_str(&format!("fixup {id}\n")),
                 RebaseAction::Drop => todo.push_str(&format!("drop {id}\n")),
+                RebaseAction::Edit => todo.push_str(&format!("edit {id}\n")),
                 RebaseAction::Reword(message) => {
                     let file = dir.join(format!("message-{ix}"));
                     std::fs::write(&file, message)?;
@@ -3232,6 +3246,30 @@ mod tests {
         let since = |since: &str| LogFilter { since: Some(since.into()), ..Default::default() };
         assert_eq!(t.repo.log(&since("1.day.ago"), 10).unwrap().len(), 3);
         assert!(t.repo.log(&since("2099-01-01"), 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn interactive_rebase_stops_to_edit() {
+        let t = TempRepo::new("rebase-edit");
+        let first = t.commit("a.txt", "a\n", "First");
+        t.commit("b.txt", "b\n", "Second");
+        t.commit("c.txt", "c\n", "Third");
+        let commits = t.repo.rebase_commits(&first).unwrap();
+        let plan: Vec<(String, RebaseAction)> = commits
+            .iter()
+            .map(|c| (c.id.clone(), if c.subject == "Second" { RebaseAction::Edit } else { RebaseAction::Pick }))
+            .collect();
+        t.repo.interactive_rebase(&first, &plan).unwrap();
+        assert_eq!(t.repo.repo_state(), RepoState::Rebasing);
+        let operation = t.repo.operation().unwrap();
+        assert!(operation.title.contains("Second"), "{}", operation.title);
+        // Amend the stopped commit, then carry on.
+        t.write("b.txt", "b2\n");
+        t.repo.git(&["commit", "-qa", "--amend", "--no-edit"]).unwrap();
+        t.repo.continue_op(RepoState::Rebasing).unwrap();
+        assert_eq!(t.repo.repo_state(), RepoState::Clean);
+        assert_eq!(t.subjects(), vec!["Third", "Second", "First"]);
+        assert_eq!(t.repo.git(&["show", "HEAD~1:b.txt"]).unwrap(), "b2\n");
     }
 
     #[test]
