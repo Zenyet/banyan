@@ -38,6 +38,9 @@ the way git branches grow apart and merge back.
 - Filter by text or hash, branch, date, any number of authors (with a "Me" shortcut), and files or folders; git does the filtering, so results reach past the commits loaded.
 - Commit details ("in N branches"), a changed-files tree, and a side-by-side or unified diff
   with syntax highlighting. **Ignore Whitespace** above any diff leaves out whitespace-only changes.
+- A merge commit's changes can be seen against either parent.
+- **Cherry-Pick Selected Changes** and **Revert Selected Changes** on a file or folder of a commit apply or undo
+  just that part in the work tree.
 - **Compare with Local** for a file of any commit or in File History, and **Compare Commits** for two
   commits selected in the log.
 - Commit context menu: copy hash, checkout, new branch / tag, cherry-pick, revert,
@@ -56,6 +59,8 @@ the way git branches grow apart and merge back.
 - Changelist-style checkboxes for Changes, Unversioned Files and Merge Conflicts.
 - Commit whole files, single hunks, or individual lines.
 - Commit, amend, commit and push, rollback, and stash. Recent commit messages are remembered.
+- **Stash Changes** can stash only the checked files, leave out unversioned files, or keep the index; a stash can
+  be popped, applied, dropped, or unstashed onto a new branch.
 - Add to `.gitignore`, Copy Path, and Reveal in Finder for local changes.
 - **Commit Options** (the gear next to the message): commit as another author, add a `Signed-off-by` line, sign
   the commit with GPG or SSH, or skip Git hooks; and set whether this repository signs every commit, with which
@@ -93,13 +98,14 @@ the way git branches grow apart and merge back.
   it out, or set to track another remote branch (**Set Upstream**).
 - **Create Patch** from one or more commits, **Apply Patch** from a file (Git menu or the Commit tab), and
   **Get from Revision** to bring a file back to its version in any commit.
-- **Interactive rebase** from any commit: reorder, pick, reword, squash, fixup, drop.
+- **Interactive rebase** from any commit: reorder, pick, reword, edit (stop to amend), squash, fixup, drop.
+- **Merge with Options…**: fast-forward only or never, squash, stop before committing, or your own message.
 - **File history** and **Annotate** (git blame shaded by age).
 - **Compare with Current** for any branch, and a **stash viewer** showing each stash's files and diff.
 
 ### Remotes
 
-- Fetch, Update Project (merge or rebase), and a **Push dialog** that lists outgoing commits and their files,
+- Fetch, Update Project (merge, rebase, or fast-forward only), and a **Push dialog** that lists outgoing commits and their files,
   shows the target branch, and offers push tags and force push with lease.
 - **Clone Repository…** and **Manage Remotes…**.
 - **Worktrees** (Git menu, repository menu, or **New Worktree from** a branch): list the repository's working
@@ -114,7 +120,7 @@ the way git branches grow apart and merge back.
 - A **Git console** tab showing every git command your actions run, with output and timing.
 - Refreshes automatically when files, the index or refs change. Git-ignored files are skipped.
 - Light and dark themes, or follow macOS.
-- English or Simplified Chinese (简体中文), following the system language or chosen in Settings.
+- English or Simplified Chinese (简体中文), chosen in Settings.
 
 ## Installation
 
