@@ -53,6 +53,25 @@ pub fn branch_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, branch: &Bran
             let remote = kind == RefKind::Remote;
             model.update(cx, |m, cx| m.checkout(n.clone(), remote, cx))
         }));
+        // The other repositories of the window with a branch of that name, as
+        // JetBrains controls the branches of several roots together.
+        let siblings: Vec<Entity<RepoModel>> = crate::repo_window::sibling_models(model, cx)
+            .into_iter()
+            .filter(|other| {
+                let other = other.read(cx);
+                other.branches.iter().any(|b| b.kind == branch.kind && b.name == name)
+                    && !(branch.kind == RefKind::Local && other.current_branch.as_deref() == Some(name.as_str()))
+            })
+            .collect();
+        if branch.kind != RefKind::Tag && !siblings.is_empty() {
+            let n = name.clone();
+            let remote = branch.kind == RefKind::Remote;
+            menu = menu.item(item(tr!("Checkout in All Repositories ({})", siblings.len() + 1), model, move |model, _, cx| {
+                for target in std::iter::once(model.clone()).chain(siblings.iter().cloned()) {
+                    target.update(cx, |m, cx| m.checkout(n.clone(), remote, cx));
+                }
+            }));
+        }
     }
     let n = name.clone();
     menu = menu.item(item(tr!("New Branch from '{}'...", name), model, move |model, window, cx| {

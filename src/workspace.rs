@@ -162,6 +162,33 @@ impl Workspace {
                 menu = menu.item(PopupMenuItem::new(tr!("New Branch...")).icon(IconName::Plus).on_click(
                     move |_, window, cx| new_branch(&m, "HEAD".into(), window, cx),
                 ));
+                let siblings = crate::repo_window::sibling_models(&model, cx);
+                if !siblings.is_empty() {
+                    let all: Vec<Entity<RepoModel>> = std::iter::once(model.clone()).chain(siblings).collect();
+                    menu = menu.item(
+                        PopupMenuItem::new(tr!("New Branch in All Repositories ({})...", all.len())).on_click(
+                            move |_, window, cx| {
+                                let all = all.clone();
+                                prompt_text(
+                                    tr!("New Branch in All Repositories"),
+                                    tr!("Create"),
+                                    "",
+                                    move |name, _, cx| {
+                                        for target in &all {
+                                            let name = name.clone();
+                                            target.update(cx, |m, cx| {
+                                                let label = tr!("Create branch {} in {}", name, m.repo.name());
+                                                m.run(label, move |repo| repo.create_branch(&name, "HEAD", true), cx)
+                                            });
+                                        }
+                                    },
+                                    window,
+                                    cx,
+                                );
+                            },
+                        ),
+                    );
+                }
                 let m = model.clone();
                 menu = menu.item(PopupMenuItem::new(tr!("Checkout Tag or Revision...")).on_click(
                     move |_, window, cx| {

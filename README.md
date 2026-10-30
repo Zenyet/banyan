@@ -130,6 +130,8 @@ the way git branches grow apart and merge back.
   <kbd>⇧</kbd> <kbd>⌘</kbd> <kbd>[</kbd>) switch between them, <kbd>⌘</kbd> <kbd>W</kbd> closes one, and
   **Git › Fetch All Repositories** and **Update All Repositories** act on them all. Drag a tab to reorder it; its
   menu closes the others, moves it to a window of its own, or copies or reveals its path.
+- Branches can be handled across the window: **Checkout in All Repositories** for a branch the others have too,
+  and **New Branch in All Repositories** from the branch popup.
 - The tabs open last time come back when Banyan starts.
 
 ### And more

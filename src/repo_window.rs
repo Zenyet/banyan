@@ -154,6 +154,19 @@ fn show_existing(root: &std::path::Path, cx: &mut App) -> bool {
     false
 }
 
+/// The repositories in the other tabs of the window showing `model`.
+pub fn sibling_models(model: &Entity<RepoModel>, cx: &App) -> Vec<Entity<RepoModel>> {
+    for (_, view) in live_windows() {
+        let Some(view) = view.upgrade() else { continue };
+        let view = view.read(cx);
+        let models: Vec<Entity<RepoModel>> = (0..view.tabs.len()).map(|ix| view.model(ix, cx)).collect();
+        if models.contains(model) {
+            return models.into_iter().filter(|m| m != model).collect();
+        }
+    }
+    Vec::new()
+}
+
 /// Close the active tab of `handle` if it has others; `false` when the
 /// window should close instead.
 pub fn close_active_tab(handle: AnyWindowHandle, cx: &mut App) -> bool {
