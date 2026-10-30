@@ -103,8 +103,11 @@ impl ChangesView {
             }),
             // Cmd-Enter in the message commits, as in JetBrains.
             cx.subscribe_in(&message, window, |this, _, event, window, cx| {
-                if let InputEvent::PressEnter { secondary: true, .. } = event {
-                    this.commit(false, window, cx);
+                match event {
+                    InputEvent::PressEnter { secondary: true, .. } => this.commit(false, window, cx),
+                    // The message checks below the box follow the text.
+                    InputEvent::Change => cx.notify(),
+                    _ => {}
                 }
             }),
         ];
@@ -945,6 +948,9 @@ impl ChangesView {
             .border_t_1()
             .border_color(cx.theme().border)
             .child(Textarea::new(&self.message))
+            .children(message_problems(&self.message.read(cx).value()).into_iter().map(|problem| {
+                div().text_xs().text_color(cx.theme().muted_foreground).child(problem)
+            }))
             .when_some(self.options_summary(), |col, summary| {
                 col.child(div().text_xs().text_color(cx.theme().warning).truncate().child(summary))
             })
@@ -1159,4 +1165,35 @@ fn changelist_menu(
         ));
     }
     menu
+}
+
+/// Where a commit message strays from the usual form: a subject of at most
+/// 72 characters, then a blank line before the body. Shown, not enforced.
+fn message_problems(message: &str) -> Vec<String> {
+    const SUBJECT_LIMIT: usize = 72;
+    let mut lines = message.lines();
+    let mut problems = Vec::new();
+    let subject_length = lines.next().map(|subject| subject.trim_end().chars().count()).unwrap_or(0);
+    if subject_length > SUBJECT_LIMIT {
+        problems.push(tr!("The subject is {} characters; {} or fewer reads best in logs", subject_length, SUBJECT_LIMIT));
+    }
+    if lines.next().is_some_and(|second| !second.trim().is_empty()) {
+        problems.push(tr!("Leave a blank line between the subject and the body").into());
+    }
+    problems
+}
+
+#[cfg(test)]
+mod tests {
+    use super::message_problems;
+
+    #[test]
+    fn checks_commit_messages() {
+        assert!(message_problems("").is_empty());
+        assert!(message_problems("Fix the thing\n\nBecause it broke.").is_empty());
+        assert_eq!(message_problems(&"x".repeat(73)).len(), 1);
+        assert!(message_problems(&"字".repeat(72)).is_empty());
+        assert_eq!(message_problems("Subject\nBody right away").len(), 1);
+        assert_eq!(message_problems(&format!("{}\nbody", "y".repeat(80))).len(), 2);
+    }
 }

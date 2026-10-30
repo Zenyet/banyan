@@ -262,6 +262,8 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Filter the Log by This File", "按此文件筛选日志"),
     ("Cherry-Pick Selected Changes", "优选所选更改"),
     ("Compare with", "比较对象"),
+    ("The subject is {} characters; {} or fewer reads best in logs", "标题有 {} 个字符，不超过 {} 个在日志里更易读"),
+    ("Leave a blank line between the subject and the body", "标题和正文之间请空一行"),
     ("Optional", "可选"),
     ("Name the tag", "请输入标签名"),
     ("With a message the tag is annotated: it records who tagged and when.", "填写说明会创建附注标签，记录打标签的人和时间。"),
