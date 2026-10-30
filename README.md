@@ -123,6 +123,14 @@ the way git branches grow apart and merge back.
 - **Git Authentication** dialog for HTTPS credentials and SSH passphrases
   (Banyan acts as `GIT_ASKPASS` / `SSH_ASKPASS`). Optional background fetch.
 
+### Several repositories in one window
+
+- Repositories open as tabs of the current window (or in windows of their own, in Settings); each tab shows its
+  branch and how many files changed. **Window › Next / Previous Repository** (<kbd>⇧</kbd> <kbd>⌘</kbd> <kbd>]</kbd> /
+  <kbd>⇧</kbd> <kbd>⌘</kbd> <kbd>[</kbd>) switch between them, <kbd>⌘</kbd> <kbd>W</kbd> closes one, and
+  **Git › Fetch All Repositories** fetches them all.
+- The tabs open last time come back when Banyan starts.
+
 ### And more
 
 - A **Git console** tab showing every git command your actions run, with output and timing.

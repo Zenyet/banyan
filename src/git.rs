@@ -34,6 +34,7 @@ pub struct Commit {
     pub id: String,
     pub parents: Vec<String>,
     pub author: String,
+    #[allow(dead_code)] // Parsed with the rest; nothing shows it yet.
     pub email: String,
     pub time: i64,
     pub subject: String,
@@ -1793,10 +1794,6 @@ impl Repo {
         Ok(())
     }
 
-    pub fn pull(&self) -> Result<String> {
-        self.git(&["pull", "--no-edit"])
-    }
-
     /// JetBrains' "Update Project": pull the tracked branch by merging or
     /// rebasing, stashing local changes around it.
     pub fn update_project(&self, method: UpdateMethod) -> Result<String> {
@@ -2174,10 +2171,6 @@ impl Repo {
     }
 
     /// Commits in `branch` that HEAD lacks, and commits in HEAD that `branch` lacks.
-    pub fn compare_with_head(&self, branch: &str) -> Result<(Vec<Commit>, Vec<Commit>)> {
-        self.compare_refs(branch, "HEAD")
-    }
-
     /// Commits in `branch` that `base` lacks, and commits in `base` that `branch` lacks.
     pub fn compare_refs(&self, branch: &str, base: &str) -> Result<(Vec<Commit>, Vec<Commit>)> {
         for rev in [branch, base] {
@@ -3450,7 +3443,7 @@ mod tests {
         t.repo.git(&["checkout", "-q", "main"]).unwrap();
         t.commit("d.txt", "d\n", "Main only");
 
-        let (incoming, outgoing) = t.repo.compare_with_head("topic").unwrap();
+        let (incoming, outgoing) = t.repo.compare_refs("topic", "HEAD").unwrap();
         let subjects = |commits: &[Commit]| commits.iter().map(|c| c.subject.clone()).collect::<Vec<_>>();
         assert_eq!(subjects(&incoming), vec!["Topic two", "Topic one"]);
         assert_eq!(subjects(&outgoing), vec!["Main only"]);

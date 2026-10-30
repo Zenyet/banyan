@@ -58,6 +58,15 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    pub fn model(&self) -> &Entity<RepoModel> {
+        &self.model
+    }
+
+    /// Where the workspace's commands are handled from.
+    pub fn focus_handle(&self) -> FocusHandle {
+        self.focus.clone()
+    }
+
     pub fn new(model: Entity<RepoModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let log = cx.new(|cx| LogView::new(model.clone(), window, cx));
         let changes = cx.new(|cx| ChangesView::new(model.clone(), window, cx));

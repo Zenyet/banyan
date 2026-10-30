@@ -37,6 +37,7 @@ mod patch;
 mod push_dialog;
 mod rebase_dialog;
 mod remotes_dialog;
+mod repo_window;
 mod settings;
 mod settings_window;
 mod shelf_view;
@@ -58,8 +59,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use gpui_kit::*;
 
 use crate::git::Repo;
-use crate::model::RepoModel;
-use crate::workspace::Workspace;
 use crate::i18n::tr;
 
 actions!(banyan, [Quit, OpenRepository, CloseWindow, OpenSettings]);
@@ -91,10 +90,13 @@ fn main() {
                 cx.quit();
             });
             cx.on_action(|_: &CloseWindow, cx| {
-                // The action is dispatched from inside the window, so close it afterwards.
+                // The action is dispatched from inside the window, so close it
+                // afterwards: its active repository if it has several.
                 if let Some(window) = cx.active_window() {
                     cx.defer(move |cx| {
-                        window.update(cx, |_, window, _| window.remove_window()).ok();
+                        if !repo_window::close_active_tab(window, cx) {
+                            window.update(cx, |_, window, _| window.remove_window()).ok();
+                        }
                     });
                 }
             });
@@ -120,6 +122,7 @@ fn main() {
                         MenuItem::action(tr!("Push…"), workspace::PushCommits),
                         MenuItem::action(tr!("Update Project"), workspace::UpdateProject),
                         MenuItem::action(tr!("Fetch"), workspace::FetchRemotes),
+                        MenuItem::action(tr!("Fetch All Repositories"), repo_window::FetchAllRepositories),
                         MenuItem::action(tr!("Apply Patch…"), workspace::ApplyPatch),
                         MenuItem::action(tr!("Manage Worktrees…"), workspace::ManageWorktrees),
                         MenuItem::action(tr!("Submodules…"), workspace::ShowSubmodules),
@@ -142,6 +145,14 @@ fn main() {
                     ],
                     disabled: false,
                 },
+                Menu {
+                    name: tr!("Window").into(),
+                    items: vec![
+                        MenuItem::action(tr!("Next Repository"), repo_window::NextRepository),
+                        MenuItem::action(tr!("Previous Repository"), repo_window::PreviousRepository),
+                    ],
+                    disabled: false,
+                },
             ]);
             // Closing the last repository goes back to the welcome window;
             // closing that quits.
@@ -157,9 +168,10 @@ fn main() {
             .detach();
             cx.activate(true);
 
-            match initial_repo(requested.as_deref()) {
-                Some(repo) => open_repo_window(repo, cx),
-                None => {
+            let repos = initial_repos(requested.as_deref());
+            match repos.is_empty() {
+                false => repo_window::open_all(repos, cx),
+                true => {
                     welcome::open(cx);
                     // A folder named on the command line that isn't a repository yet.
                     if let Some(path) = requested.filter(|path| path.is_dir()) {
@@ -184,40 +196,22 @@ fn main() {
         });
 }
 
-/// The repository to open at launch: the one named on the command line, the
-/// current directory, or (when launched from Finder) the last one opened.
-fn initial_repo(requested: Option<&Path>) -> Option<Repo> {
+/// The repositories to open at launch: the one named on the command line,
+/// the current directory, or (when launched from Finder) the tabs open last
+/// time, else the last repository opened.
+fn initial_repos(requested: Option<&Path>) -> Vec<Repo> {
     if let Some(path) = requested {
-        return Repo::open(path).ok();
+        return Repo::open(path).ok().into_iter().collect();
     }
     if let Some(repo) = std::env::current_dir().ok().and_then(|dir| Repo::open(&dir).ok()) {
-        return Some(repo);
+        return vec![repo];
     }
-    settings::Settings::get()
-        .recent
-        .iter()
-        .find_map(|path| Repo::open(path).ok())
-}
-
-fn window_options(cx: &App) -> WindowOptions {
-    WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-            None,
-            size(px(1440.), px(920.)),
-            cx,
-        ))),
-        ..Default::default()
+    let settings = settings::Settings::get();
+    let session: Vec<Repo> = settings.session.iter().filter_map(|path| Repo::open(path).ok()).collect();
+    if !session.is_empty() {
+        return session;
     }
-}
-
-pub fn open_repo_window(repo: Repo, cx: &mut App) {
-    settings::Settings::add_recent(repo.root().to_path_buf());
-    let options = window_options(cx);
-    gpui_kit::open_window(options, cx, |window, cx| {
-        let model = cx.new(|cx| RepoModel::new(repo, cx));
-        cx.new(|cx| Workspace::new(model, window, cx))
-    })
-    .expect("failed to open window");
+    settings.recent.iter().find_map(|path| Repo::open(path).ok()).into_iter().collect()
 }
 
 /// Ask for a repository folder and open it in a new window. `replace` is
@@ -243,7 +237,7 @@ pub fn open_path(path: &Path, replace: Option<AnyWindowHandle>, cx: &mut App) {
     let path = path.to_path_buf();
     let Some(window) = replace.or_else(|| cx.active_window()).or_else(|| cx.windows().into_iter().next()) else {
         if let Ok(repo) = Repo::open(&path) {
-            open_repo_window(repo, cx);
+            repo_window::open(repo, cx);
         }
         return;
     };

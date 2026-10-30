@@ -64,7 +64,11 @@ pub struct Settings {
     /// Branch names or `*` patterns, separated by spaces or commas, that
     /// are never force pushed nor have pushed commits rewritten.
     pub protected_branches: String,
+    /// Open repositories in a window of their own, not as a tab.
+    pub open_in_new_window: bool,
     pub recent: Vec<PathBuf>,
+    /// The repositories open in the last window used, shown one first.
+    pub session: Vec<PathBuf>,
     /// Commit messages, newest first.
     pub messages: Vec<String>,
     /// Shortcuts changed from the defaults: command id and keys, empty for
@@ -86,7 +90,9 @@ impl Default for Settings {
             language: String::new(),
             log_page_size: 5000,
             protected_branches: "main master".into(),
+            open_in_new_window: false,
             recent: Vec::new(),
+            session: Vec::new(),
             messages: Vec::new(),
             shortcuts: Vec::new(),
         }
@@ -220,6 +226,8 @@ impl Settings {
                 "log_page" => settings.log_page_size = value.parse().unwrap_or(settings.log_page_size),
                 "protected" => settings.protected_branches = value.to_string(),
                 "recent" => settings.recent.push(PathBuf::from(value)),
+                "session" => settings.session.push(PathBuf::from(value)),
+                "open_in" => settings.open_in_new_window = value == "window",
                 "message" => settings.messages.push(unescape(value)),
                 "shortcut" => {
                     let (id, keys) = value.split_once(' ').unwrap_or((value, ""));
@@ -246,8 +254,12 @@ impl Settings {
             self.log_page_size,
             self.protected_branches,
         );
+        text.push_str(&format!("open_in={}\n", if self.open_in_new_window { "window" } else { "tab" }));
         for repo in &self.recent {
             text.push_str(&format!("recent={}\n", repo.display()));
+        }
+        for repo in &self.session {
+            text.push_str(&format!("session={}\n", repo.display()));
         }
         for message in &self.messages {
             text.push_str(&format!("message={}\n", escape(message)));
@@ -326,7 +338,9 @@ mod tests {
             language: "zh".into(),
             log_page_size: 2000,
             protected_branches: "main release/*".into(),
+            open_in_new_window: true,
             recent: vec!["/tmp/repo".into()],
+            session: vec!["/tmp/a".into(), "/tmp/b".into()],
             messages: vec!["Fix\n\nDetails".into()],
             shortcuts: vec![("push".into(), "secondary-alt-p".into()), ("fetch".into(), String::new())],
         };

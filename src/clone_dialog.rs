@@ -140,7 +140,7 @@ impl CloneDialog {
                         let replace = this.replace;
                         cx.defer(move |cx| {
                             handle.update(cx, |_, window, cx| window.close_dialog(cx)).ok();
-                            crate::open_repo_window(repo, cx);
+                            crate::repo_window::open(repo, cx);
                             if let Some(window) = replace {
                                 window.update(cx, |_, window, _| window.remove_window()).ok();
                             }

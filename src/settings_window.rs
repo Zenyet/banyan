@@ -164,6 +164,15 @@ impl SettingsWindow {
         SettingPage::new(tr!("Version Control")).icon(IconName::GitBranch).groups([
             SettingGroup::new().title(tr!("Git")).items([
                 SettingItem::new(
+                    tr!("Open repositories in"),
+                    choice(
+                        [("tab", tr!("A tab of the current window")), ("window", tr!("A new window"))]
+                            .map(|(key, label)| (key.to_string(), label.to_string())),
+                        |s| if s.open_in_new_window { "window" } else { "tab" }.to_string(),
+                        |s, value| s.open_in_new_window = value == "window",
+                    ),
+                ),
+                SettingItem::new(
                     tr!("Path to Git executable"),
                     SettingField::input(
                         |_| Settings::read(|s| s.git_path.clone()).into(),

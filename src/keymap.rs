@@ -14,7 +14,7 @@ use gpui_kit::*;
 
 use crate::i18n::tr;
 use crate::settings::Settings;
-use crate::workspace;
+use crate::{repo_window, workspace};
 
 pub struct Command {
     /// Its name in the settings file.
@@ -46,6 +46,7 @@ pub fn commands() -> Vec<Command> {
         Command { id, label, default_keys, context, action }
     }
     let ws = Some("Workspace");
+    let rw = Some("RepoWindow");
     vec![
         command("find_action", tr!("Find Action…"), "secondary-shift-a", ws, || Box::new(workspace::FindAction)),
         command("commit", tr!("Commit…"), "secondary-k", ws, || Box::new(workspace::CommitChanges)),
@@ -61,6 +62,9 @@ pub fn commands() -> Vec<Command> {
         command("search_log", tr!("Search the Log"), "secondary-f", ws, || Box::new(workspace::FindInLog)),
         command("go_to", tr!("Go to Hash, Branch or Tag"), "secondary-g", ws, || Box::new(workspace::GoToRevision)),
         command("refresh", tr!("Refresh"), "secondary-r", ws, || Box::new(workspace::RefreshRepository)),
+        command("next_repo", tr!("Next Repository"), "secondary-shift-]", rw, || Box::new(repo_window::NextRepository)),
+        command("previous_repo", tr!("Previous Repository"), "secondary-shift-[", rw, || Box::new(repo_window::PreviousRepository)),
+        command("fetch_all", tr!("Fetch All Repositories"), "", rw, || Box::new(repo_window::FetchAllRepositories)),
         command("open", tr!("Open Repository…"), "secondary-o", None, || Box::new(crate::OpenRepository)),
         command("settings", tr!("Settings…"), "secondary-,", None, || Box::new(crate::OpenSettings)),
         command("close_window", tr!("Close Window"), "secondary-w", None, || Box::new(crate::CloseWindow)),

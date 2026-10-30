@@ -58,7 +58,7 @@ pub fn open_path(path: &Path, replace: Option<AnyWindowHandle>, window: &mut Win
     let dir = if path.is_dir() { path } else { path.parent().unwrap_or(path) };
     match Repo::open(dir) {
         Ok(repo) => {
-            crate::open_repo_window(repo, cx);
+            crate::repo_window::open(repo, cx);
             close(replace, window, cx);
         }
         Err(_) if dir.is_dir() => offer_init(dir.to_path_buf(), replace, window, cx),
@@ -104,7 +104,7 @@ fn offer_init(dir: PathBuf, replace: Option<AnyWindowHandle>, window: &mut Windo
                                 window.close_dialog(cx);
                                 match Repo::init(&dir) {
                                     Ok(repo) => {
-                                        crate::open_repo_window(repo, cx);
+                                        crate::repo_window::open(repo, cx);
                                         close(replace, window, cx);
                                     }
                                     Err(err) => window.push_notification(

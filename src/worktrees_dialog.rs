@@ -105,7 +105,7 @@ impl WorktreesDialog {
             m.run_then(
                 tr!("Add worktree {}", branch),
                 move |repo| repo.add_worktree(&path, &branch),
-                |_, repo, cx| crate::open_repo_window(repo, cx),
+                |_, repo, cx| crate::repo_window::open(repo, cx),
                 |err| RepoEvent::OpFailed(format!("{}\n{err:#}", tr!("Adding the worktree failed")).into()),
                 cx,
             )
