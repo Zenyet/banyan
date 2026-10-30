@@ -118,6 +118,30 @@ pub fn branch_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, branch: &Bran
             model,
             move |model, window, cx| crate::compare::open(model.clone(), n.clone(), window, cx),
         ));
+        let n = name.clone();
+        menu = menu.item(item(tr!("Compare with..."), model, move |model, window, cx| {
+            let (model, n) = (model.clone(), n.clone());
+            let default = model
+                .read(cx)
+                .favorites
+                .iter()
+                .filter_map(|f| f.strip_prefix("refs/heads/").or_else(|| f.strip_prefix("refs/remotes/")))
+                .find(|f| *f != n)
+                .unwrap_or("main")
+                .to_string();
+            prompt_text(
+                tr!("Compare {} with Branch", n),
+                tr!("Compare"),
+                default,
+                move |base, window, cx| {
+                    // After the prompt has closed, or closing it would close this.
+                    let (model, n) = (model.clone(), n.clone());
+                    window.defer(cx, move |window, cx| crate::compare::open_between(model, n, Some(base), window, cx));
+                },
+                window,
+                cx,
+            );
+        }));
         menu = menu.separator();
         let n = name.clone();
         menu = menu.item(item(

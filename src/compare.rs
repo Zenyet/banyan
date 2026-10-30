@@ -1,5 +1,5 @@
-//! "Compare with Current": commits a branch has that HEAD lacks, and the
-//! other way round.
+//! "Compare with Current" and "Compare with…": commits a branch has that
+//! HEAD or another branch lacks, and the other way round.
 
 use gpui_kit::component::{
     ActiveTheme as _, Sizable as _, WindowExt as _,
@@ -14,10 +14,19 @@ use crate::model::RepoModel;
 use crate::i18n::tr;
 
 pub fn open(model: Entity<RepoModel>, branch: String, window: &mut Window, cx: &mut App) {
-    let view = cx.new(|cx| CompareView::new(model, branch.clone(), cx));
+    open_between(model, branch, None, window, cx)
+}
+
+/// Compare `branch` with `base`, or with the current branch when `None`.
+pub fn open_between(model: Entity<RepoModel>, branch: String, base: Option<String>, window: &mut Window, cx: &mut App) {
+    let title = match &base {
+        Some(base) => tr!("Compare {} with {}", branch, base),
+        None => tr!("Compare {} with Current Branch", branch),
+    };
+    let view = cx.new(|cx| CompareView::new(model, branch, base, cx));
     window.open_dialog(cx, move |dialog, _, _| {
         dialog
-            .title(tr!("Compare {} with Current Branch", branch))
+            .title(title.clone())
             .w(px(1200.))
             .child(view.clone())
     });
@@ -35,19 +44,16 @@ struct CompareView {
 }
 
 impl CompareView {
-    fn new(model: Entity<RepoModel>, branch: String, cx: &mut Context<Self>) -> Self {
-        let current = model
-            .read(cx)
-            .current_branch
-            .clone()
-            .unwrap_or_else(|| "HEAD".into());
+    fn new(model: Entity<RepoModel>, branch: String, base: Option<String>, cx: &mut Context<Self>) -> Self {
+        let current = base.clone().unwrap_or_else(|| model.read(cx).current_branch.clone().unwrap_or_else(|| "HEAD".into()));
+        let base = base.unwrap_or_else(|| "HEAD".into());
         let browser = cx.new(|cx| CommitBrowser::new(model.clone(), cx));
         let repo = model.read(cx).repo.clone();
         let target = branch.clone();
         let task = cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { repo.compare_with_head(&target) })
+                .spawn(async move { repo.compare_refs(&target, &base) })
                 .await;
             this.update(cx, |this, cx| {
                 this.loading = false;

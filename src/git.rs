@@ -2164,8 +2164,18 @@ impl Repo {
 
     /// Commits in `branch` that HEAD lacks, and commits in HEAD that `branch` lacks.
     pub fn compare_with_head(&self, branch: &str) -> Result<(Vec<Commit>, Vec<Commit>)> {
-        let incoming = self.log_revs(&[&format!("HEAD..{branch}")], 10_000)?;
-        let outgoing = self.log_revs(&[&format!("{branch}..HEAD")], 10_000)?;
+        self.compare_refs(branch, "HEAD")
+    }
+
+    /// Commits in `branch` that `base` lacks, and commits in `base` that `branch` lacks.
+    pub fn compare_refs(&self, branch: &str, base: &str) -> Result<(Vec<Commit>, Vec<Commit>)> {
+        for rev in [branch, base] {
+            if self.git(&["rev-parse", "--verify", "-q", "--end-of-options", &format!("{rev}^{{commit}}")]).is_err() {
+                bail!("{}", tr!("No commit named {}", rev));
+            }
+        }
+        let incoming = self.log_revs(&[&format!("{base}..{branch}")], 10_000)?;
+        let outgoing = self.log_revs(&[&format!("{branch}..{base}")], 10_000)?;
         Ok((incoming, outgoing))
     }
 
@@ -3592,6 +3602,22 @@ mod tests {
         let since = |since: &str| LogFilter { since: Some(since.into()), ..Default::default() };
         assert_eq!(t.repo.log(&since("1.day.ago"), 10).unwrap().len(), 3);
         assert!(t.repo.log(&since("2099-01-01"), 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn compares_any_two_branches() {
+        let t = TempRepo::new("compare-refs");
+        t.commit("a.txt", "a\n", "Base");
+        t.repo.git(&["branch", "one"]).unwrap();
+        t.repo.git(&["checkout", "-q", "-b", "two"]).unwrap();
+        t.commit("b.txt", "b\n", "Only in two");
+        t.repo.git(&["checkout", "-q", "one"]).unwrap();
+        t.commit("c.txt", "c\n", "Only in one");
+        t.repo.git(&["checkout", "-q", "-b", "elsewhere"]).unwrap();
+        let (incoming, outgoing) = t.repo.compare_refs("two", "one").unwrap();
+        assert_eq!(incoming.iter().map(|c| c.subject.as_str()).collect::<Vec<_>>(), vec!["Only in two"]);
+        assert_eq!(outgoing.iter().map(|c| c.subject.as_str()).collect::<Vec<_>>(), vec!["Only in one"]);
+        assert!(t.repo.compare_refs("two", "missing").is_err());
     }
 
     #[test]
