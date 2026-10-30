@@ -874,17 +874,22 @@ impl Repo {
     /// The web page of the remote the current branch tracks, else `origin`,
     /// else the first remote.
     pub fn web_remote(&self) -> Option<WebRemote> {
+        let name = self.default_remote()?;
+        WebRemote::parse(&self.git(&["remote", "get-url", &name]).ok()?)
+    }
+
+    /// The remote the current branch tracks, else `origin`, else the first one.
+    pub fn default_remote(&self) -> Option<String> {
         let tracked = self
             .current_branch()
             .and_then(|branch| self.git(&["config", "--get", &format!("branch.{branch}.remote")]).ok())
             .map(|name| name.trim().to_string());
         let names = self.git(&["remote"]).ok()?;
         let names: Vec<&str> = names.lines().collect();
-        let name = tracked
+        tracked
             .filter(|t| names.contains(&t.as_str()))
             .or_else(|| names.iter().find(|n| **n == "origin").map(|n| n.to_string()))
-            .or_else(|| names.first().map(|n| n.to_string()))?;
-        WebRemote::parse(&self.git(&["remote", "get-url", &name]).ok()?)
+            .or_else(|| names.first().map(|n| n.to_string()))
     }
 
     /// The commit a hash, branch, tag or other revision names, and how many
@@ -1525,8 +1530,18 @@ impl Repo {
         self.git(&["push", remote, "--delete", name])
     }
 
-    pub fn create_tag(&self, name: &str, target: &str) -> Result<String> {
-        self.git(&["tag", name, target])
+    /// A lightweight tag, or an annotated one with `message`.
+    pub fn create_tag(&self, name: &str, target: &str, message: Option<&str>) -> Result<String> {
+        match message {
+            Some(message) => self.git(&["tag", "-a", "-m", message, "--end-of-options", name, target]),
+            None => self.git(&["tag", "--end-of-options", name, target]),
+        }
+    }
+
+    /// Push one tag to the remote the current branch tracks, else `origin`.
+    pub fn push_tag(&self, name: &str) -> Result<String> {
+        let remote = self.default_remote().context("the repository has no remote")?;
+        self.git(&["push", &remote, &format!("refs/tags/{name}")])
     }
 
     pub fn delete_tag(&self, name: &str) -> Result<String> {
@@ -3349,7 +3364,7 @@ mod tests {
         assert!(!target.is_new);
         assert!(t.repo.outgoing(&target).unwrap().is_empty());
 
-        t.repo.create_tag("v1", "HEAD").unwrap();
+        t.repo.create_tag("v1", "HEAD", None).unwrap();
         t.repo.push_to(&target, false, true).unwrap();
         assert!(run(&remote.dir, &["rev-parse", "--verify", "refs/tags/v1"]).is_ok());
 
@@ -3574,6 +3589,18 @@ mod tests {
         let since = |since: &str| LogFilter { since: Some(since.into()), ..Default::default() };
         assert_eq!(t.repo.log(&since("1.day.ago"), 10).unwrap().len(), 3);
         assert!(t.repo.log(&since("2099-01-01"), 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn creates_annotated_tags() {
+        let t = TempRepo::new("tags");
+        let id = t.commit("a.txt", "a\n", "First");
+        t.repo.create_tag("light", &id, None).unwrap();
+        t.repo.create_tag("v1.0", &id, Some("Release 1.0")).unwrap();
+        assert_eq!(t.repo.git(&["cat-file", "-t", "light"]).unwrap().trim(), "commit");
+        assert_eq!(t.repo.git(&["cat-file", "-t", "v1.0"]).unwrap().trim(), "tag");
+        assert_eq!(t.repo.git(&["tag", "-l", "--format=%(contents:subject)", "v1.0"]).unwrap().trim(), "Release 1.0");
+        assert!(t.repo.push_tag("v1.0").is_err());
     }
 
     #[test]

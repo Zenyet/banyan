@@ -41,6 +41,7 @@ mod shelf_view;
 mod stash_dialog;
 mod stash_viewer;
 mod submodules_dialog;
+mod tag_dialog;
 mod ui;
 mod update_dialog;
 mod watcher;

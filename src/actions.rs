@@ -243,19 +243,7 @@ pub fn commit_menu(
     }));
     let i = id.clone();
     menu = menu.item(item(tr!("New Tag..."), model, move |model, window, cx| {
-        let model = model.clone();
-        let i = i.clone();
-        prompt_text(
-            tr!("Create Tag on {}", short(&i)),
-            tr!("Create"),
-            "",
-            move |name, _, cx| {
-                let i = i.clone();
-                model.update(cx, |m, cx| m.run(tr!("Create tag {}", name), move |repo| repo.create_tag(&name, &i), cx));
-            },
-            window,
-            cx,
-        );
+        crate::tag_dialog::open(model.clone(), i.clone(), window, cx)
     }));
     menu = menu.separator();
 
