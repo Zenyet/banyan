@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -514,15 +515,17 @@ func (r *Repo) CommitDetails(id string) (*CommitDetails, error) {
 }
 
 // CommitDetailsAgainst returns details with the changes against parent
-// base (counting from 0).
+// base (counting from 0). They leave out what takes long on a big history,
+// the branches that contain the commit and whether its signature checks
+// out, which CommitExtras finds.
 func (r *Repo) CommitDetailsAgainst(id string, base int) (*CommitDetails, error) {
-	format := "--format=%H" + field + "%P" + field + "%an" + field + "%ae" + field + "%at" + field + "%cn" + field + "%ct" + field + "%G?" + field + "%GS" + field + "%B"
+	format := "--format=%H" + field + "%P" + field + "%an" + field + "%ae" + field + "%at" + field + "%cn" + field + "%ct" + field + "%B"
 	out, err := r.Git("show", "-s", format, id)
 	if err != nil {
 		return nil, err
 	}
-	f := strings.SplitN(out, field, 10)
-	for len(f) < 10 {
+	f := strings.SplitN(out, field, 8)
+	for len(f) < 8 {
 		f = append(f, "")
 	}
 	d := &CommitDetails{
@@ -531,8 +534,7 @@ func (r *Repo) CommitDetailsAgainst(id string, base int) (*CommitDetails, error)
 		Author:    f[2],
 		Email:     f[3],
 		Committer: f[5],
-		Signature: parseSignature(f[7], f[8]),
-		Message:   strings.TrimRight(f[9], " \t\r\n"),
+		Message:   strings.TrimRight(f[7], " \t\r\n"),
 	}
 	d.AuthorTime, _ = strconv.ParseInt(f[4], 10, 64)
 	d.CommitTime, _ = strconv.ParseInt(f[6], 10, 64)
@@ -541,10 +543,24 @@ func (r *Repo) CommitDetailsAgainst(id string, base int) (*CommitDetails, error)
 	if err != nil {
 		return nil, err
 	}
-	if out, err := r.Git("branch", "-a", "--format=%(refname:short)", "--contains", d.ID); err == nil {
-		d.Branches = lines(out)
-	}
 	return d, nil
+}
+
+// CommitExtras finds the branches that contain commit id, which on a big
+// history walks much of it, and checks its signature, which runs gpg or
+// ssh. Canceling ctx stops them.
+func (r *Repo) CommitExtras(ctx context.Context, id string) (branches []string, sig Signature, err error) {
+	out, err := runContext(ctx, r.root, []string{"show", "-s", "--format=%G?" + field + "%GS", id}, nil, false)
+	if err != nil {
+		return nil, Signature{}, err
+	}
+	code, signer, _ := strings.Cut(strings.TrimRight(out, "\n"), field)
+	sig = parseSignature(code, signer)
+	out, err = runContext(ctx, r.root, []string{"branch", "-a", "--format=%(refname:short)", "--contains", id}, nil, false)
+	if err != nil {
+		return nil, sig, err
+	}
+	return lines(out), sig, nil
 }
 
 // commitFiles returns the files changed by id against parent.

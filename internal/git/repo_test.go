@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -634,12 +635,16 @@ func TestSignedCommitsShowTheirSignature(t *testing.T) {
 	r.write("a.txt", "a\n")
 	must[string](t)(r.repo.Commit("Signed", []string{"a.txt"}, false, &CommitOptions{}))
 	head, _ := r.repo.Head()
-	equal(t, must[*CommitDetails](t)(r.repo.CommitDetails(head)).Signature.Kind, SignatureGood)
+	_, sig, err := r.repo.CommitExtras(context.Background(), head)
+	check(t, err)
+	equal(t, sig.Kind, SignatureGood)
 	r.write("a.txt", "b\n")
 	no := false
 	must[string](t)(r.repo.Commit("Unsigned", []string{"a.txt"}, false, &CommitOptions{Sign: &no}))
 	head, _ = r.repo.Head()
-	equal(t, must[*CommitDetails](t)(r.repo.CommitDetails(head)).Signature, Signature{})
+	_, sig, err = r.repo.CommitExtras(context.Background(), head)
+	check(t, err)
+	equal(t, sig, Signature{})
 }
 
 func TestCommitGraphIsWrittenThenExtended(t *testing.T) {
@@ -1094,6 +1099,19 @@ func TestInteractiveRebaseStopsToEdit(t *testing.T) {
 	equal(t, r.repo.State(), Clean)
 	equal(t, r.subjects(), []string{"Third", "Second", "First"})
 	equal(t, r.git("show", "HEAD~1:b.txt"), "b2\n")
+}
+
+func TestCommitExtrasListBranchesAndStopWhenCanceled(t *testing.T) {
+	r, id := fourCommits(t)
+	r.git("branch", "side", id[1])
+	branches, _, err := r.repo.CommitExtras(context.Background(), id[1])
+	check(t, err)
+	equal(t, branches, []string{"main", "side"})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := r.repo.CommitExtras(ctx, id[1]); err == nil {
+		t.Fatal("canceled")
+	}
 }
 
 func TestShowsAMergeAgainstEitherParent(t *testing.T) {

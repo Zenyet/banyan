@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -117,7 +118,11 @@ type LogView struct {
 	pendingReveal string
 	logGen        int
 	detailsGen    int
-	shownRow      int
+	// extrasLoaded says the details' branches and signature are in;
+	// cancelExtras stops looking for them.
+	extrasLoaded bool
+	cancelExtras context.CancelFunc
+	shownRow     int
 
 	branchesWidth  float32
 	commitsPercent float32
@@ -536,6 +541,12 @@ func (lv *LogView) chosenIDs() []string {
 
 func (lv *LogView) loadDetails() {
 	lv.detailsGen++
+	if lv.cancelExtras != nil {
+		// Finding the branches of the commit shown before can take seconds
+		// on a big history; it no longer matters.
+		lv.cancelExtras()
+		lv.cancelExtras = nil
+	}
 	if lv.selected == "" {
 		lv.details = nil
 		lv.files = nil
@@ -556,6 +567,7 @@ func (lv *LogView) loadDetails() {
 			}
 			same := lv.details != nil && lv.details.ID == d.ID && lv.details.Base == d.Base
 			lv.details = d
+			lv.loadExtras(d)
 			lv.files = map[string]git.FileChange{}
 			var paths []string
 			for _, f := range d.Files {
@@ -574,6 +586,30 @@ func (lv *LogView) loadDetails() {
 				lv.diff.ShowMessage("", i18n.T("No changed files"))
 			} else {
 				lv.showFile(lv.fileRows[lv.fileRow].Node.Path)
+			}
+		})
+	}()
+}
+
+// loadExtras finds the branches that contain the commit shown and checks
+// its signature, after its files and diff show: on a big history they take
+// a while.
+func (lv *LogView) loadExtras(d *git.CommitDetails) {
+	ctx, cancel := context.WithCancel(context.Background())
+	lv.cancelExtras = cancel
+	lv.extrasLoaded = false
+	repo := lv.ws.Model.Repo
+	go func() {
+		branches, sig, err := repo.CommitExtras(ctx, d.ID)
+		model.Post(func() {
+			if ctx.Err() != nil || lv.details != d {
+				return
+			}
+			cancel()
+			lv.cancelExtras = nil
+			if err == nil {
+				d.Branches, d.Signature = branches, sig
+				lv.extrasLoaded = true
 			}
 		})
 	}()
@@ -986,7 +1022,7 @@ func paintGraph(p *ui.Painter, b ui.Rect, r *graph.Row, isHead bool, background 
 		if e.Half == graph.Bottom {
 			y0, y1 = mid, bottom
 		}
-		p.Line(x(e.From), y0, x(e.To), y1, 1.5, laneColor(e.Color))
+		line(p, x(e.From), y0, x(e.To), y1, laneColor(e.Color))
 	}
 	// Cut edges, as arrows out of the node or into it.
 	cx, cy := x(r.Node), mid
@@ -994,7 +1030,7 @@ func paintGraph(p *ui.Painter, b ui.Rect, r *graph.Row, isHead bool, background 
 		from, tip := arrowEnds(&a)
 		fx, fy, tx, ty := cx+from[0], cy+from[1], cx+tip[0], cy+tip[1]
 		color := laneColor(a.Color)
-		p.Line(fx, fy, tx, ty, 1.5, color)
+		line(p, fx, fy, tx, ty, color)
 		dx, dy := tx-fx, ty-fy
 		length := sqrt(dx*dx + dy*dy)
 		ux, uy := dx/length, dy/length
@@ -1016,6 +1052,19 @@ func paintGraph(p *ui.Painter, b ui.Rect, r *graph.Row, isHead bool, background 
 	} else {
 		p.FillPath(&dot, color)
 	}
+}
+
+// line draws a 1.5 DIP line of the graph. Painter.Line fills the rectangle
+// between its ends, which only draws lines that run straight across or
+// down; slanted ones are stroked as paths.
+func line(p *ui.Painter, x0, y0, x1, y1 float32, c ui.Color) {
+	if x0 == x1 || y0 == y1 {
+		p.Line(x0, y0, x1, y1, 1.5, c)
+		return
+	}
+	var path ui.Path
+	path.MoveTo(x0, y0).LineTo(x1, y1)
+	p.StrokePath(&path, 1.5, c)
 }
 
 // arrowEnds is where a cut edge's arrow runs, from its tail to its tip,
@@ -1199,6 +1248,10 @@ func (lv *LogView) commitInfo(c *ui.Context) {
 				parents = append(parents, short(p))
 			}
 			muted(c, i18n.Tf("Merge of {}", strings.Join(parents, ", ")))
+		}
+		if !lv.extrasLoaded {
+			muted(c, i18n.T("Finding the branches that contain it…"))
+			return
 		}
 		branches := i18n.Tf("In {} branches: {}", len(d.Branches), strings.Join(d.Branches, ", "))
 		if len(d.Branches) > 6 {

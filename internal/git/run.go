@@ -4,6 +4,7 @@ package git
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -40,8 +41,13 @@ func GitVersion(program string) (string, error) {
 }
 
 func command(dir string, args []string) *exec.Cmd {
+	return commandContext(context.Background(), dir, args)
+}
+
+// commandContext is git in dir, killed once ctx is done.
+func commandContext(ctx context.Context, dir string, args []string) *exec.Cmd {
 	full := append([]string{"-C", dir, "-c", "color.ui=false", "-c", "core.quotepath=false"}, args...)
-	cmd := exec.Command(Program(), full...)
+	cmd := exec.CommandContext(ctx, Program(), full...)
 	cmd.Env = append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0",
 		// Never touch the index behind the user's back (and don't wake our
@@ -61,8 +67,12 @@ func run(dir string, args []string, recorded bool) (string, error) {
 }
 
 func runInput(dir string, args []string, input []byte, recorded bool) (string, error) {
+	return runContext(context.Background(), dir, args, input, recorded)
+}
+
+func runContext(ctx context.Context, dir string, args []string, input []byte, recorded bool) (string, error) {
 	started := time.Now()
-	cmd := command(dir, args)
+	cmd := commandContext(ctx, dir, args)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if input != nil {
@@ -77,6 +87,9 @@ func runInput(dir string, args []string, input []byte, recorded bool) (string, e
 		console.Record(dir, args, stdout.String(), stderr.String(), err == nil, elapsed.Milliseconds())
 	}
 	if err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
 		var exit *exec.ExitError
 		if !errors.As(err, &exit) {
 			return "", fmt.Errorf("failed to run git; is it installed? (Settings › Git): %w", err)
