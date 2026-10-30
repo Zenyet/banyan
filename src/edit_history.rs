@@ -91,6 +91,9 @@ pub fn drop(model: &Entity<RepoModel>, ids: Vec<String>, window: &mut Window, cx
 /// into the Commit tab.
 pub fn undo_commit(model: &Entity<RepoModel>, id: String, window: &mut Window, cx: &mut App) {
     let pushed = model.read(cx).repo.pushed_to(&id);
+    if let Some(upstream) = pushed.as_deref().filter(|upstream| is_protected(upstream)) {
+        return notify(window, cx, protected_message(upstream));
+    }
     let model = model.clone();
     let undo = move |_: &mut Window, cx: &mut App| model.update(cx, |m, cx| m.undo_commit(cx));
     match pushed {
@@ -121,9 +124,12 @@ fn with_checks(
         Ok(base) => base,
         Err(err) => return notify(window, cx, format!("{err:#}")),
     };
-    let warning = repo
-        .pushed_to(&base)
-        .map(|upstream| tr!("These commits are already in {}; rewriting them means force pushing later.", upstream));
+    let pushed = repo.pushed_to(&base);
+    if let Some(upstream) = pushed.as_deref().filter(|upstream| is_protected(upstream)) {
+        return notify(window, cx, protected_message(upstream));
+    }
+    let warning =
+        pushed.map(|upstream| tr!("These commits are already in {}; rewriting them means force pushing later.", upstream));
     let model = model.clone();
     let dropping = question.is_some();
     match (question, warning) {
@@ -138,6 +144,27 @@ fn with_checks(
 
 fn run(model: &Entity<RepoModel>, label: String, rewrite: Rewrite, cx: &mut App) {
     model.update(cx, |m, cx| m.run(label, move |repo| repo.rewrite(&rewrite), cx));
+}
+
+fn is_protected(upstream: &str) -> bool {
+    crate::settings::Settings::read(|s| s.is_protected(upstream))
+}
+
+/// Why pushed commits of a protected branch can't be rewritten.
+pub fn protected_message(upstream: &str) -> String {
+    tr!("These commits are already in {}, a protected branch; its history is not rewritten.", upstream)
+}
+
+/// Refuse with a notification when `base` and later commits are pushed to a
+/// protected branch; for rewrites that don't go through [`with_checks`].
+pub fn refuse_if_protected(repo: &crate::git::Repo, base: &str, window: &mut Window, cx: &mut App) -> bool {
+    match repo.pushed_to(base).filter(|upstream| is_protected(upstream)) {
+        Some(upstream) => {
+            notify(window, cx, protected_message(&upstream));
+            true
+        }
+        None => false,
+    }
 }
 
 fn notify(window: &mut Window, cx: &mut App, message: impl Into<SharedString>) {

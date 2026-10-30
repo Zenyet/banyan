@@ -61,6 +61,9 @@ pub struct Settings {
     pub language: String,
     /// How many commits the log loads at a time.
     pub log_page_size: usize,
+    /// Branch names or `*` patterns, separated by spaces or commas, that
+    /// are never force pushed nor have pushed commits rewritten.
+    pub protected_branches: String,
     pub recent: Vec<PathBuf>,
     /// Commit messages, newest first.
     pub messages: Vec<String>,
@@ -79,10 +82,27 @@ impl Default for Settings {
             ignore_whitespace: false,
             language: String::new(),
             log_page_size: 5000,
+            protected_branches: "main master".into(),
             recent: Vec::new(),
             messages: Vec::new(),
         }
     }
+}
+
+/// `pattern` with `*` standing for any run of characters, `/` included.
+fn glob_match(pattern: &str, text: &str) -> bool {
+    let mut parts = pattern.split('*');
+    let first = parts.next().unwrap_or_default();
+    let Some(mut rest) = text.strip_prefix(first) else { return false };
+    let parts: Vec<&str> = parts.collect();
+    let Some((last, middle)) = parts.split_last() else { return rest.is_empty() };
+    for part in middle {
+        match rest.find(part) {
+            Some(ix) => rest = &rest[ix + part.len()..],
+            None => return false,
+        }
+    }
+    rest.len() >= last.len() && rest.ends_with(last)
 }
 
 /// Keep a value on one line.
@@ -151,6 +171,17 @@ impl Settings {
     }
 
     /// Change the settings and save them.
+    /// Whether `branch` (a local name, or a remote one such as `origin/main`,
+    /// matched without the remote) is protected.
+    pub fn is_protected(&self, branch: &str) -> bool {
+        let branch = branch.strip_prefix("refs/heads/").unwrap_or(branch);
+        let short = branch.split_once('/').map(|(_, rest)| rest);
+        self.protected_branches
+            .split(|c: char| c.is_whitespace() || c == ',')
+            .filter(|pattern| !pattern.is_empty())
+            .any(|pattern| glob_match(pattern, branch) || short.is_some_and(|short| glob_match(pattern, short)))
+    }
+
     pub fn update(f: impl FnOnce(&mut Settings)) {
         let text = {
             let mut settings = CURRENT.write().unwrap();
@@ -183,6 +214,7 @@ impl Settings {
                 "whitespace" => settings.ignore_whitespace = value == "ignore",
                 "language" => settings.language = value.to_string(),
                 "log_page" => settings.log_page_size = value.parse().unwrap_or(settings.log_page_size),
+                "protected" => settings.protected_branches = value.to_string(),
                 "recent" => settings.recent.push(PathBuf::from(value)),
                 "message" => settings.messages.push(unescape(value)),
                 _ => {}
@@ -193,7 +225,7 @@ impl Settings {
 
     fn to_text(&self) -> String {
         let mut text = format!(
-            "theme={}\nfont_size={}\ndates={}\ngit={}\nupdate={}\nauto_fetch={}\ndiff={}\nwhitespace={}\nlanguage={}\nlog_page={}\n",
+            "theme={}\nfont_size={}\ndates={}\ngit={}\nupdate={}\nauto_fetch={}\ndiff={}\nwhitespace={}\nlanguage={}\nlog_page={}\nprotected={}\n",
             self.theme.key(),
             self.font_size,
             if self.relative_dates { "relative" } else { "absolute" },
@@ -204,6 +236,7 @@ impl Settings {
             if self.ignore_whitespace { "ignore" } else { "show" },
             self.language,
             self.log_page_size,
+            self.protected_branches,
         );
         for repo in &self.recent {
             text.push_str(&format!("recent={}\n", repo.display()));
@@ -257,6 +290,18 @@ mod tests {
     }
 
     #[test]
+    fn matches_protected_branches() {
+        let settings = Settings { protected_branches: "main, release/* *-stable".into(), ..Settings::default() };
+        for name in ["main", "origin/main", "refs/heads/main", "release/1.0", "origin/release/2", "v1-stable"] {
+            assert!(settings.is_protected(name), "{name}");
+        }
+        for name in ["mainline", "feature/main-fix", "releases", "stable"] {
+            assert!(!settings.is_protected(name), "{name}");
+        }
+        assert!(!Settings { protected_branches: String::new(), ..Settings::default() }.is_protected("main"));
+    }
+
+    #[test]
     fn settings_round_trip() {
         let settings = Settings {
             theme: ThemeChoice::Dark,
@@ -269,6 +314,7 @@ mod tests {
             ignore_whitespace: true,
             language: "zh".into(),
             log_page_size: 2000,
+            protected_branches: "main release/*".into(),
             recent: vec!["/tmp/repo".into()],
             messages: vec!["Fix\n\nDetails".into()],
         };

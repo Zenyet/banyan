@@ -15,6 +15,7 @@ use gpui_kit::*;
 
 use crate::git::{Commit, FileChange, PushTarget};
 use crate::model::RepoModel;
+use crate::settings::Settings;
 use crate::ui::{format_time, selection_bg, status_color};
 use crate::i18n::tr;
 
@@ -214,15 +215,30 @@ impl Render for PushDialog {
             .child(
                 h_flex()
                     .gap_2()
-                    .child(
-                        Checkbox::new("force-push")
-                            .label(tr!("Force push (--force-with-lease)"))
-                            .checked(self.force)
-                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                                this.force = *checked;
-                                cx.notify();
-                            })),
-                    )
+                    .map(|row| {
+                        let protected = self
+                            .target
+                            .as_ref()
+                            .is_some_and(|t| Settings::read(|s| s.is_protected(&t.remote_branch)));
+                        if protected {
+                            row.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(tr!("Protected branch: no force push")),
+                            )
+                        } else {
+                            row.child(
+                                Checkbox::new("force-push")
+                                    .label(tr!("Force push (--force-with-lease)"))
+                                    .checked(self.force)
+                                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                        this.force = *checked;
+                                        cx.notify();
+                                    })),
+                            )
+                        }
+                    })
                     .child(
                         Checkbox::new("push-tags")
                             .label(tr!("Push tags"))

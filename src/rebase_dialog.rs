@@ -126,6 +126,10 @@ impl RebaseDialog {
             .map(|e| (e.commit.id.clone(), e.action.clone()))
             .collect();
         let from = self.from.clone();
+        let repo = self.model.read(cx).repo.clone();
+        if crate::edit_history::refuse_if_protected(&repo, &from, window, cx) {
+            return;
+        }
         window.close_dialog(cx);
         self.model.update(cx, |model, cx| {
             model.run(tr!("Interactive rebase"), move |repo| repo.interactive_rebase(&from, &plan), cx)

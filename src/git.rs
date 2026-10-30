@@ -1855,6 +1855,9 @@ impl Repo {
 
     /// Push the branch, and with `tags` every local tag too.
     pub fn push_to(&self, target: &PushTarget, force: bool, tags: bool) -> Result<String> {
+        if force && crate::settings::Settings::read(|s| s.is_protected(&target.remote_branch)) {
+            bail!("{}", tr!("{} is a protected branch and is never force pushed (see Settings › Version Control)", target.remote_branch));
+        }
         let refspec = format!("{}:{}", target.branch, target.remote_branch);
         let mut args = vec!["push"];
         if force {

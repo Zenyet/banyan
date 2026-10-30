@@ -175,6 +175,15 @@ impl SettingsWindow {
                 )
                 .description(tr!("Leave empty to use git from the PATH. {}", version))
                 .layout(Axis::Vertical),
+                SettingItem::new(
+                    tr!("Protected branches"),
+                    SettingField::input(
+                        |_| Settings::read(|s| s.protected_branches.clone()).into(),
+                        |value: SharedString, _| Settings::update(|s| s.protected_branches = value.trim().to_string()),
+                    ),
+                )
+                .description(tr!("Never force pushed, and their pushed commits are not rewritten. Separate names with spaces; * matches anything."))
+                .layout(Axis::Vertical),
             ]),
             SettingGroup::new().title(tr!("Update and Fetch")).items([
                 SettingItem::new(
