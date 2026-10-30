@@ -54,6 +54,17 @@ pub struct LogFilter {
     pub paths: Vec<String>,
 }
 
+/// What `git stash push` puts aside.
+#[derive(Clone, Debug, Default)]
+pub struct StashOptions {
+    pub message: String,
+    /// Leave staged changes in place as well as stashing them.
+    pub keep_index: bool,
+    pub include_untracked: bool,
+    /// Only these files, or everything when empty.
+    pub paths: Vec<String>,
+}
+
 /// `text` as a POSIX basic regular expression matching itself.
 fn escape_basic_regex(text: &str) -> String {
     let mut escaped = String::with_capacity(text.len());
@@ -2284,12 +2295,28 @@ impl Repo {
         std::fs::remove_dir_all(self.shelf_root()?.join(id)).context("cannot delete the shelf")
     }
 
-    pub fn stash(&self, message: &str) -> Result<String> {
-        if message.is_empty() {
-            self.git(&["stash", "push", "--include-untracked"])
-        } else {
-            self.git(&["stash", "push", "--include-untracked", "-m", message])
+    pub fn stash(&self, options: &StashOptions) -> Result<String> {
+        let mut args = vec!["stash", "push"];
+        if options.include_untracked {
+            args.push("--include-untracked");
         }
+        if options.keep_index {
+            args.push("--keep-index");
+        }
+        if !options.message.is_empty() {
+            args.extend(["-m", options.message.as_str()]);
+        }
+        if !options.paths.is_empty() {
+            args.push("--");
+            args.extend(options.paths.iter().map(String::as_str));
+        }
+        self.git(&args)
+    }
+
+    /// Check out a new branch at the commit `stash` was made on and apply
+    /// it there, index included, dropping it when that works.
+    pub fn stash_branch(&self, stash: &str, branch: &str) -> Result<String> {
+        self.git(&["stash", "branch", branch, stash])
     }
 
     pub fn stash_pop(&self, name: &str) -> Result<String> {
@@ -3094,7 +3121,7 @@ mod tests {
         let t = TempRepo::new("stash");
         let base = t.commit("a.txt", "a\n", "Base");
         t.write("a.txt", "changed\n");
-        t.repo.stash("Work in progress").unwrap();
+        t.repo.stash(&StashOptions { message: "Work in progress".into(), include_untracked: true, ..Default::default() }).unwrap();
 
         let stashes = t.repo.stashes().unwrap();
         assert_eq!(stashes.len(), 1);
@@ -3246,6 +3273,36 @@ mod tests {
         let since = |since: &str| LogFilter { since: Some(since.into()), ..Default::default() };
         assert_eq!(t.repo.log(&since("1.day.ago"), 10).unwrap().len(), 3);
         assert!(t.repo.log(&since("2099-01-01"), 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn stashes_some_files_and_unstashes_onto_a_branch() {
+        let t = TempRepo::new("stash-options");
+        t.commit("a.txt", "a\n", "Add a");
+        t.commit("b.txt", "b\n", "Add b");
+        t.write("a.txt", "a2\n");
+        t.write("b.txt", "b2\n");
+        t.write("new.txt", "n\n");
+        let only_a = StashOptions { message: "just a".into(), paths: vec!["a.txt".into()], ..Default::default() };
+        t.repo.stash(&only_a).unwrap();
+        assert_eq!(std::fs::read_to_string(t.dir.join("a.txt")).unwrap(), "a\n");
+        assert_eq!(std::fs::read_to_string(t.dir.join("b.txt")).unwrap(), "b2\n");
+        assert!(t.dir.join("new.txt").exists());
+
+        // Keep what's staged in the work tree.
+        t.repo.git(&["add", "b.txt"]).unwrap();
+        let keep = StashOptions { keep_index: true, include_untracked: true, ..Default::default() };
+        t.repo.stash(&keep).unwrap();
+        assert_eq!(std::fs::read_to_string(t.dir.join("b.txt")).unwrap(), "b2\n");
+        assert!(!t.dir.join("new.txt").exists());
+        t.repo.git(&["reset", "-q", "--hard"]).unwrap();
+
+        let stashes = t.repo.stashes().unwrap();
+        let just_a = stashes.iter().find(|s| s.message.contains("just a")).unwrap();
+        t.repo.stash_branch(&just_a.name, "from-stash").unwrap();
+        assert_eq!(t.repo.current_branch().as_deref(), Some("from-stash"));
+        assert_eq!(std::fs::read_to_string(t.dir.join("a.txt")).unwrap(), "a2\n");
+        assert_eq!(t.repo.stashes().unwrap().len(), 1);
     }
 
     #[test]

@@ -410,7 +410,6 @@ impl ChangesView {
     }
 
     fn render_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
-        let model = self.model.clone();
         h_flex()
             .flex_none()
             .h(px(36.))
@@ -443,19 +442,11 @@ impl ChangesView {
                     .ghost()
                     .xsmall()
                     .tooltip(tr!("Stash Changes..."))
-                    .on_click(move |_, window, cx| {
-                        let model = model.clone();
-                        prompt_text(
-                            tr!("Stash Changes"),
-                            tr!("Create Stash"),
-                            "WIP",
-                            move |message, _, cx| {
-                                model.update(cx, |m, cx| m.run(tr!("Stash"), move |repo| repo.stash(&message), cx));
-                            },
-                            window,
-                            cx,
-                        );
-                    }),
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        let mut checked: Vec<String> = this.included.iter().cloned().collect();
+                        checked.sort();
+                        crate::stash_dialog::open(this.model.clone(), checked, window, cx)
+                    })),
             )
             .child(
                 Button::new("changes-apply-patch")

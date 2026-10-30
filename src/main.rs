@@ -37,6 +37,7 @@ mod remotes_dialog;
 mod settings;
 mod settings_window;
 mod shelf_view;
+mod stash_dialog;
 mod stash_viewer;
 mod submodules_dialog;
 mod ui;

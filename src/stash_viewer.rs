@@ -10,7 +10,7 @@ use gpui_kit::*;
 use crate::commit_browser::CommitBrowser;
 use crate::git::Stash;
 use crate::model::{RepoEvent, RepoModel};
-use crate::ui::confirm;
+use crate::ui::{confirm, prompt_text};
 use crate::i18n::tr;
 
 pub fn open(model: Entity<RepoModel>, window: &mut Window, cx: &mut App) {
@@ -92,6 +92,27 @@ impl StashViewer {
     }
 }
 
+impl StashViewer {
+    fn unstash_as_branch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(name) = self.selected(cx).map(|s| s.name.clone()) else { return };
+        let model = self.model.clone();
+        window.close_dialog(cx);
+        prompt_text(
+            tr!("Unstash as Branch"),
+            tr!("Create Branch"),
+            "",
+            move |branch, _, cx| {
+                let name = name.clone();
+                model.update(cx, |m, cx| {
+                    m.run(tr!("Unstash {} as {}", name, branch), move |repo| repo.stash_branch(&name, &branch), cx)
+                });
+            },
+            window,
+            cx,
+        );
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum StashOp {
     Pop,
@@ -136,6 +157,14 @@ impl Render for StashViewer {
                     .child(button("stash-pop", StashOp::Pop, cx).primary())
                     .child(button("stash-apply", StashOp::Apply, cx))
                     .child(button("stash-drop", StashOp::Drop, cx).danger())
+                    .child(
+                        Button::new("stash-branch")
+                            .label(tr!("Unstash as Branch…"))
+                            .small()
+                            .disabled(!has_selection)
+                            .tooltip(tr!("Check out a new branch where the stash was made and apply it there"))
+                            .on_click(cx.listener(|this, _, window, cx| this.unstash_as_branch(window, cx))),
+                    )
                     .child(div().flex_1())
                     .child(
                         Button::new("stash-close")
