@@ -40,6 +40,32 @@ pub struct Commit {
     pub refs: Vec<RefLabel>,
 }
 
+/// What the log shows: git does the filtering, so it reaches past the
+/// commits already loaded.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LogFilter {
+    /// A branch or other revision, or everything when `None`.
+    pub refs: Option<String>,
+    /// A `--since` date such as `1.week.ago`.
+    pub since: Option<String>,
+    /// Author names, any of which matches.
+    pub authors: Vec<String>,
+    /// Files or folders relative to the repository root, any of which matches.
+    pub paths: Vec<String>,
+}
+
+/// `text` as a POSIX basic regular expression matching itself.
+fn escape_basic_regex(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for c in text.chars() {
+        if matches!(c, '\\' | '.' | '[' | ']' | '*' | '^' | '$') {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
+}
+
 impl Commit {
     pub fn short_id(&self) -> &str {
         &self.id[..self.id.len().min(8)]
@@ -594,14 +620,31 @@ impl Repo {
     /// first, optionally only those committed since a git date such as
     /// `7.days.ago` or touching `path`. Unlike `--since`, the date filter
     /// looks past old commits that sit above newer ones.
-    pub fn log(&self, refs: Option<&str>, since: Option<&str>, path: Option<&str>, limit: usize) -> Result<Vec<Commit>> {
-        let since = since.map(|since| format!("--since-as-filter={since}"));
-        let mut revs: Vec<&str> = match refs {
+    pub fn log(&self, filter: &LogFilter, limit: usize) -> Result<Vec<Commit>> {
+        let mut options: Vec<String> = Vec::new();
+        if let Some(since) = &filter.since {
+            options.push(format!("--since-as-filter={since}"));
+        }
+        if !filter.authors.is_empty() {
+            // Explicitly basic, whatever grep.patternType says; several
+            // --author options match any of them.
+            options.push("--basic-regexp".into());
+            for author in &filter.authors {
+                options.push(format!("--author=^{} <", escape_basic_regex(author)));
+            }
+        }
+        let mut revs: Vec<&str> = match &filter.refs {
             Some(refs) => vec![refs],
             None => vec!["--branches", "--remotes", "--tags", "HEAD"],
         };
-        revs.extend(since.as_deref());
-        self.log_paths(&revs, path.as_slice(), limit)
+        revs.extend(options.iter().map(String::as_str));
+        let paths: Vec<&str> = filter.paths.iter().map(String::as_str).collect();
+        self.log_paths(&revs, &paths, limit)
+    }
+
+    /// The configured `user.name`, which "Me" in the log's user filter stands for.
+    pub fn user_name(&self) -> Option<String> {
+        self.git(&["config", "--get", "user.name"]).ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
     }
 
     /// `git log` over arbitrary revision arguments, newest first.
@@ -2836,7 +2879,7 @@ mod tests {
         for limit in [5_000, 20_000, 100_000] {
             let mut commits = Vec::new();
             time(&format!("log {limit}"), &mut || {
-                commits = repo.log(None, None, None, limit).unwrap();
+                commits = repo.log(&LogFilter::default(), limit).unwrap();
                 commits.len()
             });
             time(&format!("graph layout {limit}"), &mut || crate::graph::layout(&commits).len());
@@ -3124,8 +3167,10 @@ mod tests {
         t.commit("dir/b.txt", "b\n", "Add b");
         t.commit("a.txt", "a2\n", "Change a");
         let subjects = |commits: Vec<Commit>| commits.into_iter().map(|c| c.subject).collect::<Vec<_>>();
-        assert_eq!(subjects(t.repo.log(None, None, Some("a.txt"), 10).unwrap()), vec!["Change a", "Add a"]);
-        assert_eq!(subjects(t.repo.log(None, None, Some("dir"), 10).unwrap()), vec!["Add b"]);
+        let paths = |paths: &[&str]| LogFilter { paths: paths.iter().map(|p| p.to_string()).collect(), ..Default::default() };
+        assert_eq!(subjects(t.repo.log(&paths(&["a.txt"]), 10).unwrap()), vec!["Change a", "Add a"]);
+        assert_eq!(subjects(t.repo.log(&paths(&["dir"]), 10).unwrap()), vec!["Add b"]);
+        assert_eq!(subjects(t.repo.log(&paths(&["dir", "a.txt"]), 10).unwrap()), vec!["Change a", "Add b", "Add a"]);
         // An old commit on top must not hide the newer ones below it.
         let old = std::process::Command::new("git")
             .current_dir(&t.dir)
@@ -3134,8 +3179,35 @@ mod tests {
             .status()
             .unwrap();
         assert!(old.success());
-        assert_eq!(t.repo.log(None, Some("1.day.ago"), None, 10).unwrap().len(), 3);
-        assert!(t.repo.log(None, Some("2099-01-01"), None, 10).unwrap().is_empty());
+        let since = |since: &str| LogFilter { since: Some(since.into()), ..Default::default() };
+        assert_eq!(t.repo.log(&since("1.day.ago"), 10).unwrap().len(), 3);
+        assert!(t.repo.log(&since("2099-01-01"), 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn log_filters_by_authors() {
+        let t = TempRepo::new("log-authors");
+        let commit_as = |name: &str, subject: &str| {
+            let status = std::process::Command::new("git")
+                .current_dir(&t.dir)
+                .args(["commit", "-q", "--allow-empty", "-m", subject, &format!("--author={name} <{subject}@example.com>")])
+                .status()
+                .unwrap();
+            assert!(status.success());
+        };
+        commit_as("Ann", "one");
+        commit_as("Ann Lee", "two");
+        commit_as("B.o*b [x]", "three");
+        commit_as("Bob", "four");
+        let subjects = |authors: &[&str]| {
+            let filter = LogFilter { authors: authors.iter().map(|a| a.to_string()).collect(), ..Default::default() };
+            t.repo.log(&filter, 10).unwrap().into_iter().map(|c| c.subject).collect::<Vec<_>>()
+        };
+        // Whole names only, special characters taken literally.
+        assert_eq!(subjects(&["Ann"]), vec!["one"]);
+        assert_eq!(subjects(&["B.o*b [x]"]), vec!["three"]);
+        assert_eq!(subjects(&["Ann", "Bob"]), vec!["four", "one"]);
+        assert_eq!(t.repo.user_name().as_deref(), Some("Test"));
     }
 
     #[test]

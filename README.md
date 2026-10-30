@@ -35,7 +35,7 @@ the way git branches grow apart and merge back.
 ### Log
 
 - Branches tree (HEAD / Local / Remote / Tags) next to a commit graph with colored lanes and ref labels.
-- Filter by text or hash, branch, author, date, and file or folder.
+- Filter by text or hash, branch, date, any number of authors (with a "Me" shortcut), and files or folders; git does the filtering, so results reach past the commits loaded.
 - Commit details ("in N branches"), a changed-files tree, and a side-by-side or unified diff
   with syntax highlighting. **Ignore Whitespace** above any diff leaves out whitespace-only changes.
 - **Compare with Local** for a file of any commit or in File History, and **Compare Commits** for two

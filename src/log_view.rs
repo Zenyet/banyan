@@ -21,7 +21,7 @@ use gpui_kit::*;
 
 use crate::actions::{branch_menu, commit_menu, commits_menu, short};
 use crate::diff_pane::DiffPane;
-use crate::git::{Branch, Commit, CommitDetails, FileChange, RefKind};
+use crate::git::{Branch, Commit, CommitDetails, FileChange, LogFilter, RefKind};
 use crate::graph::{self, GraphRow, Half};
 use crate::model::{RepoEvent, RepoModel};
 use crate::settings::Settings;
@@ -77,11 +77,19 @@ pub struct LogView {
     head: Option<String>,
     filter: Entity<InputState>,
     branch_filter: Option<String>,
-    author_filter: Option<String>,
+    /// Authors to show, any of them; git does the filtering.
+    author_filter: Vec<String>,
+    /// Authors seen in the log while it wasn't filtered by author, most
+    /// active first, to choose from.
+    known_authors: Vec<String>,
+    /// `user.name`, for "Me".
+    me: Option<String>,
     /// Index into `DATE_FILTERS`.
     date_filter: Option<usize>,
-    /// A file or folder relative to the repository root.
-    path_filter: Option<String>,
+    /// Files or folders relative to the repository root, any of them.
+    path_filter: Vec<String>,
+    /// Paths filtered by before, newest first, to pick again.
+    recent_paths: Vec<String>,
     branch_tree: Entity<TreeState>,
     branches: Rc<HashMap<SharedString, Branch>>,
     selected_branch: Option<SharedString>,
@@ -109,6 +117,7 @@ impl LogView {
         let filter = cx.new(|cx| {
             InputState::new(window, cx).placeholder(tr!("Text or hash"))
         });
+        let me = model.read(cx).repo.user_name();
         let branch_tree = cx.new(|cx| TreeState::new(cx));
         let file_tree = cx.new(|cx| TreeState::new(cx));
         let diff = cx.new(DiffPane::new);
@@ -158,8 +167,11 @@ impl LogView {
             filter,
             branch_filter: None,
             date_filter: None,
-            path_filter: None,
-            author_filter: None,
+            path_filter: Vec::new(),
+            recent_paths: Vec::new(),
+            author_filter: Vec::new(),
+            known_authors: Vec::new(),
+            me,
             branch_tree,
             branches: Rc::default(),
             selected_branch: None,
@@ -205,9 +217,12 @@ impl LogView {
 
     pub fn reload(&mut self, cx: &mut Context<Self>) {
         let repo = self.model.read(cx).repo.clone();
-        let refs = self.branch_filter.clone();
-        let since = self.date_filter.map(|ix| DATE_FILTERS[ix]);
-        let path = self.path_filter.clone();
+        let filter = LogFilter {
+            refs: self.branch_filter.clone(),
+            since: self.date_filter.map(|ix| DATE_FILTERS[ix].to_string()),
+            authors: self.author_filter.clone(),
+            paths: self.path_filter.clone(),
+        };
         let limit = self.limit;
         self.loading = true;
         cx.notify();
@@ -215,7 +230,7 @@ impl LogView {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    let commits = repo.log(refs.as_deref(), since, path.as_deref(), limit)?;
+                    let commits = repo.log(&filter, limit)?;
                     let graph = graph::layout(&commits);
                     let head = repo.git(&["rev-parse", "HEAD"]).ok().map(|s| s.trim().to_string());
                     anyhow::Ok((commits, graph, head))
@@ -228,6 +243,9 @@ impl LogView {
                         this.commits = Arc::new(commits);
                         this.graph = Arc::new(graph);
                         this.head = head;
+                        if this.author_filter.is_empty() {
+                            this.known_authors = this.authors();
+                        }
                     }
                     Err(err) => {
                         this.commits = Arc::default();
@@ -283,17 +301,14 @@ impl LogView {
 
     fn apply_filter(&mut self, cx: &mut Context<Self>) {
         let query = self.filter.read(cx).value().trim().to_lowercase();
-        let author = self.author_filter.as_deref();
-        let rows: Vec<usize> = if query.is_empty() && author.is_none() {
+        let rows: Vec<usize> = if query.is_empty() {
             (0..self.commits.len()).collect()
         } else {
             self.commits
                 .iter()
                 .enumerate()
-                .filter(|(_, c)| author.is_none_or(|author| c.author == author))
                 .filter(|(_, c)| {
-                    query.is_empty()
-                        || c.id.starts_with(&query)
+                    c.id.starts_with(&query)
                         || c.subject.to_lowercase().contains(&query)
                         || c.author.to_lowercase().contains(&query)
                         || c.refs.iter().any(|r| r.name.to_lowercase().contains(&query))
@@ -311,12 +326,12 @@ impl LogView {
     }
 
     fn is_filtered(&self, cx: &App) -> bool {
-        self.author_filter.is_some() || !self.filter.read(cx).value().trim().is_empty()
+        !self.filter.read(cx).value().trim().is_empty()
     }
 
     /// Filters git applies, which leave gaps in the history.
     fn is_history_filtered(&self) -> bool {
-        self.date_filter.is_some() || self.path_filter.is_some()
+        self.date_filter.is_some() || !self.path_filter.is_empty() || !self.author_filter.is_empty()
     }
 
     fn set_date_filter(&mut self, filter: Option<usize>, cx: &mut Context<Self>) {
@@ -324,8 +339,21 @@ impl LogView {
         self.reload(cx);
     }
 
-    fn set_path_filter(&mut self, path: Option<String>, cx: &mut Context<Self>) {
-        self.path_filter = path;
+    fn clear_path_filter(&mut self, cx: &mut Context<Self>) {
+        self.path_filter.clear();
+        self.reload(cx);
+    }
+
+    /// Add `path` to the paths shown, or take it out if it's there.
+    fn toggle_path_filter(&mut self, path: String, cx: &mut Context<Self>) {
+        if let Some(ix) = self.path_filter.iter().position(|p| *p == path) {
+            self.path_filter.remove(ix);
+        } else {
+            self.recent_paths.retain(|p| *p != path);
+            self.recent_paths.insert(0, path.clone());
+            self.recent_paths.truncate(8);
+            self.path_filter.push(path);
+        }
         self.reload(cx);
     }
 
@@ -343,8 +371,13 @@ impl LogView {
             let root = std::fs::canonicalize(&root).unwrap_or(root);
             let path = std::fs::canonicalize(&path).unwrap_or(path);
             this.update(cx, |this, cx| match path.strip_prefix(&root) {
-                Ok(relative) if relative.as_os_str().is_empty() => this.set_path_filter(None, cx),
-                Ok(relative) => this.set_path_filter(Some(relative.to_string_lossy().into_owned()), cx),
+                Ok(relative) if relative.as_os_str().is_empty() => this.clear_path_filter(cx),
+                Ok(relative) => {
+                    let path = relative.to_string_lossy().replace('\\', "/");
+                    if !this.path_filter.contains(&path) {
+                        this.toggle_path_filter(path, cx);
+                    }
+                }
                 Err(_) => this.report(anyhow::anyhow!("{}", tr!("{} is not inside the repository", path.display())), cx),
             })
             .ok();
@@ -352,9 +385,30 @@ impl LogView {
         .detach();
     }
 
-    fn set_author_filter(&mut self, author: Option<String>, cx: &mut Context<Self>) {
-        self.author_filter = author;
-        self.apply_filter(cx);
+    fn clear_author_filter(&mut self, cx: &mut Context<Self>) {
+        self.author_filter.clear();
+        self.reload(cx);
+    }
+
+    /// Add `author` to the authors shown, or take them out if they're there.
+    fn toggle_author_filter(&mut self, author: String, cx: &mut Context<Self>) {
+        if let Some(ix) = self.author_filter.iter().position(|a| *a == author) {
+            self.author_filter.remove(ix);
+        } else {
+            self.author_filter.push(author);
+        }
+        self.reload(cx);
+    }
+
+    /// The authors to choose from: those seen, plus any chosen that weren't.
+    fn author_choices(&self) -> Vec<String> {
+        let mut authors = self.known_authors.clone();
+        for author in &self.author_filter {
+            if !authors.contains(author) {
+                authors.push(author.clone());
+            }
+        }
+        authors
     }
 
     /// Authors of the loaded commits, most active first.
@@ -648,28 +702,49 @@ impl LogView {
             .child({
                 let view = cx.entity().downgrade();
                 Button::new("author-filter")
-                    .label(match &self.author_filter {
-                        Some(author) => tr!("User: {}", author),
-                        None => tr!("User: All").into(),
+                    .label(match self.author_filter.as_slice() {
+                        [] => tr!("User: All").into(),
+                        [author] if Some(author) == self.me.as_ref() => tr!("User: Me").into(),
+                        [author] => tr!("User: {}", author),
+                        [author, rest @ ..] => tr!("User: {} +{}", author, rest.len()),
                     })
                     .ghost()
                     .xsmall()
                     .dropdown_caret(true)
                     .dropdown_menu(move |mut menu, _, cx| {
-                        let authors = view.upgrade().map(|view| view.read(cx).authors()).unwrap_or_default();
+                        let Some(this) = view.upgrade() else { return menu };
+                        let (authors, chosen, me) = {
+                            let this = this.read(cx);
+                            (this.author_choices(), this.author_filter.clone(), this.me.clone())
+                        };
                         let all = view.clone();
-                        menu = menu
-                            .item(PopupMenuItem::new(tr!("All")).on_click(move |_, _, cx| {
-                                all.update(cx, |this, cx| this.set_author_filter(None, cx)).ok();
-                            }))
-                            .separator();
-                        for author in &authors {
+                        menu = menu.item(
+                            PopupMenuItem::new(tr!("All")).checked(chosen.is_empty()).on_click(move |_, _, cx| {
+                                all.update(cx, |this, cx| this.clear_author_filter(cx)).ok();
+                            }),
+                        );
+                        if let Some(me) = me.clone() {
                             let view = view.clone();
-                            let name = author.clone();
-                            menu = menu.item(PopupMenuItem::new(author.clone()).on_click(move |_, _, cx| {
-                                let name = name.clone();
-                                view.update(cx, |this, cx| this.set_author_filter(Some(name), cx)).ok();
-                            }));
+                            menu = menu.item(
+                                PopupMenuItem::new(tr!("Me ({})", me))
+                                    .checked(chosen.contains(&me))
+                                    .on_click(move |_, _, cx| {
+                                        let me = me.clone();
+                                        view.update(cx, |this, cx| this.toggle_author_filter(me, cx)).ok();
+                                    }),
+                            );
+                        }
+                        menu = menu.separator();
+                        for author in authors.into_iter().filter(|author| Some(author) != me.as_ref()) {
+                            let view = view.clone();
+                            menu = menu.item(
+                                PopupMenuItem::new(author.clone())
+                                    .checked(chosen.contains(&author))
+                                    .on_click(move |_, _, cx| {
+                                        let author = author.clone();
+                                        view.update(cx, |this, cx| this.toggle_author_filter(author, cx)).ok();
+                                    }),
+                            );
                         }
                         menu.max_h(px(480.)).scrollable(true)
                     })
@@ -703,22 +778,45 @@ impl LogView {
             .child({
                 let view = cx.entity().downgrade();
                 Button::new("path-filter")
-                    .label(match &self.path_filter {
-                        Some(path) => tr!("Paths: {}", path),
-                        None => tr!("Paths: All").into(),
+                    .label(match self.path_filter.as_slice() {
+                        [] => tr!("Paths: All").into(),
+                        [path] => tr!("Paths: {}", path),
+                        [path, rest @ ..] => tr!("Paths: {} +{}", path, rest.len()),
                     })
                     .ghost()
                     .xsmall()
                     .dropdown_caret(true)
-                    .dropdown_menu(move |menu, _, _| {
+                    .dropdown_menu(move |mut menu, _, cx| {
+                        let Some(this) = view.upgrade() else { return menu };
+                        let (recent, chosen) = {
+                            let this = this.read(cx);
+                            let mut paths = this.path_filter.clone();
+                            paths.extend(this.recent_paths.iter().filter(|p| !this.path_filter.contains(p)).cloned());
+                            (paths, this.path_filter.clone())
+                        };
                         let all = view.clone();
+                        menu = menu.item(
+                            PopupMenuItem::new(tr!("All")).checked(chosen.is_empty()).on_click(move |_, _, cx| {
+                                all.update(cx, |this, cx| this.clear_path_filter(cx)).ok();
+                            }),
+                        );
+                        if !recent.is_empty() {
+                            menu = menu.separator();
+                        }
+                        for path in recent {
+                            let view = view.clone();
+                            menu = menu.item(
+                                PopupMenuItem::new(path.clone()).checked(chosen.contains(&path)).on_click(move |_, _, cx| {
+                                    let path = path.clone();
+                                    view.update(cx, |this, cx| this.toggle_path_filter(path, cx)).ok();
+                                }),
+                            );
+                        }
                         let choose = view.clone();
-                        menu.item(PopupMenuItem::new(tr!("All")).on_click(move |_, _, cx| {
-                            all.update(cx, |this, cx| this.set_path_filter(None, cx)).ok();
-                        }))
-                        .item(PopupMenuItem::new(tr!("Select File or Folder…")).on_click(move |_, window, cx| {
-                            choose.update(cx, |this, cx| this.choose_path_filter(window, cx)).ok();
-                        }))
+                        menu.separator()
+                            .item(PopupMenuItem::new(tr!("Select File or Folder…")).on_click(move |_, window, cx| {
+                                choose.update(cx, |this, cx| this.choose_path_filter(window, cx)).ok();
+                            }))
                     })
             })
             .child(div().flex_1())
