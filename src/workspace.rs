@@ -27,7 +27,7 @@ use crate::i18n::tr;
 
 actions!(
     workspace,
-    [CommitChanges, PushCommits, UpdateProject, ApplyPatch, ManageWorktrees, ShowSubmodules, FindInLog, ShowLog, ShowCommitTab, ShowConsole, RefreshRepository]
+    [CommitChanges, PushCommits, UpdateProject, ApplyPatch, ManageWorktrees, ShowSubmodules, FindInLog, GoToRevision, ShowLog, ShowCommitTab, ShowConsole, RefreshRepository]
 );
 
 /// JetBrains' macOS keymap where it has an equivalent.
@@ -40,6 +40,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new(secondary!("0"), ShowCommitTab, Some("Workspace")),
         KeyBinding::new(secondary!("r"), RefreshRepository, Some("Workspace")),
         KeyBinding::new(secondary!("f"), FindInLog, Some("Workspace")),
+        KeyBinding::new(secondary!("g"), GoToRevision, Some("Workspace")),
     ]);
 }
 
@@ -507,6 +508,20 @@ impl Render for Workspace {
                 this.set_tab(0, cx);
                 let search = this.log.read(cx).search_focus(cx);
                 search.focus(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &GoToRevision, window, cx| {
+                this.set_tab(0, cx);
+                let log = this.log.downgrade();
+                prompt_text(
+                    tr!("Go to Hash, Branch or Tag"),
+                    tr!("Go"),
+                    "",
+                    move |rev, window, cx| {
+                        log.update(cx, |log, cx| log.go_to(rev, window, cx)).ok();
+                    },
+                    window,
+                    cx,
+                );
             }))
             .on_action(cx.listener(|this, _: &ShowLog, _, cx| this.set_tab(0, cx)))
             .on_action(cx.listener(|this, _: &ShowCommitTab, _, cx| this.set_tab(1, cx)))

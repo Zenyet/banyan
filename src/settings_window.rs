@@ -225,6 +225,7 @@ impl SettingsWindow {
             ]),
             SettingGroup::new().title(tr!("Log")).items([
                 shortcut_item(tr!("Search the Log"), &["secondary-f"]),
+                shortcut_item(tr!("Go to Hash, Branch or Tag"), &["secondary-g"]),
                 shortcut_item(tr!("From the search box to the commits"), &["enter"]),
                 shortcut_item(tr!("Previous / next commit"), &["up", "down"]),
                 shortcut_item(tr!("First / last commit"), &["home", "end"]),

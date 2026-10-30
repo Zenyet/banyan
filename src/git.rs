@@ -887,6 +887,23 @@ impl Repo {
         WebRemote::parse(&self.git(&["remote", "get-url", &name]).ok()?)
     }
 
+    /// The commit a hash, branch, tag or other revision names, and how many
+    /// commits of the whole log are not its ancestors: an upper bound on how
+    /// far down the log it is.
+    pub fn locate_commit(&self, rev: &str) -> Result<(String, usize)> {
+        let id = self
+            .git(&["rev-parse", "--verify", "-q", "--end-of-options", &format!("{}^{{commit}}", rev.trim())])
+            .map_err(|_| anyhow::anyhow!("{}", tr!("No commit named {}", rev.trim())))?
+            .trim()
+            .to_string();
+        let above = self
+            .git(&["rev-list", "--count", "--branches", "--remotes", "--tags", "HEAD", "--not", &id])?
+            .trim()
+            .parse()
+            .unwrap_or(0);
+        Ok((id, above))
+    }
+
     /// The configured `user.name`, which "Me" in the log's user filter stands for.
     pub fn user_name(&self) -> Option<String> {
         self.git(&["config", "--get", "user.name"]).ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
@@ -3557,6 +3574,19 @@ mod tests {
         let since = |since: &str| LogFilter { since: Some(since.into()), ..Default::default() };
         assert_eq!(t.repo.log(&since("1.day.ago"), 10).unwrap().len(), 3);
         assert!(t.repo.log(&since("2099-01-01"), 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn locates_commits_by_any_name() {
+        let t = TempRepo::new("locate");
+        let first = t.commit("a.txt", "a\n", "First");
+        t.commit("a.txt", "b\n", "Second");
+        t.repo.git(&["tag", "v1", &first]).unwrap();
+        assert_eq!(t.repo.locate_commit("v1").unwrap(), (first.clone(), 1));
+        assert_eq!(t.repo.locate_commit(&first[..7]).unwrap().0, first);
+        assert_eq!(t.repo.locate_commit("HEAD").unwrap().1, 0);
+        assert!(t.repo.locate_commit("nope").is_err());
+        assert!(t.repo.locate_commit("--all").is_err());
     }
 
     #[test]

@@ -126,6 +126,7 @@ fn main() {
                         MenuItem::separator(),
                         MenuItem::action(tr!("Show Log"), workspace::ShowLog),
                         MenuItem::action(tr!("Search the Log"), workspace::FindInLog),
+                        MenuItem::action(tr!("Go to Hash, Branch or Tag…"), workspace::GoToRevision),
                         MenuItem::action(tr!("Show Commit"), workspace::ShowCommitTab),
                         MenuItem::action(tr!("Show Console"), workspace::ShowConsole),
                         MenuItem::action(tr!("Refresh"), workspace::RefreshRepository),
@@ -258,7 +259,7 @@ mod tests {
     fn key_bindings_parse() {
         for keys in [
             secondary!("q"), secondary!("o"), secondary!("w"), secondary!(","), secondary!("k"),
-            secondary!("shift-k"), secondary!("t"), secondary!("9"), secondary!("0"), secondary!("r"),
+            secondary!("shift-k"), secondary!("t"), secondary!("9"), secondary!("0"), secondary!("r"), secondary!("g"),
         ] {
             assert!(gpui_kit::Keystroke::parse(keys).is_ok(), "{keys}");
         }

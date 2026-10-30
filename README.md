@@ -185,6 +185,7 @@ On Linux and Windows, use <kbd>Ctrl</kbd> where these show <kbd>⌘</kbd>.
 | <kbd>⇧</kbd> <kbd>⌘</kbd> <kbd>K</kbd> | Push |
 | <kbd>⌘</kbd> <kbd>T</kbd> | Update Project |
 | <kbd>⌘</kbd> <kbd>F</kbd> | Search the log (<kbd>↩</kbd> moves to the commits) |
+| <kbd>⌘</kbd> <kbd>G</kbd> | Go to a hash, branch or tag in the log |
 | <kbd>⌘</kbd> <kbd>9</kbd> / <kbd>⌘</kbd> <kbd>0</kbd> | Log / Commit tab |
 | <kbd>⌘</kbd> <kbd>R</kbd> | Refresh |
 | <kbd>⌘</kbd> <kbd>,</kbd> | Settings |

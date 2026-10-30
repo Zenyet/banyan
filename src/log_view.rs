@@ -109,6 +109,8 @@ pub struct LogView {
     /// The model's `refs_version` the log was last loaded for.
     refs_version: u64,
     load_more_scheduled: bool,
+    /// A commit to select once the log has loaded, from Go to Revision.
+    pending_reveal: Option<String>,
     log_task: Option<Task<()>>,
     details_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
@@ -177,6 +179,7 @@ impl LogView {
             branch_tree,
             branches: Rc::default(),
             selected_branch: None,
+            pending_reveal: None,
             base: 0,
             details: None,
             file_tree,
@@ -257,6 +260,12 @@ impl LogView {
                     }
                 }
                 this.apply_filter(cx);
+                if let Some(id) = this.pending_reveal.take()
+                    && this.rows.iter().any(|&ix| this.commits[ix].id == id)
+                {
+                    this.reveal_commit(&id, cx);
+                    return;
+                }
                 let still_there = this
                     .selected
                     .as_ref()
@@ -428,6 +437,31 @@ impl LogView {
     fn set_branch_filter(&mut self, branch: Option<String>, cx: &mut Context<Self>) {
         self.branch_filter = branch;
         self.reload(cx);
+    }
+
+    /// Select the commit `rev` names, loading and unfiltering the log as far
+    /// as it takes to show it.
+    pub fn go_to(&mut self, rev: String, window: &mut Window, cx: &mut Context<Self>) {
+        let repo = self.model.read(cx).repo.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let result = cx.background_executor().spawn(async move { repo.locate_commit(&rev) }).await;
+            this.update_in(cx, |this, window, cx| match result {
+                Ok((id, _)) if this.rows.iter().any(|&ix| this.commits[ix].id == id) => this.reveal_commit(&id, cx),
+                Ok((id, above)) => {
+                    this.filter.update(cx, |input, cx| input.set_value("", window, cx));
+                    this.branch_filter = None;
+                    this.author_filter.clear();
+                    this.date_filter = None;
+                    this.path_filter.clear();
+                    this.limit = this.limit.max(above + 100);
+                    this.pending_reveal = Some(id);
+                    this.reload(cx);
+                }
+                Err(err) => this.report(err, cx),
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn reveal_commit(&mut self, id: &str, cx: &mut Context<Self>) {
