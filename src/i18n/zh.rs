@@ -262,6 +262,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("Filter the Log by This File", "按此文件筛选日志"),
     ("Cherry-Pick Selected Changes", "优选所选更改"),
     ("Compare with", "比较对象"),
+    ("Searched the first {} commits. Search every commit message for “{}”", "已搜索前 {} 个提交。在所有提交说明中搜索“{}”"),
     ("Annotate Previous Revision", "注释上一修订"),
     ("Show Diff", "显示差异"),
     ("{} at {}. Click a line to see its commit.", "{}，位于 {}。点击某一行查看对应提交。"),

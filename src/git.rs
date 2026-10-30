@@ -52,6 +52,8 @@ pub struct LogFilter {
     pub authors: Vec<String>,
     /// Files or folders relative to the repository root, any of which matches.
     pub paths: Vec<String>,
+    /// Text the commit message contains, ignoring case.
+    pub text: Option<String>,
 }
 
 /// The web page of a remote repository, for links to its commits and files.
@@ -862,13 +864,17 @@ impl Repo {
         if let Some(since) = &filter.since {
             options.push(format!("--since-as-filter={since}"));
         }
-        if !filter.authors.is_empty() {
-            // Explicitly basic, whatever grep.patternType says; several
-            // --author options match any of them.
+        if !filter.authors.is_empty() || filter.text.is_some() {
+            // Explicitly basic, whatever grep.patternType says.
             options.push("--basic-regexp".into());
-            for author in &filter.authors {
-                options.push(format!("--author=^{} <", escape_basic_regex(author)));
-            }
+        }
+        // Several --author options match any of them.
+        for author in &filter.authors {
+            options.push(format!("--author=^{} <", escape_basic_regex(author)));
+        }
+        if let Some(text) = &filter.text {
+            options.push("--regexp-ignore-case".into());
+            options.push(format!("--grep={}", escape_basic_regex(text)));
         }
         let mut revs: Vec<&str> = match &filter.refs {
             Some(refs) => vec![refs],
@@ -3841,6 +3847,20 @@ mod tests {
         assert!(t.repo.apply_commit_changes(&id, Some(&parent), &["a.txt".into()], true).is_err());
         assert!(t.repo.status().unwrap().iter().any(|e| e.path == "a.txt" && e.is_conflicted()));
         assert!(t.repo.apply_commit_changes(&id, Some(&parent), &["missing.txt".into()], false).is_err());
+    }
+
+    #[test]
+    fn log_searches_messages() {
+        let t = TempRepo::new("log-grep");
+        t.commit("a.txt", "a\n", "Add a");
+        t.repo.git(&["commit", "-q", "--allow-empty", "-m", "Fix [crash]", "-m", "Deep in the BODY."]).unwrap();
+        let search = |text: &str| {
+            let filter = LogFilter { text: Some(text.into()), ..Default::default() };
+            t.repo.log(&filter, 10).unwrap().into_iter().map(|c| c.subject).collect::<Vec<_>>()
+        };
+        assert_eq!(search("[crash]"), vec!["Fix [crash]"]);
+        assert_eq!(search("deep in the body"), vec!["Fix [crash]"]);
+        assert!(search("c.ash").is_empty());
     }
 
     #[test]

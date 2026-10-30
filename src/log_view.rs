@@ -93,6 +93,9 @@ pub struct LogView {
     path_filter: Vec<String>,
     /// Paths filtered by before, newest first, to pick again.
     recent_paths: Vec<String>,
+    /// The search text git looked for in every message, past the commits
+    /// loaded, after "Search the whole history".
+    grep: Option<String>,
     branch_tree: Entity<TreeState>,
     branches: Rc<HashMap<SharedString, Branch>>,
     selected_branch: Option<SharedString>,
@@ -138,7 +141,16 @@ impl LogView {
                 }
             }),
             cx.subscribe_in(&filter, window, |this, _, event, window, cx| match event {
-                InputEvent::Change => this.apply_filter(cx),
+                InputEvent::Change => {
+                    // A new search is over the loaded commits again.
+                    let query = this.filter.read(cx).value().trim().to_string();
+                    if this.grep.as_ref().is_some_and(|grep| *grep != query) {
+                        this.grep = None;
+                        this.reload(cx);
+                    } else {
+                        this.apply_filter(cx);
+                    }
+                }
                 // Enter goes to the matching commits, for the arrow keys.
                 InputEvent::PressEnter { .. } => this.focus.focus(window, cx),
                 _ => {}
@@ -177,6 +189,7 @@ impl LogView {
             date_filter: None,
             path_filter: Vec::new(),
             recent_paths: Vec::new(),
+            grep: None,
             author_filter: Vec::new(),
             known_authors: Vec::new(),
             me,
@@ -232,6 +245,7 @@ impl LogView {
             since: self.date_filter.map(|ix| DATE_FILTERS[ix].to_string()),
             authors: self.author_filter.clone(),
             paths: self.path_filter.clone(),
+            text: self.grep.clone(),
         };
         let limit = self.limit;
         self.loading = true;
@@ -320,7 +334,9 @@ impl LogView {
 
     fn apply_filter(&mut self, cx: &mut Context<Self>) {
         let query = self.filter.read(cx).value().trim().to_lowercase();
-        let rows: Vec<usize> = if query.is_empty() {
+        // Git has already matched every message, bodies included.
+        let searched_by_git = self.grep.as_ref().is_some_and(|grep| grep.to_lowercase() == query);
+        let rows: Vec<usize> = if query.is_empty() || searched_by_git {
             (0..self.commits.len()).collect()
         } else {
             self.commits
@@ -917,7 +933,10 @@ impl LogView {
 
     fn render_commits(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let show_graph = !self.is_filtered(cx) && !self.is_history_filtered();
-        let has_more = !self.is_filtered(cx) && self.commits.len() >= self.limit;
+        let has_more = (!self.is_filtered(cx) || self.grep.is_some()) && self.commits.len() >= self.limit;
+        // The text search only saw the commits loaded; git can look further.
+        let offer_grep = self.is_filtered(cx) && self.grep.is_none() && self.commits.len() >= self.limit;
+        let extra = (has_more || offer_grep) as usize;
         v_flex()
             .size_full()
             .child(
@@ -948,12 +967,14 @@ impl LogView {
                     .child(
                         uniform_list(
                             "commits",
-                            self.rows.len() + has_more as usize,
+                            self.rows.len() + extra,
                             cx.processor(move |this, range: std::ops::Range<usize>, window, cx| {
                                 range
                                     .map(|row| {
                                         if row < this.rows.len() {
                                             this.render_commit_row(row, show_graph, window, cx)
+                                        } else if offer_grep {
+                                            this.render_search_history(cx)
                                         } else {
                                             this.render_load_more(cx)
                                         }
@@ -992,6 +1013,26 @@ impl LogView {
                 tr!("Showing the first {} commits. Load more…", self.limit)
             })
             .on_click(cx.listener(|this, _, _, cx| this.load_more(cx)))
+            .into_any_element()
+    }
+
+    fn render_search_history(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let query = self.filter.read(cx).value().trim().to_string();
+        div()
+            .id("search-history")
+            .h(ROW_HEIGHT)
+            .w_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_sm()
+            .text_color(cx.theme().link)
+            .hover(|style| style.bg(cx.theme().list_hover))
+            .child(tr!("Searched the first {} commits. Search every commit message for “{}”", self.limit, query))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.grep = Some(query.clone());
+                this.reload(cx);
+            }))
             .into_any_element()
     }
 
