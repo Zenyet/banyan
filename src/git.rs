@@ -1622,6 +1622,35 @@ impl Repo {
         }
     }
 
+    /// Apply what commit `id` did to `paths` to the work tree, or undo it
+    /// when `revert`, without committing: JetBrains' "Cherry-Pick Selected
+    /// Changes" and "Revert Selected Changes". Changes that no longer fit
+    /// are merged three-way, and conflicts that leaves are an error.
+    pub fn apply_commit_changes(&self, id: &str, paths: &[String], revert: bool) -> Result<String> {
+        if paths.is_empty() {
+            bail!("no files chosen");
+        }
+        // Against the first parent, as the log shows a commit's changes.
+        let mut args = vec!["diff-tree", "-p", "--binary", "--full-index", "-M", "--root", "-m", "--first-parent", id, "--"];
+        args.extend(paths.iter().map(String::as_str));
+        let patch = self.git(&args)?;
+        // diff-tree starts with the commit's id when it shows several files.
+        let patch = match patch.find("diff --git") {
+            Some(start) => &patch[start..],
+            None => bail!("the commit doesn't change these files"),
+        };
+        let mut apply = vec!["apply", "--binary"];
+        if revert {
+            apply.push("-R");
+        }
+        let plain = [apply.as_slice(), &["-"]].concat();
+        if let Ok(out) = self.git_with_input(&plain, patch) {
+            return Ok(out);
+        }
+        let three_way = [apply.as_slice(), &["--3way", "-"]].concat();
+        self.git_with_input(&three_way, patch)
+    }
+
     /// Replace `path` in the work tree with its version in `rev`; a file
     /// `rev` doesn't have is deleted.
     pub fn get_from_revision(&self, rev: &str, path: &str) -> Result<String> {
@@ -3182,6 +3211,27 @@ mod tests {
         let since = |since: &str| LogFilter { since: Some(since.into()), ..Default::default() };
         assert_eq!(t.repo.log(&since("1.day.ago"), 10).unwrap().len(), 3);
         assert!(t.repo.log(&since("2099-01-01"), 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn applies_and_reverts_part_of_a_commit() {
+        let t = TempRepo::new("selected-changes");
+        t.commit("a.txt", "a\n", "Add a");
+        t.write("b.txt", "b\n");
+        t.commit("a.txt", "a\nmore\n", "Change a and add b");
+        let id = t.repo.git(&["rev-parse", "HEAD"]).unwrap().trim().to_string();
+        // Undo only a.txt's part.
+        t.repo.apply_commit_changes(&id, &["a.txt".into()], true).unwrap();
+        assert_eq!(std::fs::read_to_string(t.dir.join("a.txt")).unwrap(), "a\n");
+        assert!(t.dir.join("b.txt").exists());
+        // And bring it back.
+        t.repo.apply_commit_changes(&id, &["a.txt".into()], false).unwrap();
+        assert_eq!(std::fs::read_to_string(t.dir.join("a.txt")).unwrap(), "a\nmore\n");
+        // A file changed since is left in conflict.
+        t.commit("a.txt", "x\n", "Rewrite a");
+        assert!(t.repo.apply_commit_changes(&id, &["a.txt".into()], true).is_err());
+        assert!(t.repo.status().unwrap().iter().any(|e| e.path == "a.txt" && e.is_conflicted()));
+        assert!(t.repo.apply_commit_changes(&id, &["missing.txt".into()], false).is_err());
     }
 
     #[test]

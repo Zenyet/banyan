@@ -25,7 +25,7 @@ use crate::git::{Branch, Commit, CommitDetails, FileChange, LogFilter, RefKind};
 use crate::graph::{self, GraphRow, Half};
 use crate::model::{RepoEvent, RepoModel};
 use crate::settings::Settings;
-use crate::ui::{cached, SubView, selection_bg, FILE_PREFIX, file_tree, format_full_time, format_time, lane_color, path_tree, ref_colors, status_color};
+use crate::ui::{cached, SubView, selection_bg, FILE_PREFIX, file_count, file_tree, format_full_time, format_time, lane_color, path_tree, ref_colors, status_color};
 use crate::i18n::tr;
 
 const ROW_HEIGHT: Pixels = px(24.);
@@ -1051,9 +1051,37 @@ impl LogView {
                 },
             )
             .context_menu(move |_, entry, menu, _, _| {
-                let (Some(change), Some(rev)) = (menu_files.get(&entry.item().id), rev.clone()) else {
-                    return menu;
+                let Some(rev) = rev.clone() else { return menu };
+                let id = entry.item().id.as_ref();
+                // The file, or every file under the folder, with where renamed ones came from.
+                let chosen: Vec<&FileChange> = match id.strip_prefix(&format!("d:{FILE_PREFIX}")) {
+                    Some(dir) => {
+                        let dir = format!("{dir}/");
+                        menu_files.values().filter(|f| f.path.starts_with(&dir)).collect()
+                    }
+                    None => menu_files.get(id).into_iter().collect(),
                 };
+                let count = chosen.len();
+                let mut paths: Vec<String> = chosen.iter().map(|f| f.path.clone()).collect();
+                paths.extend(chosen.iter().filter_map(|f| f.orig_path.clone()));
+                let mut menu = menu;
+                for (label, revert) in [(tr!("Cherry-Pick Selected Changes"), false), (tr!("Revert Selected Changes"), true)] {
+                    if paths.is_empty() {
+                        break;
+                    }
+                    let (m, r, paths) = (model.clone(), rev.clone(), paths.clone());
+                    menu = menu.item(PopupMenuItem::new(label).on_click(move |_, _, cx| {
+                        let (rev, paths) = (r.clone(), paths.clone());
+                        let label = if revert {
+                            tr!("Revert {} from {}", file_count(count), crate::actions::short(&rev))
+                        } else {
+                            tr!("Cherry-pick {} from {}", file_count(count), crate::actions::short(&rev))
+                        };
+                        m.update(cx, |m, cx| m.run(label, move |repo| repo.apply_commit_changes(&rev, &paths, revert), cx));
+                    }));
+                }
+                let Some(change) = menu_files.get(id) else { return menu };
+                let menu = menu.separator();
                 let path = change.path.clone();
                 let (m, p) = (model.clone(), path.clone());
                 let menu = menu.item(PopupMenuItem::new(tr!("Show History")).on_click(move |_, window, cx| {
