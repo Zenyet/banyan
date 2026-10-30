@@ -6,6 +6,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, RwLock};
 
+use crate::git::UpdateMethod;
+
 const MAX_RECENT: usize = 10;
 const MAX_MESSAGES: usize = 20;
 
@@ -46,8 +48,8 @@ pub struct Settings {
     pub relative_dates: bool,
     /// The git executable; empty means `git` from the PATH.
     pub git_path: String,
-    /// Update Project rebases instead of merging.
-    pub update_rebase: bool,
+    /// How Update Project brings in the tracked branch, by default.
+    pub update_method: UpdateMethod,
     /// Fetch in the background this often; 0 turns it off.
     pub auto_fetch_minutes: u32,
     /// Show diffs unified instead of side by side.
@@ -71,7 +73,7 @@ impl Default for Settings {
             font_size: 16,
             relative_dates: true,
             git_path: String::new(),
-            update_rebase: false,
+            update_method: UpdateMethod::Merge,
             auto_fetch_minutes: 0,
             unified_diff: false,
             ignore_whitespace: false,
@@ -175,7 +177,7 @@ impl Settings {
                 "font_size" => settings.font_size = value.parse().unwrap_or(settings.font_size),
                 "dates" => settings.relative_dates = value != "absolute",
                 "git" => settings.git_path = value.to_string(),
-                "update" => settings.update_rebase = value == "rebase",
+                "update" => settings.update_method = UpdateMethod::from_key(value),
                 "auto_fetch" => settings.auto_fetch_minutes = value.parse().unwrap_or(0),
                 "diff" => settings.unified_diff = value == "unified",
                 "whitespace" => settings.ignore_whitespace = value == "ignore",
@@ -196,7 +198,7 @@ impl Settings {
             self.font_size,
             if self.relative_dates { "relative" } else { "absolute" },
             self.git_path,
-            if self.update_rebase { "rebase" } else { "merge" },
+            self.update_method.key(),
             self.auto_fetch_minutes,
             if self.unified_diff { "unified" } else { "split" },
             if self.ignore_whitespace { "ignore" } else { "show" },
@@ -261,7 +263,7 @@ mod tests {
             font_size: 14,
             relative_dates: false,
             git_path: "/opt/homebrew/bin/git".into(),
-            update_rebase: true,
+            update_method: crate::git::UpdateMethod::FastForwardOnly,
             auto_fetch_minutes: 15,
             unified_diff: true,
             ignore_whitespace: true,

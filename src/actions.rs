@@ -121,6 +121,10 @@ pub fn branch_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, branch: &Bran
             },
         ));
         let n = name.clone();
+        menu = menu.item(item(tr!("Merge with Options..."), model, move |model, window, cx| {
+            crate::merge_dialog::open(model.clone(), n.clone(), window, cx)
+        }));
+        let n = name.clone();
         menu = menu.item(item(
             tr!("Rebase '{}' onto '{}'", current_label, name),
             model,

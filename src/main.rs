@@ -28,6 +28,7 @@ mod graph;
 mod history;
 mod i18n;
 mod log_view;
+mod merge_dialog;
 mod merge_tool;
 mod model;
 mod patch;

@@ -54,6 +54,94 @@ pub struct LogFilter {
     pub paths: Vec<String>,
 }
 
+/// How Update Project brings in the tracked branch.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UpdateMethod {
+    #[default]
+    Merge,
+    Rebase,
+    /// Only when the branch has no commits of its own.
+    FastForwardOnly,
+}
+
+impl UpdateMethod {
+    pub const ALL: [UpdateMethod; 3] = [UpdateMethod::Merge, UpdateMethod::Rebase, UpdateMethod::FastForwardOnly];
+
+    /// Its name in the settings file.
+    pub fn key(self) -> &'static str {
+        match self {
+            UpdateMethod::Merge => "merge",
+            UpdateMethod::Rebase => "rebase",
+            UpdateMethod::FastForwardOnly => "ff-only",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Self {
+        Self::ALL.into_iter().find(|m| m.key() == key).unwrap_or_default()
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            UpdateMethod::Merge => tr!("Merge incoming changes"),
+            UpdateMethod::Rebase => tr!("Rebase onto incoming changes"),
+            UpdateMethod::FastForwardOnly => tr!("Fast-forward only"),
+        }
+    }
+
+    pub fn detail(self) -> &'static str {
+        match self {
+            UpdateMethod::Merge => tr!("Creates a merge commit if both sides changed"),
+            UpdateMethod::Rebase => tr!("Replays your local commits on top, keeping history linear"),
+            UpdateMethod::FastForwardOnly => tr!("Stops instead if your branch has commits of its own"),
+        }
+    }
+}
+
+/// Fast-forwarding in a merge.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FastForward {
+    /// When possible, git's default.
+    #[default]
+    Allow,
+    /// Fail unless the merge is a fast-forward.
+    Only,
+    /// Always create a merge commit.
+    Never,
+}
+
+/// Options of a merge, as in JetBrains' Merge dialog.
+#[derive(Clone, Debug, Default)]
+pub struct MergeOptions {
+    pub fast_forward: FastForward,
+    /// Put the merged changes in the work tree and index as one change to commit.
+    pub squash: bool,
+    /// Stop before committing the merge.
+    pub no_commit: bool,
+    /// The merge commit's message instead of git's.
+    pub message: Option<String>,
+}
+
+impl MergeOptions {
+    pub fn args(&self) -> Vec<String> {
+        let mut args = vec!["--no-edit".to_string()];
+        match self.fast_forward {
+            FastForward::Allow => {}
+            FastForward::Only => args.push("--ff-only".into()),
+            FastForward::Never => args.push("--no-ff".into()),
+        }
+        if self.squash {
+            args.push("--squash".into());
+        }
+        if self.no_commit {
+            args.push("--no-commit".into());
+        }
+        if let Some(message) = &self.message {
+            args.extend(["-m".into(), message.clone()]);
+        }
+        args
+    }
+}
+
 /// What `git stash push` puts aside.
 #[derive(Clone, Debug, Default)]
 pub struct StashOptions {
@@ -1294,7 +1382,15 @@ impl Repo {
     }
 
     pub fn merge(&self, name: &str) -> Result<String> {
-        self.git(&["merge", "--no-edit", name])
+        self.merge_with(name, &MergeOptions::default())
+    }
+
+    pub fn merge_with(&self, name: &str, options: &MergeOptions) -> Result<String> {
+        let mut args = vec!["merge"];
+        let extra = options.args();
+        args.extend(extra.iter().map(String::as_str));
+        args.push(name);
+        self.git(&args)
     }
 
     pub fn rebase(&self, onto: &str) -> Result<String> {
@@ -1525,17 +1621,18 @@ impl Repo {
 
     /// JetBrains' "Update Project": pull the tracked branch by merging or
     /// rebasing, stashing local changes around it.
-    pub fn update_project(&self, rebase: bool) -> Result<String> {
+    pub fn update_project(&self, method: UpdateMethod) -> Result<String> {
         let branch = self.current_branch().context("cannot update a detached HEAD")?;
         if self.git(&["config", "--get", &format!("branch.{branch}.merge")]).is_err() {
             bail!("{branch} has no tracked remote branch; push it first or set an upstream");
         }
-        self.git(&[
-            "pull",
-            "--autostash",
-            "--no-edit",
-            if rebase { "--rebase" } else { "--no-rebase" },
-        ])
+        let mut args = vec!["pull", "--autostash", "--no-edit"];
+        match method {
+            UpdateMethod::Merge => args.push("--no-rebase"),
+            UpdateMethod::Rebase => args.push("--rebase"),
+            UpdateMethod::FastForwardOnly => args.extend(["--no-rebase", "--ff-only"]),
+        }
+        self.git(&args)
     }
 
     /// Where the current branch pushes to: its upstream, or a new branch of
@@ -3276,6 +3373,38 @@ mod tests {
     }
 
     #[test]
+    fn merges_with_options() {
+        let t = TempRepo::new("merge-options");
+        t.commit("a.txt", "a\n", "Base");
+        t.repo.git(&["checkout", "-q", "-b", "feature"]).unwrap();
+        t.commit("f.txt", "f\n", "Feature");
+        t.repo.git(&["checkout", "-q", "-"]).unwrap();
+        let parents = |t: &TempRepo| t.repo.git(&["log", "-1", "--format=%P"]).unwrap().split_whitespace().count();
+
+        // A fast-forward that's made a merge commit anyway, with our message.
+        let no_ff = MergeOptions { fast_forward: FastForward::Never, message: Some("Bring in feature".into()), ..Default::default() };
+        t.repo.merge_with("feature", &no_ff).unwrap();
+        assert_eq!(parents(&t), 2);
+        assert_eq!(t.subjects()[0], "Bring in feature");
+
+        t.repo.git(&["reset", "-q", "--hard", "HEAD~1"]).unwrap();
+        t.commit("main.txt", "m\n", "Main");
+        let ff_only = MergeOptions { fast_forward: FastForward::Only, ..Default::default() };
+        assert!(t.repo.merge_with("feature", &ff_only).is_err());
+
+        // Squash leaves the changes to commit, without a merge in progress.
+        let squash = MergeOptions { squash: true, ..Default::default() };
+        t.repo.merge_with("feature", &squash).unwrap();
+        assert_eq!(t.repo.repo_state(), RepoState::Clean);
+        assert!(t.repo.status().unwrap().iter().any(|e| e.path == "f.txt"));
+        t.repo.git(&["reset", "-q", "--hard"]).unwrap();
+
+        let no_commit = MergeOptions { no_commit: true, fast_forward: FastForward::Never, ..Default::default() };
+        t.repo.merge_with("feature", &no_commit).unwrap();
+        assert_eq!(t.repo.repo_state(), RepoState::Merging);
+    }
+
+    #[test]
     fn stashes_some_files_and_unstashes_onto_a_branch() {
         let t = TempRepo::new("stash-options");
         t.commit("a.txt", "a\n", "Add a");
@@ -3459,7 +3588,7 @@ mod tests {
         local.commit("c.txt", "c\n", "Local commit");
         local.write("a.txt", "uncommitted\n");
 
-        local.repo.update_project(true).unwrap();
+        local.repo.update_project(UpdateMethod::Rebase).unwrap();
         assert_eq!(local.subjects(), vec!["Local commit", "Incoming", "Base"]);
         assert!(local.dir.join("b.txt").exists());
         assert_eq!(std::fs::read_to_string(local.dir.join("a.txt")).unwrap(), "uncommitted\n");
@@ -3469,7 +3598,7 @@ mod tests {
     fn update_project_needs_an_upstream() {
         let t = TempRepo::new("update-no-upstream");
         t.commit("a.txt", "a\n", "Base");
-        let err = t.repo.update_project(false).unwrap_err();
+        let err = t.repo.update_project(UpdateMethod::Merge).unwrap_err();
         assert!(format!("{err:#}").contains("no tracked remote branch"));
     }
 

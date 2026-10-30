@@ -1,4 +1,5 @@
-//! JetBrains' "Update Project" dialog: merge or rebase the incoming changes.
+//! JetBrains' "Update Project" dialog: merge or rebase the incoming
+//! changes, or only fast-forward.
 
 use gpui_kit::component::{
     ActiveTheme as _, Sizable as _, WindowExt as _,
@@ -7,6 +8,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::*;
 
+use crate::git::UpdateMethod;
 use crate::model::RepoModel;
 use crate::settings::Settings;
 use crate::i18n::tr;
@@ -14,39 +16,39 @@ use crate::i18n::tr;
 pub fn open(model: Entity<RepoModel>, window: &mut Window, cx: &mut App) {
     let view = cx.new(|_| UpdateDialog {
         model,
-        rebase: Settings::get().update_rebase,
+        method: Settings::get().update_method,
     });
     window.open_dialog(cx, move |dialog, _, _| dialog.title(tr!("Update Project")).w(px(440.)).child(view.clone()));
 }
 
 struct UpdateDialog {
     model: Entity<RepoModel>,
-    rebase: bool,
+    method: UpdateMethod,
 }
 
 impl UpdateDialog {
     fn update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let rebase = self.rebase;
-        Settings::update(|settings| settings.update_rebase = rebase);
+        let method = self.method;
+        Settings::update(|settings| settings.update_method = method);
         window.close_dialog(cx);
         self.model.update(cx, |model, cx| {
-            model.run(tr!("Update Project"), move |repo| repo.update_project(rebase), cx)
+            model.run(tr!("Update Project"), move |repo| repo.update_project(method), cx)
         });
     }
 
-    fn option(&self, id: &'static str, rebase: bool, title: &'static str, detail: &'static str, cx: &mut Context<Self>) -> impl IntoElement {
-        let selected = self.rebase == rebase;
+    fn option(&self, method: UpdateMethod, cx: &mut Context<Self>) -> impl IntoElement {
+        let selected = self.method == method;
         v_flex()
-            .id(id)
+            .id(method.key())
             .p_2()
             .gap_0p5()
             .rounded(cx.theme().radius)
             .border_1()
             .border_color(if selected { cx.theme().primary } else { cx.theme().border })
-            .child(div().text_sm().child(title))
-            .child(div().text_xs().text_color(cx.theme().muted_foreground).child(detail))
+            .child(div().text_sm().child(method.label()))
+            .child(div().text_xs().text_color(cx.theme().muted_foreground).child(method.detail()))
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.rebase = rebase;
+                this.method = method;
                 cx.notify();
             }))
     }
@@ -63,8 +65,9 @@ impl Render for UpdateDialog {
                     .text_color(cx.theme().muted_foreground)
                     .child(tr!("Fetch and update {} from its tracked branch. Local changes are stashed and restored.", branch)),
             )
-            .child(self.option("update-merge", false, tr!("Merge incoming changes"), tr!("Creates a merge commit if both sides changed"), cx))
-            .child(self.option("update-rebase", true, tr!("Rebase onto incoming changes"), tr!("Replays your local commits on top, keeping history linear"), cx))
+            .child(self.option(UpdateMethod::Merge, cx))
+            .child(self.option(UpdateMethod::Rebase, cx))
+            .child(self.option(UpdateMethod::FastForwardOnly, cx))
             .child(
                 h_flex()
                     .justify_end()

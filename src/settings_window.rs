@@ -10,7 +10,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::*;
 
-use crate::git::git_version;
+use crate::git::{UpdateMethod, git_version};
 use crate::settings::{Settings, ThemeChoice};
 use crate::i18n::tr;
 
@@ -180,10 +180,9 @@ impl SettingsWindow {
                 SettingItem::new(
                     tr!("Update Project"),
                     choice(
-                        [("merge", tr!("Merge incoming changes")), ("rebase", tr!("Rebase onto incoming changes"))]
-                            .map(|(key, label)| (key.to_string(), label.to_string())),
-                        |s| if s.update_rebase { "rebase" } else { "merge" }.to_string(),
-                        |s, value| s.update_rebase = value == "rebase",
+                        UpdateMethod::ALL.map(|method| (method.key().to_string(), method.label().to_string())),
+                        |s| s.update_method.key().to_string(),
+                        |s, value| s.update_method = UpdateMethod::from_key(&value),
                     ),
                 )
                 .description(tr!("The default in the Update Project dialog.")),
