@@ -123,6 +123,7 @@ fn main() {
                         MenuItem::action(tr!("Update Project"), workspace::UpdateProject),
                         MenuItem::action(tr!("Fetch"), workspace::FetchRemotes),
                         MenuItem::action(tr!("Fetch All Repositories"), repo_window::FetchAllRepositories),
+                        MenuItem::action(tr!("Update All Repositories"), repo_window::UpdateAllRepositories),
                         MenuItem::action(tr!("Apply Patch…"), workspace::ApplyPatch),
                         MenuItem::action(tr!("Manage Worktrees…"), workspace::ManageWorktrees),
                         MenuItem::action(tr!("Submodules…"), workspace::ShowSubmodules),

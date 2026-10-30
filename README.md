@@ -128,7 +128,8 @@ the way git branches grow apart and merge back.
 - Repositories open as tabs of the current window (or in windows of their own, in Settings); each tab shows its
   branch and how many files changed. **Window › Next / Previous Repository** (<kbd>⇧</kbd> <kbd>⌘</kbd> <kbd>]</kbd> /
   <kbd>⇧</kbd> <kbd>⌘</kbd> <kbd>[</kbd>) switch between them, <kbd>⌘</kbd> <kbd>W</kbd> closes one, and
-  **Git › Fetch All Repositories** fetches them all.
+  **Git › Fetch All Repositories** and **Update All Repositories** act on them all. Drag a tab to reorder it; its
+  menu closes the others, moves it to a window of its own, or copies or reveals its path.
 - The tabs open last time come back when Banyan starts.
 
 ### And more

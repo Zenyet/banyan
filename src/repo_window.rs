@@ -9,7 +9,9 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     ActiveTheme as _, Icon, Sizable as _,
     button::{Button, ButtonVariants as _},
-    h_flex, v_flex,
+    h_flex,
+    menu::{ContextMenuExt as _, PopupMenuItem},
+    v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -20,7 +22,29 @@ use crate::model::RepoModel;
 use crate::settings::Settings;
 use crate::workspace::Workspace;
 
-actions!(repo_window, [NextRepository, PreviousRepository, FetchAllRepositories]);
+actions!(repo_window, [NextRepository, PreviousRepository, FetchAllRepositories, UpdateAllRepositories]);
+
+/// A tab being dragged to another place in the tab bar.
+#[derive(Clone)]
+struct DraggedTab {
+    ix: usize,
+    name: SharedString,
+}
+
+impl Render for DraggedTab {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_3()
+            .py_1()
+            .rounded(px(4.))
+            .text_sm()
+            .bg(cx.theme().background)
+            .border_1()
+            .border_color(cx.theme().border)
+            .shadow_md()
+            .child(self.name.clone())
+    }
+}
 
 thread_local! {
     /// Every open repository window, oldest first.
@@ -50,6 +74,11 @@ pub fn open(repo: Repo, cx: &mut App) {
 
 /// Open several repositories as tabs of one window, the first one shown.
 pub fn open_all(repos: Vec<Repo>, cx: &mut App) {
+    open_in(repos, false, cx)
+}
+
+/// Like [`open_all`]; `new_window` opens a window whatever the settings say.
+fn open_in(repos: Vec<Repo>, new_window: bool, cx: &mut App) {
     let Some(first) = repos.first() else { return };
     let active = cx.active_window();
     // Whoever asked may be updating that very window; act once it's done.
@@ -58,14 +87,14 @@ pub fn open_all(repos: Vec<Repo>, cx: &mut App) {
     cx.spawn(async move |cx| cx.update(move |cx| {
         let mut repos = repos;
         // Already open somewhere: show it there.
-        if repos.len() == 1 && show_existing(&first_root, cx) {
+        if repos.len() == 1 && !new_window && show_existing(&first_root, cx) {
             return;
         }
         for repo in &repos {
             Settings::add_recent(repo.root().to_path_buf());
         }
         let windows = live_windows();
-        let target = if Settings::read(|s| s.open_in_new_window) {
+        let target = if new_window || Settings::read(|s| s.open_in_new_window) {
             None
         } else {
             windows
@@ -209,8 +238,59 @@ impl RepoWindow {
 
     fn fetch_all(&mut self, cx: &mut Context<Self>) {
         for ix in 0..self.tabs.len() {
-            self.model(ix, cx).update(cx, |m, cx| m.run(tr!("Fetch"), |repo| repo.fetch(), cx));
+            self.model(ix, cx).update(cx, |m, cx| {
+                let label = tr!("Fetch {}", m.repo.name());
+                m.run(label, |repo| repo.fetch(), cx)
+            });
         }
+    }
+
+    /// Update Project in every tab whose branch tracks a remote one, the way
+    /// Settings say to bring changes in.
+    fn update_all(&mut self, cx: &mut Context<Self>) {
+        let method = Settings::read(|s| s.update_method);
+        for ix in 0..self.tabs.len() {
+            let model = self.model(ix, cx);
+            let tracks = model.read(cx).branches.iter().any(|b| b.is_head && b.upstream.is_some());
+            if !tracks {
+                continue;
+            }
+            model.update(cx, |m, cx| {
+                let label = tr!("Update {}", m.repo.name());
+                m.run(label, move |repo| repo.update_project(method), cx)
+            });
+        }
+    }
+
+    fn close_others(&mut self, keep: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(kept) = self.tabs.get(keep).cloned() {
+            self.tabs = vec![kept];
+            self.activate(0, window, cx);
+        }
+    }
+
+    /// Move tab `ix` to a window of its own.
+    fn move_to_new_window(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if self.tabs.len() < 2 {
+            return;
+        }
+        let root = self.model(ix, cx).read(cx).repo.root().to_path_buf();
+        self.close(ix, window, cx);
+        if let Ok(repo) = Repo::open(&root) {
+            open_in(vec![repo], true, cx);
+        }
+    }
+
+    /// Put the tab at `from` where `to` is.
+    fn move_tab(&mut self, from: usize, to: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if from == to || from >= self.tabs.len() || to >= self.tabs.len() {
+            return;
+        }
+        let active = self.tabs[self.active].clone();
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(to, tab);
+        let ix = self.tabs.iter().position(|t| *t == active).unwrap_or(0);
+        self.activate(ix, window, cx);
     }
 
     /// The window's repositories, to open again at the next launch.
@@ -233,8 +313,14 @@ impl RepoWindow {
         let active = ix == self.active;
         let muted = cx.theme().muted_foreground;
         let changes = model.status.len();
+        let name: SharedString = model.repo.name().into();
+        let root = model.repo.root().to_path_buf();
+        let view = cx.entity().downgrade();
         h_flex()
             .id(("repo-tab", ix))
+            .on_drag(DraggedTab { ix, name: name.clone() }, |tab, _, _, cx| cx.new(|_| tab.clone()))
+            .drag_over::<DraggedTab>(|style, _, _, cx| style.bg(cx.theme().drop_target))
+            .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| this.move_tab(dragged.ix, ix, window, cx)))
             .flex_none()
             .h_full()
             .pl_3()
@@ -246,7 +332,7 @@ impl RepoWindow {
             .when(active, |tab| tab.bg(cx.theme().background))
             .when(!active, |tab| tab.text_color(muted).hover(|style| style.bg(cx.theme().list_hover)))
             .child(Icon::new(IconName::FolderGit2).xsmall())
-            .child(model.repo.name())
+            .child(name)
             .when_some(model.current_branch.clone(), |tab, branch| {
                 tab.child(div().text_xs().text_color(muted).child(branch))
             })
@@ -266,6 +352,26 @@ impl RepoWindow {
                     })),
             )
             .on_click(cx.listener(move |this, _, window, cx| this.activate(ix, window, cx)))
+            .context_menu(move |menu, _, _| {
+                let (close, others, separate) = (view.clone(), view.clone(), view.clone());
+                let (copy, reveal) = (root.clone(), root.clone());
+                menu.item(PopupMenuItem::new(tr!("Close Repository")).on_click(move |_, window, cx| {
+                    close.update(cx, |this, cx| this.close(ix, window, cx)).ok();
+                }))
+                .item(PopupMenuItem::new(tr!("Close Other Repositories")).on_click(move |_, window, cx| {
+                    others.update(cx, |this, cx| this.close_others(ix, window, cx)).ok();
+                }))
+                .item(PopupMenuItem::new(tr!("Open in New Window")).on_click(move |_, window, cx| {
+                    separate.update(cx, |this, cx| this.move_to_new_window(ix, window, cx)).ok();
+                }))
+                .separator()
+                .item(PopupMenuItem::new(tr!("Copy Path")).on_click(move |_, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(copy.display().to_string()))
+                }))
+                .item(PopupMenuItem::new(crate::changes_view::reveal_label()).on_click(move |_, _, cx| {
+                    cx.reveal_path(&reveal)
+                }))
+            })
     }
 }
 
@@ -284,6 +390,7 @@ impl Render for RepoWindow {
             .on_action(cx.listener(|this, _: &NextRepository, window, cx| this.step(1, window, cx)))
             .on_action(cx.listener(|this, _: &PreviousRepository, window, cx| this.step(-1, window, cx)))
             .on_action(cx.listener(|this, _: &FetchAllRepositories, _, cx| this.fetch_all(cx)))
+            .on_action(cx.listener(|this, _: &UpdateAllRepositories, _, cx| this.update_all(cx)))
             .when(show_tabs, |col| {
                 col.child(
                     h_flex()

@@ -1075,7 +1075,7 @@ impl Render for ChangesView {
 }
 
 /// The file manager's name for showing a file in its folder.
-fn reveal_label() -> &'static str {
+pub fn reveal_label() -> &'static str {
     if cfg!(target_os = "macos") {
         tr!("Reveal in Finder")
     } else if cfg!(windows) {

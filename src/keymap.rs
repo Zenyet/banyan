@@ -65,6 +65,7 @@ pub fn commands() -> Vec<Command> {
         command("next_repo", tr!("Next Repository"), "secondary-shift-]", rw, || Box::new(repo_window::NextRepository)),
         command("previous_repo", tr!("Previous Repository"), "secondary-shift-[", rw, || Box::new(repo_window::PreviousRepository)),
         command("fetch_all", tr!("Fetch All Repositories"), "", rw, || Box::new(repo_window::FetchAllRepositories)),
+        command("update_all", tr!("Update All Repositories"), "", rw, || Box::new(repo_window::UpdateAllRepositories)),
         command("open", tr!("Open Repository…"), "secondary-o", None, || Box::new(crate::OpenRepository)),
         command("settings", tr!("Settings…"), "secondary-,", None, || Box::new(crate::OpenSettings)),
         command("close_window", tr!("Close Window"), "secondary-w", None, || Box::new(crate::CloseWindow)),
