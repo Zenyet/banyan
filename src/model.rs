@@ -8,7 +8,7 @@ use anyhow::Result;
 use gpui_kit::*;
 
 use crate::changelists::Changelists;
-use crate::git::{Branch, Operation, RefKind, Repo, RepoState, Shelf, StatusEntry, Stash};
+use crate::git::{Branch, Operation, RefKind, Repo, RepoState, Shelf, StatusEntry, Stash, WebRemote};
 use crate::settings::Settings;
 use crate::watcher::RepoWatcher;
 use crate::i18n::tr;
@@ -42,6 +42,8 @@ pub struct RepoModel {
     /// Local changes sorted into named lists, kept in the git directory.
     pub changelists: Changelists,
     pub shelves: Vec<Shelf>,
+    /// Where the repository's commits and files can be seen on the web.
+    pub web: Option<WebRemote>,
     /// Label of the operation that is running, if any.
     pub busy: Option<SharedString>,
     /// Bumped whenever HEAD or any ref moves, so views know to reload the log.
@@ -70,6 +72,7 @@ struct Snapshot {
     status: Vec<StatusEntry>,
     stashes: Vec<Stash>,
     shelves: Vec<Shelf>,
+    web: Option<WebRemote>,
     /// Reading the status took long enough that the index's cached file
     /// times are worth refreshing.
     slow_status: bool,
@@ -88,6 +91,7 @@ impl RepoModel {
             stashes: Vec::new(),
             changelists,
             shelves: Vec::new(),
+            web: None,
             busy: None,
             refs_version: 0,
             refs_key: None,
@@ -226,6 +230,7 @@ impl RepoModel {
                         slow_status,
                         stashes: repo.stashes().unwrap_or_default(),
                         shelves: repo.shelves(),
+                        web: repo.web_remote(),
                     }
                 })
                 .await;
@@ -253,6 +258,7 @@ impl RepoModel {
                 this.status = snapshot.status;
                 this.stashes = snapshot.stashes;
                 this.shelves = snapshot.shelves;
+                this.web = snapshot.web;
                 if snapshot.slow_status {
                     this.refresh_index(cx);
                 }

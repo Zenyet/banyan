@@ -899,7 +899,7 @@ impl LogView {
                                 return menu;
                             };
                             match view.upgrade() {
-                                Some(view) => view.read(cx).commit_list_menu(menu, target),
+                                Some(view) => view.read(cx).commit_list_menu(menu, target, cx),
                                 None => menu,
                             }
                         }
@@ -1032,7 +1032,7 @@ impl LogView {
 
     /// The menu for the commit last right-clicked, or for the selection it
     /// belongs to. One menu serves the whole list.
-    fn commit_list_menu(&self, menu: PopupMenu, id: String) -> PopupMenu {
+    fn commit_list_menu(&self, menu: PopupMenu, id: String, cx: &App) -> PopupMenu {
         let selection = self.selection_for_menu(&id);
         if !selection.is_empty() {
             return commits_menu(menu, &self.model, selection);
@@ -1040,12 +1040,14 @@ impl LogView {
         let commit = self.commits.iter().find(|c| c.id == id);
         let subject = commit.map(|c| c.subject.clone()).unwrap_or_default();
         let is_head = commit.is_some_and(|c| c.refs.iter().any(|r| r.kind == crate::git::RefKind::Head));
-        commit_menu(menu, &self.model, id, subject, is_head)
+        let web = self.model.read(cx).web.clone();
+        commit_menu(menu, &self.model, id, subject, is_head, web)
     }
 
     fn render_details(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let files = self.files.clone();
         let menu_files = self.files.clone();
+        let web = self.model.read(cx).web.clone();
         let view = cx.entity().downgrade();
         let model = self.model.clone();
         let rev = self.details.as_ref().map(|d| d.id.clone());
@@ -1163,6 +1165,17 @@ impl LogView {
                 if change.status == 'D' {
                     return menu;
                 }
+                let menu = match &web {
+                    Some(web) => {
+                        let url = web.file_url(&rev, &path, None);
+                        let open = url.clone();
+                        menu.item(PopupMenuItem::new(tr!("Open on {}", web.name())).on_click(move |_, _, cx| cx.open_url(&open)))
+                            .item(PopupMenuItem::new(tr!("Copy Link to File")).on_click(move |_, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(url.clone()))
+                            }))
+                    }
+                    None => menu,
+                };
                 let m = model.clone();
                 menu.item(PopupMenuItem::new(tr!("Annotate at This Revision")).on_click(move |_, window, cx| {
                     crate::history::annotate(m.clone(), rev.clone(), path.clone(), window, cx)

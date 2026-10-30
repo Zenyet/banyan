@@ -54,6 +54,114 @@ pub struct LogFilter {
     pub paths: Vec<String>,
 }
 
+/// The web page of a remote repository, for links to its commits and files.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WebRemote {
+    pub kind: HostKind,
+    /// e.g. `https://github.com/owner/repo`.
+    pub base: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostKind {
+    GitHub,
+    GitLab,
+    Bitbucket,
+    /// Gitea, Forgejo and Codeberg.
+    Gitea,
+    /// Anything else, linked to the way GitHub lays out its pages.
+    Other,
+}
+
+impl WebRemote {
+    /// From a remote's URL in any of git's forms: `git@host:owner/repo.git`,
+    /// `ssh://git@host:22/owner/repo`, `https://user@host/owner/repo.git`.
+    pub fn parse(url: &str) -> Option<Self> {
+        let url = url.trim();
+        let (host, path) = if let Some((_, rest)) = url.split_once("://") {
+            let (authority, path) = rest.split_once('/')?;
+            let host = authority.rsplit('@').next()?;
+            // A port only means something for ssh; the web page is on the default one.
+            let host = if url.starts_with("http") { host } else { host.split(':').next()? };
+            (host.to_string(), path.to_string())
+        } else {
+            // scp-like syntax; a local path has no host.
+            let (authority, path) = url.split_once(':')?;
+            if authority.contains('/') || authority.len() < 2 {
+                return None;
+            }
+            (authority.rsplit('@').next()?.to_string(), path.to_string())
+        };
+        let path = path.trim_matches('/').trim_end_matches(".git").trim_end_matches('/');
+        if host.is_empty() || path.is_empty() {
+            return None;
+        }
+        let lower = host.to_lowercase();
+        let kind = if lower.contains("github") {
+            HostKind::GitHub
+        } else if lower.contains("gitlab") {
+            HostKind::GitLab
+        } else if lower.contains("bitbucket") {
+            HostKind::Bitbucket
+        } else if lower.contains("gitea") || lower.contains("forgejo") || lower.contains("codeberg") {
+            HostKind::Gitea
+        } else {
+            HostKind::Other
+        };
+        let scheme = if url.starts_with("http://") { "http" } else { "https" };
+        Some(Self { kind, base: format!("{scheme}://{host}/{path}") })
+    }
+
+    /// "GitHub", or the host for an unknown kind.
+    pub fn name(&self) -> String {
+        match self.kind {
+            HostKind::GitHub => "GitHub".into(),
+            HostKind::GitLab => "GitLab".into(),
+            HostKind::Bitbucket => "Bitbucket".into(),
+            HostKind::Gitea | HostKind::Other => {
+                self.base.split("://").nth(1).and_then(|rest| rest.split('/').next()).unwrap_or_default().to_string()
+            }
+        }
+    }
+
+    pub fn commit_url(&self, id: &str) -> String {
+        match self.kind {
+            HostKind::GitLab => format!("{}/-/commit/{id}", self.base),
+            HostKind::Bitbucket => format!("{}/commits/{id}", self.base),
+            HostKind::GitHub | HostKind::Gitea | HostKind::Other => format!("{}/commit/{id}", self.base),
+        }
+    }
+
+    /// A file as of `rev`, at `line` (from 1) when given.
+    pub fn file_url(&self, rev: &str, path: &str, line: Option<usize>) -> String {
+        let path: String = path.split('/').map(percent_encode_segment).collect::<Vec<_>>().join("/");
+        let url = match self.kind {
+            HostKind::GitLab => format!("{}/-/blob/{rev}/{path}", self.base),
+            HostKind::Bitbucket => format!("{}/src/{rev}/{path}", self.base),
+            HostKind::Gitea => format!("{}/src/commit/{rev}/{path}", self.base),
+            HostKind::GitHub | HostKind::Other => format!("{}/blob/{rev}/{path}", self.base),
+        };
+        match (line, self.kind) {
+            (Some(line), HostKind::Bitbucket) => format!("{url}#lines-{line}"),
+            (Some(line), _) => format!("{url}#L{line}"),
+            (None, _) => url,
+        }
+    }
+}
+
+/// A path segment with the characters a URL can't hold escaped.
+fn percent_encode_segment(segment: &str) -> String {
+    let mut out = String::new();
+    for byte in segment.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
 /// How Update Project brings in the tracked branch.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum UpdateMethod {
@@ -750,6 +858,22 @@ impl Repo {
         revs.extend(options.iter().map(String::as_str));
         let paths: Vec<&str> = filter.paths.iter().map(String::as_str).collect();
         self.log_paths(&revs, &paths, limit)
+    }
+
+    /// The web page of the remote the current branch tracks, else `origin`,
+    /// else the first remote.
+    pub fn web_remote(&self) -> Option<WebRemote> {
+        let tracked = self
+            .current_branch()
+            .and_then(|branch| self.git(&["config", "--get", &format!("branch.{branch}.remote")]).ok())
+            .map(|name| name.trim().to_string());
+        let names = self.git(&["remote"]).ok()?;
+        let names: Vec<&str> = names.lines().collect();
+        let name = tracked
+            .filter(|t| names.contains(&t.as_str()))
+            .or_else(|| names.iter().find(|n| **n == "origin").map(|n| n.to_string()))
+            .or_else(|| names.first().map(|n| n.to_string()))?;
+        WebRemote::parse(&self.git(&["remote", "get-url", &name]).ok()?)
     }
 
     /// The configured `user.name`, which "Me" in the log's user filter stands for.
@@ -3370,6 +3494,32 @@ mod tests {
         let since = |since: &str| LogFilter { since: Some(since.into()), ..Default::default() };
         assert_eq!(t.repo.log(&since("1.day.ago"), 10).unwrap().len(), 3);
         assert!(t.repo.log(&since("2099-01-01"), 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn links_to_commits_and_files_on_the_web() {
+        let base = |url: &str| WebRemote::parse(url).map(|w| w.base);
+        assert_eq!(base("git@github.com:Zenyet/banyan.git").as_deref(), Some("https://github.com/Zenyet/banyan"));
+        assert_eq!(base("https://user@gitlab.com/group/sub/repo.git").as_deref(), Some("https://gitlab.com/group/sub/repo"));
+        assert_eq!(base("ssh://git@git.example.com:2222/team/repo").as_deref(), Some("https://git.example.com/team/repo"));
+        assert_eq!(base("http://localhost:3000/me/repo.git").as_deref(), Some("http://localhost:3000/me/repo"));
+        assert_eq!(base("/srv/git/repo.git"), None);
+        assert_eq!(base("../other"), None);
+
+        let github = WebRemote::parse("git@github.com:o/r.git").unwrap();
+        assert_eq!(github.commit_url("abc"), "https://github.com/o/r/commit/abc");
+        assert_eq!(github.file_url("abc", "src/a b.rs", Some(7)), "https://github.com/o/r/blob/abc/src/a%20b.rs#L7");
+        let gitlab = WebRemote::parse("git@gitlab.com:o/r.git").unwrap();
+        assert_eq!(gitlab.commit_url("abc"), "https://gitlab.com/o/r/-/commit/abc");
+        let bitbucket = WebRemote::parse("git@bitbucket.org:o/r.git").unwrap();
+        assert_eq!(bitbucket.file_url("abc", "a.rs", Some(3)), "https://bitbucket.org/o/r/src/abc/a.rs#lines-3");
+        assert_eq!(WebRemote::parse("https://codeberg.org/o/r").unwrap().name(), "codeberg.org");
+
+        let t = TempRepo::new("web-remote");
+        assert_eq!(t.repo.web_remote(), None);
+        t.repo.git(&["remote", "add", "upstream", "git@gitlab.com:x/y.git"]).unwrap();
+        t.repo.git(&["remote", "add", "origin", "git@github.com:o/r.git"]).unwrap();
+        assert_eq!(t.repo.web_remote().unwrap().base, "https://github.com/o/r");
     }
 
     #[test]

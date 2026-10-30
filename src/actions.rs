@@ -4,7 +4,7 @@
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::*;
 
-use crate::git::{Branch, RefKind, ResetMode};
+use crate::git::{Branch, RefKind, ResetMode, WebRemote};
 use crate::model::RepoModel;
 use crate::ui::{confirm, prompt_text};
 use crate::i18n::tr;
@@ -195,7 +195,15 @@ pub fn branch_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, branch: &Bran
 }
 
 /// The menu for one commit; `is_head` adds Undo Commit.
-pub fn commit_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, id: String, subject: String, is_head: bool) -> PopupMenu {
+/// `web` is where the commit can be opened, when the repository has a remote on the web.
+pub fn commit_menu(
+    mut menu: PopupMenu,
+    model: &Entity<RepoModel>,
+    id: String,
+    subject: String,
+    is_head: bool,
+    web: Option<WebRemote>,
+) -> PopupMenu {
     let short_id = short(&id).to_string();
     let copy_id = id.clone();
     menu = menu.item(PopupMenuItem::new(tr!("Copy Revision Number")).on_click(move |_, _, cx| {
@@ -205,6 +213,15 @@ pub fn commit_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, id: String, s
     menu = menu.item(PopupMenuItem::new(tr!("Copy Commit Subject")).on_click(move |_, _, cx| {
         cx.write_to_clipboard(ClipboardItem::new_string(copy_subject.clone()))
     }));
+    if let Some(web) = web {
+        let url = web.commit_url(&id);
+        let open = url.clone();
+        menu = menu
+            .item(PopupMenuItem::new(tr!("Open on {}", web.name())).on_click(move |_, _, cx| cx.open_url(&open)))
+            .item(PopupMenuItem::new(tr!("Copy Link to Commit")).on_click(move |_, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(url.clone()))
+            }));
+    }
     menu = menu.separator();
 
     let i = id.clone();
