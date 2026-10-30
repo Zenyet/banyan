@@ -67,6 +67,9 @@ pub struct Settings {
     pub recent: Vec<PathBuf>,
     /// Commit messages, newest first.
     pub messages: Vec<String>,
+    /// Shortcuts changed from the defaults: command id and keys, empty for
+    /// none; see `keymap`.
+    pub shortcuts: Vec<(String, String)>,
 }
 
 impl Default for Settings {
@@ -85,6 +88,7 @@ impl Default for Settings {
             protected_branches: "main master".into(),
             recent: Vec::new(),
             messages: Vec::new(),
+            shortcuts: Vec::new(),
         }
     }
 }
@@ -217,6 +221,10 @@ impl Settings {
                 "protected" => settings.protected_branches = value.to_string(),
                 "recent" => settings.recent.push(PathBuf::from(value)),
                 "message" => settings.messages.push(unescape(value)),
+                "shortcut" => {
+                    let (id, keys) = value.split_once(' ').unwrap_or((value, ""));
+                    settings.shortcuts.push((id.to_string(), keys.trim().to_string()));
+                }
                 _ => {}
             }
         }
@@ -243,6 +251,9 @@ impl Settings {
         }
         for message in &self.messages {
             text.push_str(&format!("message={}\n", escape(message)));
+        }
+        for (id, keys) in &self.shortcuts {
+            text.push_str(&format!("shortcut={id} {keys}\n"));
         }
         text
     }
@@ -317,6 +328,7 @@ mod tests {
             protected_branches: "main release/*".into(),
             recent: vec!["/tmp/repo".into()],
             messages: vec!["Fix\n\nDetails".into()],
+            shortcuts: vec![("push".into(), "secondary-alt-p".into()), ("fetch".into(), String::new())],
         };
         assert_eq!(Settings::parse(&settings.to_text()), settings);
         // Files written before the Settings dialog existed.

@@ -185,10 +185,12 @@ a Git repository yet can be made one. Recent repositories are also listed in the
 
 ### Keyboard shortcuts
 
-On Linux and Windows, use <kbd>Ctrl</kbd> where these show <kbd>⌘</kbd>.
+On Linux and Windows, use <kbd>Ctrl</kbd> where these show <kbd>⌘</kbd>. Commands can be given other shortcuts
+in **Settings › Keyboard Shortcuts**, and **Find Action** runs any of them by name.
 
 | Shortcut | Action |
 | --- | --- |
+| <kbd>⇧</kbd> <kbd>⌘</kbd> <kbd>A</kbd> | Find Action |
 | <kbd>⌘</kbd> <kbd>K</kbd> | Commit (<kbd>⌘</kbd> <kbd>↩</kbd> in the message box) |
 | <kbd>⇧</kbd> <kbd>⌘</kbd> <kbd>K</kbd> | Push |
 | <kbd>⌘</kbd> <kbd>T</kbd> | Update Project |

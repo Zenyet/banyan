@@ -27,22 +27,11 @@ use crate::i18n::tr;
 
 actions!(
     workspace,
-    [CommitChanges, PushCommits, UpdateProject, ApplyPatch, ManageWorktrees, ShowSubmodules, FindInLog, GoToRevision, ShowLog, ShowCommitTab, ShowConsole, RefreshRepository]
+    [
+        CommitChanges, PushCommits, UpdateProject, FetchRemotes, ApplyPatch, ManageWorktrees, ShowSubmodules, FindInLog,
+        GoToRevision, ShowLog, ShowCommitTab, ShowConsole, RefreshRepository, FindAction
+    ]
 );
-
-/// JetBrains' macOS keymap where it has an equivalent.
-pub fn init(cx: &mut App) {
-    cx.bind_keys([
-        KeyBinding::new(secondary!("k"), CommitChanges, Some("Workspace")),
-        KeyBinding::new(secondary!("shift-k"), PushCommits, Some("Workspace")),
-        KeyBinding::new(secondary!("t"), UpdateProject, Some("Workspace")),
-        KeyBinding::new(secondary!("9"), ShowLog, Some("Workspace")),
-        KeyBinding::new(secondary!("0"), ShowCommitTab, Some("Workspace")),
-        KeyBinding::new(secondary!("r"), RefreshRepository, Some("Workspace")),
-        KeyBinding::new(secondary!("f"), FindInLog, Some("Workspace")),
-        KeyBinding::new(secondary!("g"), GoToRevision, Some("Workspace")),
-    ]);
-}
 
 /// The height of a small underlined `TabBar`.
 const TAB_BAR_HEIGHT: Pixels = px(30.);
@@ -523,6 +512,11 @@ impl Render for Workspace {
                     cx,
                 );
             }))
+            .on_action(cx.listener(|this, _: &FindAction, window, cx| {
+                let focus = this.focus.clone();
+                crate::palette::open(focus, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &FetchRemotes, _, cx| this.run(tr!("Fetch"), |repo| repo.fetch(), cx)))
             .on_action(cx.listener(|this, _: &ShowLog, _, cx| this.set_tab(0, cx)))
             .on_action(cx.listener(|this, _: &ShowCommitTab, _, cx| this.set_tab(1, cx)))
             .on_action(cx.listener(|this, _: &ShowConsole, _, cx| this.set_tab(3, cx)))

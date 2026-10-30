@@ -27,10 +27,12 @@ mod git;
 mod graph;
 mod history;
 mod i18n;
+mod keymap;
 mod log_view;
 mod merge_dialog;
 mod merge_tool;
 mod model;
+mod palette;
 mod patch;
 mod push_dialog;
 mod rebase_dialog;
@@ -78,7 +80,6 @@ fn main() {
         .run(move |cx| {
             gpui_kit::init(cx);
             log_view::init(cx);
-            workspace::init(cx);
             merge_tool::init(cx);
             match askpass::start_server() {
                 Ok(requests) => askpass::spawn_prompt_loop(requests, cx),
@@ -99,12 +100,7 @@ fn main() {
             });
             cx.on_action(|_: &OpenRepository, cx| prompt_open_repo(None, cx));
             cx.on_action(|_: &OpenSettings, cx| settings_window::open(cx));
-            cx.bind_keys([
-                KeyBinding::new(secondary!("q"), Quit, None),
-                KeyBinding::new(secondary!("o"), OpenRepository, None),
-                KeyBinding::new(secondary!("w"), CloseWindow, None),
-                KeyBinding::new(secondary!(","), OpenSettings, None),
-            ]);
+            keymap::apply(cx);
             cx.set_menus(vec![
                 Menu {
                     name: tr!("Banyan").into(),
@@ -118,9 +114,12 @@ fn main() {
                 Menu {
                     name: tr!("Git").into(),
                     items: vec![
+                        MenuItem::action(tr!("Find Action…"), workspace::FindAction),
+                        MenuItem::separator(),
                         MenuItem::action(tr!("Commit…"), workspace::CommitChanges),
                         MenuItem::action(tr!("Push…"), workspace::PushCommits),
                         MenuItem::action(tr!("Update Project"), workspace::UpdateProject),
+                        MenuItem::action(tr!("Fetch"), workspace::FetchRemotes),
                         MenuItem::action(tr!("Apply Patch…"), workspace::ApplyPatch),
                         MenuItem::action(tr!("Manage Worktrees…"), workspace::ManageWorktrees),
                         MenuItem::action(tr!("Submodules…"), workspace::ShowSubmodules),

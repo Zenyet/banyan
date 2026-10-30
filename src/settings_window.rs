@@ -216,33 +216,20 @@ impl SettingsWindow {
     }
 
     fn keymap_page() -> SettingPage {
+        let commands = crate::keymap::commands();
         SettingPage::new(tr!("Keyboard Shortcuts")).icon(IconName::Keyboard).groups([
-            SettingGroup::new().title(tr!("General")).items([
-                shortcut_item(tr!("Open Repository…"), &["secondary-o"]),
-                shortcut_item(tr!("Settings…"), &["secondary-,"]),
-                shortcut_item(tr!("Close Window"), &["secondary-w"]),
-                shortcut_item(tr!("Quit Banyan"), &["secondary-q"]),
-                shortcut_item(tr!("Refresh"), &["secondary-r"]),
-            ]),
-            SettingGroup::new().title(tr!("Git")).items([
-                shortcut_item(tr!("Commit…"), &["secondary-k"]),
+            SettingGroup::new()
+                .title(tr!("Commands"))
+                .description(tr!("Type keys such as cmd-shift-k (ctrl-shift-k on Windows and Linux), or leave empty for none."))
+                .items(commands.into_iter().map(command_item)),
+            SettingGroup::new().title(tr!("Fixed")).items([
                 shortcut_item(tr!("Commit from the message box"), &["secondary-enter"]),
-                shortcut_item(tr!("Push…"), &["secondary-shift-k"]),
-                shortcut_item(tr!("Update Project"), &["secondary-t"]),
-                shortcut_item(tr!("Show Log"), &["secondary-9"]),
-                shortcut_item(tr!("Show Commit"), &["secondary-0"]),
-            ]),
-            SettingGroup::new().title(tr!("Log")).items([
-                shortcut_item(tr!("Search the Log"), &["secondary-f"]),
-                shortcut_item(tr!("Go to Hash, Branch or Tag"), &["secondary-g"]),
                 shortcut_item(tr!("From the search box to the commits"), &["enter"]),
                 shortcut_item(tr!("Previous / next commit"), &["up", "down"]),
                 shortcut_item(tr!("First / last commit"), &["home", "end"]),
                 shortcut_item(tr!("Page up / down"), &["pageup", "pagedown"]),
-            ]),
-            SettingGroup::new().title(tr!("Merge tool")).items([
-                shortcut_item(tr!("Undo a choice"), &["secondary-z"]),
-                shortcut_item(tr!("Redo a choice"), &["secondary-shift-z"]),
+                shortcut_item(tr!("Undo a choice in the merge tool"), &["secondary-z"]),
+                shortcut_item(tr!("Redo a choice in the merge tool"), &["secondary-shift-z"]),
             ]),
         ])
     }
@@ -313,6 +300,43 @@ fn shortcut(keys: &str) -> String {
         modifiers.push(&key);
         modifiers.join("+")
     }
+}
+
+/// A row whose shortcut can be changed, applied as soon as it's typed.
+fn command_item(command: crate::keymap::Command) -> SettingItem {
+    let id = command.id;
+    let default_keys = command.default_keys;
+    let default = match default_keys {
+        "" => tr!("none").to_string(),
+        keys => crate::keymap::display(keys),
+    };
+    // In the field, ⌘ or Ctrl by name rather than `secondary`.
+    let primary = if cfg!(target_os = "macos") { "cmd-" } else { "ctrl-" };
+    SettingItem::new(
+        command.label,
+        SettingField::input(
+            move |_| {
+                let keys = crate::keymap::commands().into_iter().find(|c| c.id == id).map(|c| c.keys()).unwrap_or_default();
+                keys.replace("secondary-", primary).into()
+            },
+            move |value: SharedString, cx| {
+                let value = value.trim().to_lowercase();
+                if !value.is_empty() && crate::keymap::platform_keys(&value).is_none() {
+                    return;
+                }
+                let is_default = crate::keymap::platform_keys(&value) == crate::keymap::platform_keys(default_keys);
+                Settings::update(|s| {
+                    s.shortcuts.retain(|(other, _)| *other != id);
+                    if !is_default {
+                        s.shortcuts.push((id.to_string(), value.clone()));
+                    }
+                });
+                crate::keymap::apply(cx);
+                cx.refresh_windows();
+            },
+        ),
+    )
+    .description(tr!("Default: {}", default))
 }
 
 /// A read-only row showing what `keys` do.
