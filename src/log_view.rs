@@ -1014,6 +1014,7 @@ impl LogView {
     fn render_details(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let files = self.files.clone();
         let menu_files = self.files.clone();
+        let view = cx.entity().downgrade();
         let model = self.model.clone();
         let rev = self.details.as_ref().map(|d| d.id.clone());
         let changed = self.details.as_ref().map(|d| d.files.len()).unwrap_or(0);
@@ -1057,6 +1058,15 @@ impl LogView {
                 let (m, p) = (model.clone(), path.clone());
                 let menu = menu.item(PopupMenuItem::new(tr!("Show History")).on_click(move |_, window, cx| {
                     crate::history::show_history(m.clone(), p.clone(), window, cx)
+                }));
+                let (v, p) = (view.clone(), path.clone());
+                let menu = menu.item(PopupMenuItem::new(tr!("Filter the Log by This File")).on_click(move |_, _, cx| {
+                    let path = p.clone();
+                    v.update(cx, |this, cx| {
+                        this.path_filter.clear();
+                        this.toggle_path_filter(path, cx);
+                    })
+                    .ok();
                 }));
                 let (m, p, r) = (model.clone(), path.clone(), rev.clone());
                 let menu = menu.item(PopupMenuItem::new(tr!("Compare with Local")).on_click(move |_, window, cx| {

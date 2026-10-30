@@ -259,6 +259,7 @@ pub const TABLE: &[(&str, &str)] = &[
     ("User: Me", "用户：我"),
     ("User: {} +{}", "用户：{} +{}"),
     ("Me ({})", "我（{}）"),
+    ("Filter the Log by This File", "按此文件筛选日志"),
     ("Date: {}", "日期：{}"),
     ("Date: All", "日期：全部"),
     ("Paths: {}", "路径：{}"),
