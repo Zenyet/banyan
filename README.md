@@ -34,7 +34,8 @@ the way git branches grow apart and merge back.
 
 ### Log
 
-- Branches tree (HEAD / Local / Remote / Tags) next to a commit graph with colored lanes and ref labels.
+- Branches tree (HEAD / Local / Remote / Tags) next to a commit graph with colored lanes and ref labels;
+  commits of the current branch are in bold. **Go to Hash, Branch or Tag** (<kbd>⌘</kbd> <kbd>G</kbd>) jumps to any commit.
 - Filter by text or hash, branch, date, any number of authors (with a "Me" shortcut), and files or folders; git does the filtering, so results reach past the commits loaded.
 - Commit details ("in N branches"), a changed-files tree, and a side-by-side or unified diff
   with syntax highlighting. **Ignore Whitespace** above any diff leaves out whitespace-only changes.
@@ -50,6 +51,7 @@ the way git branches grow apart and merge back.
   **Squash into Parent**, **Squash Commits** (several selected, also apart), **Drop Commit(s)** and, on the last
   commit, **Undo Commit**, which keeps its changes and puts its message back in the Commit tab. Local changes are
   stashed around the rebase, and rewriting commits that are already pushed asks first.
+- **Open on GitHub** (or GitLab, Bitbucket, Gitea) and **Copy Link** for commits and files.
 - Loads 5000 commits at a time (configurable), and more when you scroll to the end.
 
 ### Commit
@@ -58,7 +60,8 @@ the way git branches grow apart and merge back.
 
 - Changelist-style checkboxes for Changes, Unversioned Files and Merge Conflicts.
 - Commit whole files, single hunks, or individual lines.
-- Commit, amend, commit and push, rollback, and stash. Recent commit messages are remembered.
+- Commit, amend, commit and push, rollback, and stash. Recent commit messages are remembered, and a subject over
+  72 characters or a missing blank line before the body is pointed out.
 - **Stash Changes** can stash only the checked files, leave out unversioned files, or keep the index; a stash can
   be popped, applied, dropped, or unstashed onto a new branch.
 - Add to `.gitignore`, Copy Path, and Reveal in Finder for local changes.
@@ -92,15 +95,20 @@ the way git branches grow apart and merge back.
 
 ### Branches and history
 
-- Branch popup in the toolbar: checkout (with Smart Checkout when local changes are in the way),
+- Branch popup in the toolbar, with recently used branches and favorites (★) first: checkout (with Smart Checkout when local changes are in the way),
   new branch from, merge into current, rebase current onto, rename, and delete local, remote and tag refs.
   Any local branch can be pushed on its own, fast-forwarded to its upstream (**Update**) without checking
-  it out, or set to track another remote branch (**Set Upstream**).
+  it out, or set to track another remote branch (**Set Upstream**). **Compare with…** lists the commits two
+  branches don't share.
+- **Protected branches** (main and master by default) are never force pushed, nor are their pushed commits
+  rewritten.
+- **New Tag…** creates lightweight or annotated tags and can push them.
 - **Create Patch** from one or more commits, **Apply Patch** from a file (Git menu or the Commit tab), and
   **Get from Revision** to bring a file back to its version in any commit.
 - **Interactive rebase** from any commit: reorder, pick, reword, edit (stop to amend), squash, fixup, drop.
 - **Merge with Options…**: fast-forward only or never, squash, stop before committing, or your own message.
-- **File history** and **Annotate** (git blame shaded by age).
+- **File history** and **Annotate** (git blame shaded by age): click a line for its commit, step back with
+  **Annotate Previous Revision**, or open the line on the web.
 - **Compare with Current** for any branch, and a **stash viewer** showing each stash's files and diff.
 
 ### Remotes

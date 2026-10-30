@@ -65,6 +65,9 @@ pub struct LogView {
     model: Entity<RepoModel>,
     commits: Arc<Vec<Commit>>,
     graph: Arc<Vec<GraphRow>>,
+    /// Indices into `commits` of those on the current branch, drawn in bold
+    /// when other branches are shown too, as JetBrains highlights them.
+    on_head: Arc<HashSet<usize>>,
     /// Indices into `commits` that pass the text filter.
     rows: Rc<Vec<usize>>,
     selected: Option<String>,
@@ -162,6 +165,7 @@ impl LogView {
             model,
             commits: Arc::default(),
             graph: Arc::default(),
+            on_head: Arc::default(),
             rows: Rc::default(),
             selected: None,
             marked: HashSet::new(),
@@ -239,15 +243,17 @@ impl LogView {
                     let commits = repo.log(&filter, limit)?;
                     let graph = graph::layout(&commits);
                     let head = repo.git(&["rev-parse", "HEAD"]).ok().map(|s| s.trim().to_string());
-                    anyhow::Ok((commits, graph, head))
+                    let on_head = reachable_from(&commits, head.as_deref());
+                    anyhow::Ok((commits, graph, head, on_head))
                 })
                 .await;
             this.update(cx, |this, cx| {
                 this.loading = false;
                 match result {
-                    Ok((commits, graph, head)) => {
+                    Ok((commits, graph, head, on_head)) => {
                         this.commits = Arc::new(commits);
                         this.graph = Arc::new(graph);
+                        this.on_head = Arc::new(on_head);
                         this.head = head;
                         if this.author_filter.is_empty() {
                             this.known_authors = this.authors();
@@ -256,6 +262,7 @@ impl LogView {
                     Err(err) => {
                         this.commits = Arc::default();
                         this.graph = Arc::default();
+                        this.on_head = Arc::default();
                         this.report(err, cx);
                     }
                 }
@@ -1007,6 +1014,10 @@ impl LogView {
         let commit = &self.commits[ix];
         let selected = self.is_selected(&commit.id);
         let is_head = self.head.as_deref() == Some(commit.id.as_str());
+        // Only worth it when commits of other branches are listed too.
+        let bold = self.branch_filter.is_none()
+            && self.on_head.len() < self.commits.len()
+            && self.on_head.contains(&ix);
         let graph_row = self.graph.get(ix).cloned().unwrap_or_default();
         let graph_width = if show_graph {
             GRAPH_PADDING * 2. + LANE_WIDTH * graph_row.width as f32
@@ -1030,6 +1041,7 @@ impl LogView {
                 })
                 .collect(),
             subject: commit.subject.clone().into(),
+            bold,
             author: commit.author.clone().into(),
             time: format_time(commit.time).into(),
             fg,
@@ -1384,6 +1396,8 @@ struct RowPaint {
     /// Label, background and text color of each ref.
     refs: Vec<(SharedString, Hsla, Hsla)>,
     subject: SharedString,
+    /// The subject in bold: the commit is on the current branch.
+    bold: bool,
     author: SharedString,
     time: SharedString,
     fg: Hsla,
@@ -1438,12 +1452,13 @@ impl RowPaint {
             .ok();
             x += width + px(4.);
         }
+        let subject_font = if self.bold { Font { weight: FontWeight::SEMIBOLD, ..font.clone() } } else { font.clone() };
         let cells = [
-            (&self.subject, self.fg, x, author_left - CELL_PADDING),
-            (&self.author, self.secondary, author_left + CELL_PADDING, time_left),
-            (&self.time, self.secondary, time_left + CELL_PADDING, right),
+            (&self.subject, &subject_font, self.fg, x, author_left - CELL_PADDING),
+            (&self.author, &font, self.secondary, author_left + CELL_PADDING, time_left),
+            (&self.time, &font, self.secondary, time_left + CELL_PADDING, right),
         ];
-        for (text, color, left, right) in cells {
+        for (text, font, color, left, right) in cells {
             let width = right - left;
             if width <= px(0.) || text.is_empty() {
                 continue;
@@ -1457,6 +1472,19 @@ impl RowPaint {
             line.paint(point(left, text_top), line_height, TextAlign::Left, None, window, cx).ok();
         }
     }
+}
+
+/// Indices of `commits` that `head` reaches through the parents listed.
+fn reachable_from(commits: &[Commit], head: Option<&str>) -> HashSet<usize> {
+    let index: HashMap<&str, usize> = commits.iter().enumerate().map(|(ix, c)| (c.id.as_str(), ix)).collect();
+    let mut reached = HashSet::new();
+    let mut stack: Vec<usize> = head.and_then(|head| index.get(head).copied()).into_iter().collect();
+    while let Some(ix) = stack.pop() {
+        if reached.insert(ix) {
+            stack.extend(commits[ix].parents.iter().filter_map(|p| index.get(p.as_str()).copied()));
+        }
+    }
+    reached
 }
 
 fn shape(text: SharedString, font: &Font, font_size: Pixels, color: Hsla, window: &Window) -> ShapedLine {
