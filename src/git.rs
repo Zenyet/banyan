@@ -286,13 +286,21 @@ pub struct FileRevision {
     pub path: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct BlameLine {
     pub id: String,
     pub author: String,
     pub time: i64,
     pub summary: String,
     pub text: String,
+    /// The file's path in that commit, which a rename may have changed since.
+    pub path: String,
+    /// The line's number in that commit's version of the file, from 1.
+    pub orig_line: usize,
+    /// The commit before it that touched the file, and the file's path there:
+    /// what "Annotate Previous Revision" shows. `None` where the line was added
+    /// with the file.
+    pub previous: Option<(String, String)>,
 }
 
 /// Parse `--name-status -z` output.
@@ -1010,35 +1018,32 @@ impl Repo {
     /// Line-by-line blame of `path` at `rev`.
     pub fn blame(&self, rev: &str, path: &str) -> Result<Vec<BlameLine>> {
         let out = self.git(&["blame", "--porcelain", rev, "--", path])?;
-        let mut infos: std::collections::HashMap<String, (String, i64, String)> = Default::default();
+        // git describes each commit once, at its first line.
+        let mut infos: std::collections::HashMap<String, BlameLine> = Default::default();
         let mut lines = Vec::new();
-        let mut current = String::new();
-        let mut author = String::new();
-        let mut time = 0;
-        let mut summary = String::new();
+        let mut current = BlameLine::default();
         for line in out.lines() {
             if let Some(text) = line.strip_prefix('\t') {
-                let info = infos
-                    .entry(current.clone())
-                    .or_insert_with(|| (author.clone(), time, summary.clone()))
-                    .clone();
-                lines.push(BlameLine {
-                    id: current.clone(),
-                    author: info.0,
-                    time: info.1,
-                    summary: info.2,
-                    text: text.to_string(),
-                });
+                let info = infos.entry(current.id.clone()).or_insert_with(|| current.clone());
+                lines.push(BlameLine { orig_line: current.orig_line, text: text.to_string(), ..info.clone() });
             } else if let Some(value) = line.strip_prefix("author ") {
-                author = value.to_string();
+                current.author = value.to_string();
             } else if let Some(value) = line.strip_prefix("author-time ") {
-                time = value.parse().unwrap_or(0);
+                current.time = value.parse().unwrap_or(0);
             } else if let Some(value) = line.strip_prefix("summary ") {
-                summary = value.to_string();
+                current.summary = value.to_string();
+            } else if let Some(value) = line.strip_prefix("filename ") {
+                current.path = value.to_string();
+            } else if let Some(value) = line.strip_prefix("previous ") {
+                current.previous = value.split_once(' ').map(|(id, path)| (id.to_string(), path.to_string()));
             } else {
-                let id = line.split(' ').next().unwrap_or_default();
+                let mut fields = line.split(' ');
+                let id = fields.next().unwrap_or_default();
                 if id.len() == 40 && id.chars().all(|c| c.is_ascii_hexdigit()) {
-                    current = id.to_string();
+                    if id != current.id {
+                        current = infos.get(id).cloned().unwrap_or_else(|| BlameLine { id: id.to_string(), ..Default::default() });
+                    }
+                    current.orig_line = fields.next().and_then(|n| n.parse().ok()).unwrap_or(0);
                 }
             }
         }
@@ -3602,6 +3607,26 @@ mod tests {
         let since = |since: &str| LogFilter { since: Some(since.into()), ..Default::default() };
         assert_eq!(t.repo.log(&since("1.day.ago"), 10).unwrap().len(), 3);
         assert!(t.repo.log(&since("2099-01-01"), 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn blames_with_previous_revisions_across_renames() {
+        let t = TempRepo::new("blame-previous");
+        let first = t.commit("old.txt", "one\ntwo\n", "Add");
+        t.repo.git(&["mv", "old.txt", "new.txt"]).unwrap();
+        t.repo.git(&["commit", "-qm", "Rename"]).unwrap();
+        let second = t.commit("new.txt", "one\nTWO\nthree\n", "Change");
+        let lines = t.repo.blame("HEAD", "new.txt").unwrap();
+        assert_eq!(lines.len(), 3);
+        assert_eq!((lines[0].id.as_str(), lines[0].path.as_str(), lines[0].orig_line), (first.as_str(), "old.txt", 1));
+        assert_eq!(lines[0].previous, None);
+        assert_eq!(lines[1].id, second);
+        assert_eq!(lines[1].orig_line, 2);
+        assert_eq!(lines[1].summary, "Change");
+        let (previous, path) = lines[1].previous.clone().unwrap();
+        assert_eq!(path, "new.txt");
+        assert_eq!(t.repo.blame(&previous, &path).unwrap()[1].text, "two");
+        assert_eq!(lines[2].author, lines[1].author);
     }
 
     #[test]

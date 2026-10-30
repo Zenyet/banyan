@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use gpui_kit::component::{
-    ActiveTheme as _, WindowExt as _, h_flex, h_resizable,
+    ActiveTheme as _, Disableable as _, Sizable as _, WindowExt as _, button::Button, h_flex, h_resizable,
     menu::{ContextMenuExt as _, PopupMenuItem},
     resizable_panel, v_flex,
 };
@@ -215,17 +215,44 @@ impl Render for HistoryView {
 }
 
 struct AnnotateView {
+    model: Entity<RepoModel>,
+    /// The revision and path shown; "Annotate Previous Revision" changes them.
+    rev: String,
+    path: String,
     lines: Rc<Vec<BlameLine>>,
     /// Commit ids ordered from oldest to newest, for age shading.
     ages: Rc<std::collections::HashMap<String, f32>>,
+    /// The line clicked, whose commit the bar below describes.
+    selected: Option<usize>,
     loading: bool,
-    _task: Task<()>,
+    _task: Option<Task<()>>,
 }
 
 impl AnnotateView {
     fn new(model: Entity<RepoModel>, rev: String, path: String, cx: &mut Context<Self>) -> Self {
-        let repo = model.read(cx).repo.clone();
-        let task = cx.spawn(async move |this, cx| {
+        let mut this = Self {
+            model,
+            rev: String::new(),
+            path: String::new(),
+            lines: Rc::default(),
+            ages: Rc::default(),
+            selected: None,
+            loading: true,
+            _task: None,
+        };
+        this.load(rev, path, None, cx);
+        this
+    }
+
+    /// Blame `path` at `rev`, then select line `select` (from 1) if given.
+    fn load(&mut self, rev: String, path: String, select: Option<usize>, cx: &mut Context<Self>) {
+        let repo = self.model.read(cx).repo.clone();
+        self.rev = rev.clone();
+        self.path = path.clone();
+        self.loading = true;
+        self.selected = None;
+        cx.notify();
+        self._task = Some(cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move { repo.blame(&rev, &path) })
@@ -247,19 +274,80 @@ impl AnnotateView {
                                 .collect(),
                         );
                         this.lines = Rc::new(lines);
+                        this.selected = select.and_then(|line| line.checked_sub(1)).filter(|&ix| ix < this.lines.len());
                     }
-                    Err(err) => report(&model, err, cx),
+                    Err(err) => report(&this.model, err, cx),
                 }
                 cx.notify();
             })
             .ok();
-        });
-        Self {
-            lines: Rc::default(),
-            ages: Rc::default(),
-            loading: true,
-            _task: task,
-        }
+        }));
+    }
+
+    /// Blame the file as it was before the selected line's commit, at the
+    /// same line, the way JetBrains steps back through a line's history.
+    fn annotate_previous(&mut self, cx: &mut Context<Self>) {
+        let Some(line) = self.selected.and_then(|ix| self.lines.get(ix)) else { return };
+        let Some((rev, path)) = line.previous.clone() else { return };
+        let at = line.orig_line;
+        self.load(rev, path, Some(at), cx);
+    }
+
+    /// What can be done with the selected line's commit.
+    fn render_line_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let line = self.selected.and_then(|ix| self.lines.get(ix))?.clone();
+        let web = self.model.read(cx).web.clone();
+        let muted = cx.theme().muted_foreground;
+        let diff_from = line.previous.as_ref().map(|(id, _)| id.clone());
+        Some(
+            h_flex()
+                .gap_2()
+                .text_sm()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .child(format!("{}  {}", short(&line.id), line.summary)),
+                )
+                .child(div().flex_none().text_xs().text_color(muted).child(format!("{}, {}", line.author, format_time(line.time))))
+                .child(
+                    Button::new("annotate-previous")
+                        .label(tr!("Annotate Previous Revision"))
+                        .xsmall()
+                        .disabled(line.previous.is_none())
+                        .on_click(cx.listener(|this, _, _, cx| this.annotate_previous(cx))),
+                )
+                .child({
+                    let (model, id, path) = (self.model.clone(), line.id.clone(), line.path.clone());
+                    Button::new("annotate-diff")
+                        .label(tr!("Show Diff"))
+                        .xsmall()
+                        .disabled(diff_from.is_none())
+                        .on_click(move |_, window, cx| {
+                            if let Some(from) = diff_from.clone() {
+                                crate::worktree_diff::open_between(model.clone(), from, Some(id.clone()), Some(path.clone()), window, cx)
+                            }
+                        })
+                })
+                .when_some(web, |row, web| {
+                    let url = web.file_url(&line.id, &line.path, Some(line.orig_line));
+                    row.child(
+                        Button::new("annotate-web")
+                            .label(tr!("Open on {}", web.name()))
+                            .xsmall()
+                            .on_click(move |_, _, cx| cx.open_url(&url)),
+                    )
+                })
+                .child({
+                    let id = line.id.clone();
+                    Button::new("annotate-copy")
+                        .label(tr!("Copy Revision Number"))
+                        .xsmall()
+                        .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(id.clone())))
+                })
+                .into_any_element(),
+        )
     }
 }
 
@@ -277,11 +365,18 @@ impl Render for AnnotateView {
                         // Newer commits get a stronger tint, like JetBrains' annotation gutter.
                         let mut tint = lane_color(0);
                         tint.a = 0.06 + 0.3 * age;
+                        let same_commit = this.selected.is_some_and(|sel| this.lines[sel].id == line.id);
                         h_flex()
                             .id(ix)
                             .w_full()
                             .h(px(20.))
                             .text_sm()
+                            .when(same_commit, |row| row.bg(selection_bg().opacity(0.5)))
+                            .when(this.selected == Some(ix), |row| row.bg(selection_bg()))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.selected = Some(ix);
+                                cx.notify();
+                            }))
                             .child(
                                 h_flex()
                                     .id(("gutter", ix))
@@ -327,13 +422,25 @@ impl Render for AnnotateView {
         )
         .size_full();
 
-        div()
-            .h(px(640.))
-            .border_1()
-            .border_color(cx.theme().border)
-            .rounded(cx.theme().radius)
-            .overflow_hidden()
-            .when(self.loading, |el| el.child(div().p_3().text_sm().child(tr!("Loading…"))))
-            .child(list)
+        let bar = self.render_line_bar(cx);
+        v_flex()
+            .gap_2()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr!("{} at {}. Click a line to see its commit.", self.path, short(&self.rev))),
+            )
+            .child(
+                div()
+                    .h(px(600.))
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .rounded(cx.theme().radius)
+                    .overflow_hidden()
+                    .when(self.loading, |el| el.child(div().p_3().text_sm().child(tr!("Loading…"))))
+                    .child(list),
+            )
+            .children(bar)
     }
 }
