@@ -365,6 +365,11 @@ impl RepoWindow {
                     })),
             )
             .on_click(cx.listener(move |this, _, window, cx| this.activate(ix, window, cx)))
+            .on_mouse_down(MouseButton::Middle, cx.listener(move |this, _, window, cx| this.close(ix, window, cx)))
+            .tooltip({
+                let path: SharedString = crate::welcome::tilde(&root).into();
+                move |window, cx| gpui_kit::component::tooltip::Tooltip::new(path.clone()).build(window, cx)
+            })
             .context_menu(move |menu, _, _| {
                 let (close, others, separate) = (view.clone(), view.clone(), view.clone());
                 let (copy, reveal) = (root.clone(), root.clone());
