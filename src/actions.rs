@@ -58,6 +58,14 @@ pub fn branch_menu(mut menu: PopupMenu, model: &Entity<RepoModel>, branch: &Bran
     menu = menu.item(item(tr!("New Branch from '{}'...", name), model, move |model, window, cx| {
         new_branch(model, n.clone(), window, cx)
     }));
+    if branch.kind != RefKind::Tag {
+        let favorite = model.read(cx).is_favorite(branch);
+        let b = branch.clone();
+        let label = if favorite { tr!("Remove from Favorites") } else { tr!("Add to Favorites") };
+        menu = menu.item(item(label, model, move |model, _, cx| {
+            model.update(cx, |m, cx| m.set_favorite(&b, !favorite, cx))
+        }));
+    }
     if branch.kind != RefKind::Tag && !is_current {
         let n = name.clone();
         menu = menu.item(item(tr!("New Worktree from '{}'...", name), model, move |model, window, cx| {

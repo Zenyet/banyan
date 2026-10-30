@@ -18,7 +18,7 @@ use crate::actions::{branch_menu, new_branch};
 use crate::changes_view::ChangesView;
 use crate::console::ConsoleView;
 use crate::shelf_view::ShelfView;
-use crate::git::{RefKind, RepoState};
+use crate::git::{Branch, RefKind, RepoState};
 use crate::log_view::LogView;
 use crate::model::{RepoEvent, RepoModel};
 use crate::settings::{Settings, ThemeChoice};
@@ -179,21 +179,47 @@ impl Workspace {
                         );
                     },
                 ));
-                let branches = model.read(cx).branches.clone();
-                for (title, kind) in [(tr!("Local"), RefKind::Local), (tr!("Remote"), RefKind::Remote)] {
-                    let group: Vec<_> = branches.iter().filter(|b| b.kind == kind).cloned().collect();
-                    if group.is_empty() {
-                        continue;
+                let (branches, favorites, recent) = {
+                    let state = model.read(cx);
+                    (state.branches.clone(), state.favorites.clone(), state.recent_branches.clone())
+                };
+                // ✓ marks the current branch and ★ the favorites, which come first in their group.
+                let label = |branch: &Branch| {
+                    let mark = if branch.is_head {
+                        "✓ "
+                    } else if favorites.contains(&branch.full_name()) {
+                        "★ "
+                    } else {
+                        ""
+                    };
+                    match &branch.track {
+                        Some(track) => format!("{mark}{}  ({track})", branch.name),
+                        None => format!("{mark}{}", branch.name),
                     }
+                };
+                let recent: Vec<Branch> = recent
+                    .iter()
+                    .filter_map(|name| branches.iter().find(|b| b.kind == RefKind::Local && b.name == *name && !b.is_head))
+                    .take(5)
+                    .cloned()
+                    .collect();
+                let mut groups = Vec::new();
+                if !recent.is_empty() {
+                    groups.push((tr!("Recent"), recent));
+                }
+                for (title, kind) in [(tr!("Local"), RefKind::Local), (tr!("Remote"), RefKind::Remote)] {
+                    let mut group: Vec<Branch> = branches.iter().filter(|b| b.kind == kind).cloned().collect();
+                    // Stable, so each part keeps git's order.
+                    group.sort_by_key(|b| !favorites.contains(&b.full_name()));
+                    if !group.is_empty() {
+                        groups.push((title, group));
+                    }
+                }
+                for (title, group) in groups {
                     menu = menu.separator().label(title);
                     for branch in group {
                         let m = model.clone();
-                        let label = match (&branch.track, branch.is_head) {
-                            (_, true) => format!("★ {}", branch.name),
-                            (Some(track), _) => format!("{}  ({track})", branch.name),
-                            _ => branch.name.clone(),
-                        };
-                        menu = menu.submenu(label, window, cx, move |menu, _, cx| {
+                        menu = menu.submenu(label(&branch), window, cx, move |menu, _, cx| {
                             branch_menu(menu, &m, &branch, cx)
                         });
                     }

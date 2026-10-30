@@ -485,6 +485,17 @@ pub struct Branch {
     pub is_head: bool,
 }
 
+impl Branch {
+    /// e.g. `refs/heads/main`.
+    pub fn full_name(&self) -> String {
+        match self.kind {
+            RefKind::Remote => format!("refs/remotes/{}", self.name),
+            RefKind::Tag => format!("refs/tags/{}", self.name),
+            _ => format!("refs/heads/{}", self.name),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct StatusEntry {
     pub path: String,
@@ -2329,6 +2340,58 @@ impl Repo {
         self.git(&args)
     }
 
+    /// Full names (`refs/heads/main`) of the branches marked as favorites;
+    /// until any is marked, `main` and `master` are.
+    pub fn favorite_branches(&self) -> Vec<String> {
+        match self.favorites_file().and_then(|file| Ok(std::fs::read_to_string(file)?)) {
+            Ok(text) => text.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect(),
+            Err(_) => vec!["refs/heads/main".into(), "refs/heads/master".into()],
+        }
+    }
+
+    pub fn set_favorite_branch(&self, full_name: &str, favorite: bool) -> Result<()> {
+        let mut favorites = self.favorite_branches();
+        favorites.retain(|f| f != full_name);
+        if favorite {
+            favorites.push(full_name.to_string());
+        }
+        let file = self.favorites_file()?;
+        if let Some(dir) = file.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(file, favorites.iter().map(|f| format!("{f}\n")).collect::<String>())?;
+        Ok(())
+    }
+
+    /// Shared by all worktrees of the repository.
+    fn favorites_file(&self) -> Result<PathBuf> {
+        let common = self.git(&["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
+        Ok(PathBuf::from(common.trim()).join("banyan/favorite-branches"))
+    }
+
+    /// Local branches checked out lately, most recent first, from HEAD's reflog.
+    pub fn recent_branches(&self, count: usize) -> Vec<String> {
+        let Ok(out) = self.git(&["reflog", "show", "--format=%gs", "-n", "300", "HEAD", "--"]) else { return Vec::new() };
+        let Ok(locals) = self.git(&["for-each-ref", "--format=%(refname:short)", "refs/heads"]) else { return Vec::new() };
+        let locals: std::collections::HashSet<&str> = locals.lines().collect();
+        let mut recent: Vec<String> = Vec::new();
+        for line in out.lines() {
+            let Some(moves) = line.strip_prefix("checkout: moving from ") else { continue };
+            let Some((from, to)) = moves.rsplit_once(" to ") else { continue };
+            // The branch left counts too: it was in use until then.
+            for name in [to, from] {
+                if !recent.iter().any(|r| r == name) && locals.contains(name) {
+                    recent.push(name.to_string());
+                }
+            }
+            if recent.len() >= count {
+                recent.truncate(count);
+                break;
+            }
+        }
+        recent
+    }
+
     fn shelf_root(&self) -> Result<PathBuf> {
         Ok(self.git_dir()?.join("banyan/shelf"))
     }
@@ -3494,6 +3557,26 @@ mod tests {
         let since = |since: &str| LogFilter { since: Some(since.into()), ..Default::default() };
         assert_eq!(t.repo.log(&since("1.day.ago"), 10).unwrap().len(), 3);
         assert!(t.repo.log(&since("2099-01-01"), 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn remembers_favorite_and_recent_branches() {
+        let t = TempRepo::new("favorites");
+        t.commit("a.txt", "a\n", "Base");
+        assert!(t.repo.favorite_branches().contains(&"refs/heads/main".to_string()));
+        t.repo.set_favorite_branch("refs/heads/main", false).unwrap();
+        t.repo.set_favorite_branch("refs/remotes/origin/dev", true).unwrap();
+        // The defaults that weren't unmarked stay.
+        assert_eq!(t.repo.favorite_branches(), vec!["refs/heads/master", "refs/remotes/origin/dev"]);
+
+        let first = t.repo.current_branch().unwrap();
+        for branch in ["one", "two"] {
+            t.repo.git(&["checkout", "-q", "-b", branch]).unwrap();
+        }
+        t.repo.git(&["checkout", "-q", "one"]).unwrap();
+        t.repo.git(&["branch", "-q", "-D", "two"]).unwrap();
+        // Newest first, gone branches left out.
+        assert_eq!(t.repo.recent_branches(5), vec!["one".to_string(), first]);
     }
 
     #[test]

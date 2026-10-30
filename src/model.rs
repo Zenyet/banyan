@@ -44,6 +44,10 @@ pub struct RepoModel {
     pub shelves: Vec<Shelf>,
     /// Where the repository's commits and files can be seen on the web.
     pub web: Option<WebRemote>,
+    /// Full names of the branches marked as favorites.
+    pub favorites: Vec<String>,
+    /// Local branches checked out lately, most recent first.
+    pub recent_branches: Vec<String>,
     /// Label of the operation that is running, if any.
     pub busy: Option<SharedString>,
     /// Bumped whenever HEAD or any ref moves, so views know to reload the log.
@@ -73,6 +77,8 @@ struct Snapshot {
     stashes: Vec<Stash>,
     shelves: Vec<Shelf>,
     web: Option<WebRemote>,
+    favorites: Vec<String>,
+    recent_branches: Vec<String>,
     /// Reading the status took long enough that the index's cached file
     /// times are worth refreshing.
     slow_status: bool,
@@ -92,6 +98,8 @@ impl RepoModel {
             changelists,
             shelves: Vec::new(),
             web: None,
+            favorites: Vec::new(),
+            recent_branches: Vec::new(),
             busy: None,
             refs_version: 0,
             refs_key: None,
@@ -211,6 +219,24 @@ impl RepoModel {
         self.branches.iter().filter(move |b| b.kind == kind)
     }
 
+    pub fn is_favorite(&self, branch: &Branch) -> bool {
+        self.favorites.contains(&branch.full_name())
+    }
+
+    pub fn set_favorite(&mut self, branch: &Branch, favorite: bool, cx: &mut Context<Self>) {
+        let full_name = branch.full_name();
+        match self.repo.set_favorite_branch(&full_name, favorite) {
+            Ok(()) => {
+                self.favorites.retain(|f| *f != full_name);
+                if favorite {
+                    self.favorites.push(full_name);
+                }
+                cx.notify();
+            }
+            Err(err) => cx.emit(RepoEvent::OpFailed(format!("{err:#}").into())),
+        }
+    }
+
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         let repo = self.repo.clone();
         self.refresh_task = Some(cx.spawn(async move |this, cx| {
@@ -231,6 +257,8 @@ impl RepoModel {
                         stashes: repo.stashes().unwrap_or_default(),
                         shelves: repo.shelves(),
                         web: repo.web_remote(),
+                        favorites: repo.favorite_branches(),
+                        recent_branches: repo.recent_branches(6),
                     }
                 })
                 .await;
@@ -259,6 +287,8 @@ impl RepoModel {
                 this.stashes = snapshot.stashes;
                 this.shelves = snapshot.shelves;
                 this.web = snapshot.web;
+                this.favorites = snapshot.favorites;
+                this.recent_branches = snapshot.recent_branches;
                 if snapshot.slow_status {
                     this.refresh_index(cx);
                 }
