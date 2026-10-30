@@ -1,11 +1,11 @@
 ; Inno Setup script for the Windows installer. Built by scripts/package-windows.ps1:
-;   iscc /DVersion=0.1.0 /DSource=target\release packaging\windows\banyan.iss
+;   iscc /DVersion=0.2.0 /DSource=build packaging\windows\banyan.iss
 
 #ifndef Version
   #define Version "0.0.0"
 #endif
 #ifndef Source
-  #define Source "..\..\target\release"
+  #define Source "..\..\build"
 #endif
 
 [Setup]

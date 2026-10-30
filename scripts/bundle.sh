@@ -1,21 +1,24 @@
 #!/bin/sh
-# Build target/release/Banyan.app for this Mac, or with --target for
-# another architecture, e.g. --target x86_64-apple-darwin, in
-# target/<target>/release/Banyan.app.
-# Usage: scripts/bundle.sh [--target <target>]
+# Build build/Banyan.app for this Mac, or with --arch for another
+# architecture (arm64 or amd64), in build/<arch>/Banyan.app. Go builds
+# without cgo, so either works from any Mac.
+# Usage: scripts/bundle.sh [--arch <arch>]
 set -e
 cd "$(dirname "$0")/.."
 
-VERSION=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f 2)
+VERSION=$(scripts/version.sh)
 
-if [ "$1" = "--target" ]; then
-    cargo build --release --target "$2"
-    OUT="target/$2/release"
+if [ "$1" = "--arch" ]; then
+    ARCH="$2"
+    OUT="build/$2"
 else
-    cargo build --release
-    OUT=target/release
+    ARCH=$(go env GOARCH)
+    OUT=build
 fi
 APP="$OUT/Banyan.app"
+mkdir -p "$OUT"
+CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" go build -trimpath -tags mygo_noinspector \
+    -ldflags "-s -w -X main.version=$VERSION -X github.com/egoist/mygo.production=1" -o "$OUT/banyan" .
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

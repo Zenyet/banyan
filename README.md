@@ -6,13 +6,13 @@
 
 **A fast, native Git client in the spirit of JetBrains' Git tooling.**
 
-Built in Rust with [GPUI](https://gpui.rs) and [GPUI Kit](https://gpui-kit.com).
+Built in Go with [MyGo](https://github.com/egoist/mygo)'s native UI.
 
 ![macOS 11+](https://img.shields.io/badge/macOS-11%2B-black?logo=apple)
 ![Linux](https://img.shields.io/badge/Linux-preview-black?logo=linux)
 ![Windows](https://img.shields.io/badge/Windows-preview-black?logo=windows)
-![Rust](https://img.shields.io/badge/Rust-2024_edition-orange?logo=rust)
-![GPUI](https://img.shields.io/badge/UI-GPUI-blue)
+![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go)
+![MyGo](https://img.shields.io/badge/UI-MyGo-blue)
 
 </div>
 
@@ -165,28 +165,26 @@ Banyan is developed on macOS; the Linux and Windows builds are new and less test
 
 ### Building from source
 
-You need [Rust](https://rustup.rs) 1.85 or later and `git`, plus on macOS the Xcode command line tools
-(`xcode-select --install`). On Linux, install the development packages the
-[release workflow](.github/workflows/release.yml) lists.
+You need [Go](https://go.dev/dl/) 1.27.3 or later and `git`. Banyan builds without cgo, so no C toolchain or
+system development packages are needed, and every platform's build can be made from any machine.
 
 ```sh
 git clone https://github.com/Zenyet/banyan.git
 cd banyan
-cargo run --release -- /path/to/repo
-scripts/bundle.sh                  # macOS: builds target/release/Banyan.app
-scripts/package-linux.sh           # Linux: tarball and .deb in dist/
+go run . /path/to/repo
+scripts/bundle.sh                  # macOS: builds build/Banyan.app
+scripts/package-macos.sh           # macOS: disk images for Apple silicon and Intel in dist/
+scripts/package-linux.sh           # Linux: tarball and .deb in dist/ (needs dpkg-deb)
 scripts/package-windows.ps1        # Windows: zip and installer in dist/ (needs Inno Setup)
 ```
 
-The app is about 27 MB. Diffs are highlighted for common languages by default. To also highlight Kotlin, Swift,
-C#, Scala, SQL, PHP, Ruby and Elixir (about 25 MB more), build with
-`cargo build --release --features all-languages`.
+The app is about 12 MB. Diffs are syntax-highlighted by MyGo's code editor.
 
 ## Usage
 
 ```sh
-cargo run -- /path/to/repo   # open a repository
-cargo run                    # open the repository you're in
+go run . /path/to/repo   # open a repository
+go run .                 # open the repository you're in
 ```
 
 Launched from Finder, Banyan reopens the last repository you used. Otherwise, and whenever you close the last
@@ -228,41 +226,29 @@ are carried over on first launch.
 ## Development
 
 ```sh
-cargo run -- .     # run a debug build on this repository
-cargo test         # graph layout, ref parsing, and git operations against throwaway repositories
+go run . .         # run a debug build on this repository
+go test ./...      # graph layout, ref parsing, and git operations against throwaway repositories
 ```
 
 ### Project layout
 
 | File | Purpose |
 | --- | --- |
-| `src/git.rs` | `git` CLI backend (log, status, diff, branch ops…) |
-| `src/graph.rs` | Commit graph lane layout |
-| `src/model.rs` | Shared repo state; runs ops in the background and broadcasts refreshes |
-| `src/workspace.rs` | Main window, toolbar, tabs |
-| `src/log_view.rs` | Log tab |
-| `src/changes_view.rs` | Commit tab |
-| `src/diff_pane.rs` | Diff preview |
-| `src/merge_tool.rs` | Conflict resolution dialog |
-| `src/history.rs` | File history and annotate dialogs |
-| `src/push_dialog.rs` | Push dialog |
-| `src/rebase_dialog.rs` | Interactive rebase editor |
-| `src/commit_browser.rs` | Commit list + files + diff, reused by compare and stashes |
-| `src/compare.rs` / `src/stash_viewer.rs` | Branch comparison and stash dialogs |
-| `src/console.rs` | Git console |
-| `src/askpass.rs` | Credential prompts for git and ssh |
-| `src/clone_dialog.rs` / `src/remotes_dialog.rs` | Clone and remote management |
-| `src/watcher.rs` | File system watcher for auto-refresh |
-| `src/settings.rs` | Persisted settings, recent repositories and commit messages |
-| `src/settings_window.rs` | Settings window |
-| `src/actions.rs` | Branch / commit context menus |
-| `src/assets.rs` | Icons: GPUI Kit's default bundle plus `assets/icons` |
+| `main.go` | Entry point; answers git's credential prompts in askpass mode |
+| `internal/git` | `git` CLI backend (log, status, diff, branch ops…) |
+| `internal/graph` | Commit graph lane layout |
+| `internal/model` | Shared repo state; runs ops in the background, watches the repository and broadcasts refreshes |
+| `internal/patch`, `internal/conflict`, `internal/changelists` | Partial commits, merge conflicts and changelists |
+| `internal/settings` | Persisted settings, recent repositories and commit messages |
+| `internal/i18n` | English and Simplified Chinese strings |
+| `internal/askpass` | Credential prompts for git and ssh |
+| `internal/console` | What the Git console shows |
+| `internal/app` | The interface: windows, the Log, Commit, Shelf and Console tabs, dialogs, menus and shortcuts |
 | `scripts/bundle.sh` | Builds `Banyan.app` (icon, `Info.plist`, ad-hoc signature) |
 | `scripts/make_icon.swift` | Draws the app icon |
 
 ## Acknowledgements
 
-- [GPUI](https://gpui.rs), the GPU-accelerated UI framework from the [Zed](https://zed.dev) editor
-- [GPUI Kit](https://gpui-kit.com) for components and syntax highlighting
+- [MyGo](https://github.com/egoist/mygo), the Go desktop framework whose native UI draws Banyan on the GPU
 - [Lucide](https://lucide.dev) icons (ISC license)
 - The Git integration in JetBrains IDEs, which inspired the workflow

@@ -1,0 +1,225 @@
+package app
+
+import (
+	"strings"
+
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
+
+	"github.com/Zenyet/banyan/internal/i18n"
+	"github.com/Zenyet/banyan/internal/model"
+	"github.com/Zenyet/banyan/internal/settings"
+)
+
+// Shell is what every window of the app has around its content: the
+// dialogs open over it, one above the other, and the toasts waiting to show.
+type Shell struct {
+	Win     *mygo.Window
+	dialogs []*Dialog
+	toasts  []ui.Toast
+	// content builds the window's own interface.
+	content func(c *ui.Context)
+	// onClosed runs once the window is gone.
+	onClosed func()
+}
+
+// Dialog is a dialog over a window, as GPUI Kit's open_dialog made them:
+// Body builds its content for every frame while it is open.
+type Dialog struct {
+	Title string
+	Width float32
+	Body  func(c *ui.Context, d *Dialog)
+	// OnDismiss runs when Escape or a click outside closes it.
+	OnDismiss func()
+	open      bool
+}
+
+// Close closes the dialog, from its body or anywhere.
+func (d *Dialog) Close() { d.open = false }
+
+var shells = map[*mygo.Window]*Shell{}
+
+// newWindow opens a window of native UI around content.
+func newWindow(opts mygo.WindowOptions, content func(s *Shell, c *ui.Context)) *Shell {
+	s := &Shell{}
+	s.content = func(c *ui.Context) { content(s, c) }
+	opts.Content = ui.View(s.view)
+	s.Win = mygo.NewWindow(opts)
+	shells[s.Win] = s
+	s.Win.OnClosed(func() {
+		delete(shells, s.Win)
+		if s.onClosed != nil {
+			s.onClosed()
+		}
+		windowClosed()
+	})
+	return s
+}
+
+// shellOf is the shell of a window, nil for none of ours.
+func shellOf(w *mygo.Window) *Shell {
+	if w == nil {
+		return nil
+	}
+	return shells[w]
+}
+
+// Open shows a dialog over the window.
+func (s *Shell) Open(d *Dialog) {
+	d.open = true
+	if d.Width == 0 {
+		d.Width = 440
+	}
+	s.dialogs = append(s.dialogs, d)
+	s.Win.Invalidate()
+}
+
+// HasDialog reports whether a dialog is open over the window.
+func (s *Shell) HasDialog() bool { return len(s.dialogs) > 0 }
+
+// Toast shows a message near the bottom of the window; kind is "error",
+// "warning", "success" or "".
+func (s *Shell) Toast(kind, message string) {
+	title, description, _ := strings.Cut(message, "\n")
+	t := ui.Toast{Title: title, Description: strings.TrimSpace(description), Type: kind}
+	if kind == "error" {
+		t.Timeout = 10e9
+	}
+	s.toasts = append(s.toasts, t)
+	s.Win.Invalidate()
+}
+
+func (s *Shell) view(c *ui.Context) {
+	applyTheme(c)
+	t := c.Theme()
+	ui.Column(c).Fill().Background(t.Background).TextColor(t.Text).Children(func() {
+		s.content(c)
+	})
+	for _, d := range s.dialogs {
+		was := d.open
+		panel := ui.Modal(c.Key(d), &d.open, func() {
+			if d.Title != "" {
+				ui.Text(c, d.Title).FontSize(t.FontSize + 2).Bold()
+			}
+			d.Body(c, d)
+		})
+		panel.Width(d.Width)
+		if was && !d.open && panel.Dismissed() && d.OnDismiss != nil {
+			d.OnDismiss()
+		}
+	}
+	open := s.dialogs[:0]
+	for _, d := range s.dialogs {
+		if d.open {
+			open = append(open, d)
+		}
+	}
+	s.dialogs = open
+	for _, toast := range s.toasts {
+		c.AddToast(toast)
+	}
+	s.toasts = nil
+}
+
+// applyTheme sets the theme the settings ask for on the window.
+func applyTheme(c *ui.Context) {
+	size := settings.Read(func(s *settings.Settings) int { return s.FontSize })
+	t := *c.Theme()
+	if size >= 9 && size <= 24 {
+		t.FontSize = float32(size)
+	}
+	t.Spacing = 3.5
+	t.Accent = ui.Hex("#3574f0")
+	t.AccentHover = ui.Hex("#2f67d8")
+	t.AccentPressed = ui.Hex("#2a5cc0")
+	if t.Dark {
+		t.Background = ui.Hex("#1e1f22")
+		t.Surface = ui.Hex("#2b2d30")
+		t.SurfaceHover = ui.Hex("#35373b")
+		t.Border = ui.Hex("#393b40")
+		t.Text = ui.Hex("#dfe1e5")
+		t.TextMuted = ui.Hex("#8c8f96")
+	}
+	c.SetTheme(&t)
+}
+
+// buttons are a dialog's buttons at its bottom right: Cancel, then ok.
+func dialogButtons(c *ui.Context, d *Dialog, okLabel string, danger, disabled bool, onOK func()) {
+	ui.Row(c).Gap(8).Justify(ui.End).Margin(8, 0, 0, 0).Children(func() {
+		if ui.Button(c.Key("cancel"), i18n.T("Cancel")).Clicked() {
+			d.Close()
+		}
+		ok := ui.PrimaryButton(c.Key("ok"), okLabel).Disabled(disabled)
+		if danger {
+			ok.Background(c.Theme().Danger)
+		}
+		if ok.Clicked() {
+			onOK()
+		}
+	})
+}
+
+// PromptText asks for a line of text in a dialog.
+func (s *Shell) PromptText(title, okLabel, value string, onOK func(string)) {
+	submit := func(d *Dialog) {
+		if v := strings.TrimSpace(value); v != "" {
+			d.Close()
+			onOK(v)
+		}
+	}
+	s.Open(&Dialog{Title: title, Width: 420, Body: func(c *ui.Context, d *Dialog) {
+		if ui.TextInput(c.Key("value"), &value).AutoFocus().FillWidth().Submitted() {
+			submit(d)
+		}
+		dialogButtons(c, d, okLabel, false, strings.TrimSpace(value) == "", func() { submit(d) })
+	}})
+}
+
+// PromptMessage asks for a commit message, with note above it. Cmd-Enter
+// confirms too.
+func (s *Shell) PromptMessage(title, note, okLabel, value string, onOK func(string)) {
+	submit := func(d *Dialog) {
+		if v := strings.TrimSpace(value); v != "" {
+			d.Close()
+			onOK(v)
+		}
+	}
+	s.Open(&Dialog{Title: title, Width: 560, Body: func(c *ui.Context, d *Dialog) {
+		if note != "" {
+			ui.Text(c, note).TextColor(c.Theme().TextMuted)
+		}
+		area := ui.TextArea(c.Key("value"), &value).AutoFocus().FillWidth().Lines(6, 16).Font(monoFont)
+		if area.Shortcut(ui.Cmd, ui.KeyEnter) {
+			submit(d)
+		}
+		dialogButtons(c, d, okLabel, false, strings.TrimSpace(value) == "", func() { submit(d) })
+	}})
+}
+
+// Confirm asks before doing something destructive.
+func (s *Shell) Confirm(title, message, okLabel string, onOK func()) {
+	s.Open(&Dialog{Title: title, Width: 440, Body: func(c *ui.Context, d *Dialog) {
+		ui.Text(c, message).TextColor(c.Theme().TextMuted)
+		dialogButtons(c, d, okLabel, true, false, func() {
+			d.Close()
+			onOK()
+		})
+	}})
+}
+
+// Report shows a model's events as toasts and dialogs in the window.
+func (s *Shell) Report(m *model.Model, e model.Event) {
+	switch e.Kind {
+	case model.OpFailed:
+		s.Toast("error", e.Text)
+	case model.OpSucceeded:
+		s.Toast("success", e.Text)
+	case model.Conflicts:
+		s.Toast("warning", i18n.Tf("{} stopped: resolve the conflicts to continue", e.Text))
+		if !s.HasDialog() {
+			openConflicts(s, m)
+		}
+	case model.CheckoutBlocked:
+		offerSmartCheckout(s, m, e.Target, e.Remote, e.Text)
+	}
+}
