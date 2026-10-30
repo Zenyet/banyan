@@ -125,7 +125,7 @@ fn display_stroke(stroke: &str) -> String {
     let parts: Vec<&str> = stroke.split('-').collect();
     let (key, mods) = match parts.split_last() {
         // "secondary--" binds the minus key.
-        Some((last, rest)) if last.is_empty() => ("-", &rest[..rest.len().saturating_sub(1)]),
+        Some((&"", rest)) => ("-", &rest[..rest.len().saturating_sub(1)]),
         Some((last, rest)) => (*last, rest),
         None => return String::new(),
     };
