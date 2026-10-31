@@ -50,23 +50,29 @@ func openSettings() {
 
 type option struct{ key, label string }
 
-// choice is a drop-down over options bound to one setting.
+// choice is a drop-down over options bound to one setting: a capsule
+// showing the option chosen, which opens the system's menu of them.
 func choice(c *ui.Context, options []option, current string, set func(*settings.Settings, string)) {
-	var labels []string
-	selected := ""
+	t := c.Theme()
+	shown := ""
 	for _, o := range options {
-		labels = append(labels, o.label)
 		if o.key == current {
-			selected = o.label
+			shown = o.label
 		}
 	}
-	if ui.Select(c.Key("choice"), &selected, labels).Radius(14).Changed() {
-		ix := slices.Index(labels, selected)
-		if ix >= 0 {
-			key := options[ix].key
-			changeSettings(func(s *settings.Settings) { set(s, key) })
+	b := button(c.Key("choice"), "").Label(shown).MinWidth(140).PaddingX(12).Gap(8)
+	b.Children(func() {
+		ui.Text(c, shown).SingleLine().Grow(1)
+		ui.Icon(c, icon("chevron-down")).FontSize(t.FontSize - 2).TextColor(t.TextMuted)
+	})
+	b.Menu(func(m *ui.Menu) {
+		for _, o := range options {
+			if m.Item(o.label).Radio(o.key == current).Chosen() {
+				key := o.key
+				changeSettings(func(s *settings.Settings) { set(s, key) })
+			}
 		}
-	}
+	})
 }
 
 // firstSetting is whether the next settingRow is the first of its group,
