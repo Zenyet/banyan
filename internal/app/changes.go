@@ -518,9 +518,9 @@ func (cv *ChangesView) View(c *ui.Context) {
 	}
 	e, ok := cv.entry(cv.selected)
 	conflicted := ok && e.IsConflicted()
-	// The diff in a window of its own leaves the list the whole width,
-	// unless a conflict or the changes to choose from want the room.
-	if cv.diff.Detached() && !conflicted && len(cv.hunks) == 0 {
+	// The diff hidden, or in a window of its own, leaves the list the whole
+	// width, unless a conflict or the changes to choose from want the room.
+	if !cv.diff.Docked() && !conflicted && len(cv.hunks) == 0 {
 		ui.Column(c.Key("changes")).Fill().Children(list)
 		return
 	}
@@ -532,7 +532,7 @@ func (cv *ChangesView) View(c *ui.Context) {
 			if len(cv.hunks) > 0 {
 				cv.hunkRows(c)
 			}
-			if !cv.diff.Detached() {
+			if cv.diff.Docked() {
 				cv.diff.View(c)
 			}
 		})
@@ -625,6 +625,8 @@ func (cv *ChangesView) entryRow(c *ui.Context, e *git.StatusEntry) {
 		cv.selectPath(path)
 		if e.IsConflicted() {
 			openMergeTool(cv.ws, path)
+		} else {
+			cv.diff.Reveal()
 		}
 	}
 	entry := *e

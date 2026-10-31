@@ -634,4 +634,5 @@ var zh = map[string]string{
 	"Open in a New Window":                                                             "在新窗口中打开",
 	"Log Diff – {}":                                                                    "日志差异 – {}",
 	"Shelf – {}":                                                                       "搁置 – {}",
+	"Hide the Diff (double-click a file to show it again)":                             "隐藏差异（双击文件可再次显示）",
 }

@@ -1,7 +1,9 @@
 package app
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -88,9 +90,15 @@ func branchesWorkspace(t *testing.T) *Workspace {
 		}
 	}
 	run(remote, "init", "-q", "--bare")
+	run(dir, "init", "-q", "-b", "main")
+	for _, name := range []string{"README.md", "notes.md"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("hello\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, args := range [][]string{
-		{"init", "-q", "-b", "main"},
-		{"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first"},
+		{"add", "."},
+		{"-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "first"},
 		{"branch", "topic"},
 		{"branch", "feature/one"},
 		{"tag", "v1"},

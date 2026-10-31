@@ -30,9 +30,13 @@ type DiffPane struct {
 	// Remote says the patches come from a partial clone, whose file
 	// contents may have to be downloaded first.
 	Remote bool
-	// WindowTitle, when set, lets the pane move to a window of its own and
-	// back, which it names; window is that window while the pane is in it.
+	// WindowTitle, when set, lets the pane move to a window of its own,
+	// which it names, and back, and hide: inWindow says it shows in that
+	// window rather than in its view, and hidden that it shows nowhere
+	// until Reveal. window is the window while it is open.
 	WindowTitle func() string
+	inWindow    bool
+	hidden      bool
 	window      *Shell
 }
 
@@ -53,25 +57,60 @@ func (p *DiffPane) Load(title string, load func() (string, error)) {
 	p.redraw()
 }
 
-// Detached reports whether the pane shows in a window of its own, where
-// the view it belongs to leaves no room for it.
-func (p *DiffPane) Detached() bool { return p.window != nil }
+// Docked reports whether the pane shows in the view it belongs to, which
+// leaves it no room otherwise.
+func (p *DiffPane) Docked() bool { return !p.inWindow && !p.hidden }
 
-// detach moves the pane to a window of its own, which closing brings it
-// back from.
+// Reveal shows the pane where it last showed, in its view or in its
+// window, which comes to the front.
+func (p *DiffPane) Reveal() {
+	p.hidden = false
+	switch {
+	case !p.inWindow:
+	case p.window == nil:
+		p.openWindow()
+	default:
+		p.window.Win.Show()
+		p.window.Win.Focus()
+	}
+}
+
+// Hide shows the pane nowhere until Reveal, closing its window.
+func (p *DiffPane) Hide() {
+	p.hidden = true
+	p.closeWindow()
+}
+
+// detach moves the pane to a window of its own.
 func (p *DiffPane) detach() {
+	p.inWindow, p.hidden = true, false
+	p.openWindow()
+}
+
+// Dock moves the pane back to its view from its window.
+func (p *DiffPane) Dock() {
+	p.inWindow, p.hidden = false, false
+	p.closeWindow()
+}
+
+func (p *DiffPane) openWindow() {
 	s := newWindow(mygo.WindowOptions{Title: p.WindowTitle(), Width: 1100, Height: 760, MinWidth: 480, MinHeight: 320},
 		func(_ *Shell, c *ui.Context) { p.View(c) })
 	s.onClosed = func() {
 		p.window = nil
-		// The view it belongs to makes room for it again.
+		// Closed from its title bar, the window hides the pane, which
+		// Reveal brings back there.
+		if p.inWindow {
+			p.hidden = true
+		}
+		// The view it belongs to lays out again.
 		model.Post(func() {})
 	}
 	p.window = s
 }
 
-// Dock moves the pane back from its window, if it is in one.
-func (p *DiffPane) Dock() {
+// closeWindow closes the pane's window, if it is open.
+func (p *DiffPane) closeWindow() {
 	if w := p.window; w != nil {
 		w.Win.Close()
 	}
@@ -204,12 +243,17 @@ func (p *DiffPane) View(c *ui.Context) {
 				}
 			})
 			if p.WindowTitle != nil {
-				if p.Detached() {
+				if p.inWindow {
 					if iconButton(c.Key("dock"), "dock", i18n.T("Back to the Main Window")).Clicked() {
 						p.Dock()
 					}
-				} else if iconButton(c.Key("detach"), "open-window", i18n.T("Open in a New Window")).Clicked() {
-					p.detach()
+				} else {
+					if iconButton(c.Key("detach"), "open-window", i18n.T("Open in a New Window")).Clicked() {
+						p.detach()
+					}
+					if iconButton(c.Key("hide"), "x", i18n.T("Hide the Diff (double-click a file to show it again)")).Clicked() {
+						p.Hide()
+					}
 				}
 			}
 		})

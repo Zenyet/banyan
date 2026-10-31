@@ -55,10 +55,10 @@ func (ws *Workspace) Close() {
 	ws.off()
 	ws.Model.Close()
 	// Its diffs in windows of their own go with it.
-	ws.log.diff.Dock()
-	ws.changes.diff.Dock()
+	ws.log.diff.closeWindow()
+	ws.changes.diff.closeWindow()
 	if ws.shelf.diff != nil {
-		ws.shelf.diff.Dock()
+		ws.shelf.diff.closeWindow()
 	}
 }
 

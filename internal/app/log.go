@@ -663,8 +663,9 @@ func (lv *LogView) View(c *ui.Context) {
 			}).Fill()
 		}).Fill()
 	}
-	// The diff in a window of its own leaves the log the whole height.
-	if lv.diff.Detached() {
+	// The diff hidden, or in a window of its own, leaves the log the whole
+	// height.
+	if !lv.diff.Docked() {
 		ui.Column(c.Key("log-main")).Fill().Children(top)
 		return
 	}
@@ -1229,6 +1230,12 @@ func (lv *LogView) filesPanel(c *ui.Context) {
 		if n.IsDir && row.Clicked() {
 			lv.fileClosed[n.Path] = !lv.fileClosed[n.Path]
 			toggled = true
+		}
+		// A file double-clicked shows its diff, hidden or in a window
+		// behind. The double click stays the list's, which chooses the
+		// file: DoubleClicked would take the clicks from it.
+		if !n.IsDir && row.RowDoubleClicked() {
+			lv.diff.Reveal()
 		}
 		row.Children(func() {
 			change, isFile := lv.files[n.Path]

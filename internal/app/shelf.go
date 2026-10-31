@@ -100,8 +100,9 @@ func (sv *ShelfView) View(c *ui.Context) {
 			})
 		})
 	}
-	// The diff in a window of its own leaves the shelves the whole width.
-	if sv.diff.Detached() {
+	// The diff hidden, or in a window of its own, leaves the shelves the
+	// whole width.
+	if !sv.diff.Docked() {
 		ui.Column(c.Key("shelf")).Fill().Children(list)
 		return
 	}
@@ -165,6 +166,10 @@ func (sv *ShelfView) shelfRows(c *ui.Context, shelf git.Shelf) {
 		}
 		if fr.Clicked() {
 			sv.file = file
+		}
+		if fr.DoubleClicked() {
+			sv.file = file
+			sv.diff.Reveal()
 		}
 		fr.ContextMenu(func(menu *ui.Menu) {
 			if menu.Item(i18n.T("Unshelve This File")).Chosen() {
