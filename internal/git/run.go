@@ -33,7 +33,9 @@ const (
 
 // GitVersion is the version of the git at program, e.g. "git version 2.50.1".
 func GitVersion(program string) (string, error) {
-	out, err := exec.Command(program, "--version").Output()
+	cmd := exec.Command(program, "--version")
+	hideWindow(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("cannot run %s: %w", program, err)
 	}

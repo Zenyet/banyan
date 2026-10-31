@@ -60,13 +60,19 @@ func Run(requested string) error {
 				openPath(welcome, requested, true)
 			}
 		}
+		checkGit()
 		// CI launches the app this way to check that it starts: it quits by
 		// itself once its window has been up for a few seconds.
 		if os.Getenv("BANYAN_SMOKE_TEST") != "" {
 			go func() {
 				time.Sleep(5 * time.Second)
 				mygo.RunOnMain(func() {
-					fmt.Printf("smoke test passed: %d window(s) open\n", len(mygo.Windows()))
+					repos := 0
+					for _, rw := range repoWindows {
+						repos += len(rw.tabs)
+					}
+					program := settings.Read(func(s *settings.Settings) string { return s.GitProgram() })
+					fmt.Printf("smoke test passed: %d window(s) open, %d repositories, git %s\n", len(mygo.Windows()), repos, program)
 					quit()
 				})
 			}()

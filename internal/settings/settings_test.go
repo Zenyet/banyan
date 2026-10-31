@@ -1,6 +1,9 @@
 package settings
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -69,5 +72,47 @@ func TestSettingsRoundTrip(t *testing.T) {
 	d := Default()
 	if d.GitProgram() != "git" {
 		t.Errorf("GitProgram() = %q", d.GitProgram())
+	}
+}
+
+// Git comes from the PATH, else on Windows from where Git for Windows
+// installs, else from beside the app, where its packages bring one.
+func TestFindGit(t *testing.T) {
+	found := func(string) (string, error) { return "/usr/bin/git", nil }
+	missing := func(string) (string, error) { return "", exec.ErrNotFound }
+	dir, programs := t.TempDir(), t.TempDir()
+	env := func(key string) string {
+		if key == "ProgramFiles" {
+			return programs
+		}
+		return ""
+	}
+	touch := func(path string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := findGit(found, dir, "windows", env); got != "git" {
+		t.Errorf("on the PATH: %s", got)
+	}
+	if got := findGit(missing, dir, "windows", env); got != "git" {
+		t.Errorf("none anywhere: %s", got)
+	}
+	bundled := filepath.Join(dir, "git", "cmd", "git.exe")
+	touch(bundled)
+	if got := findGit(missing, dir, "windows", env); got != bundled {
+		t.Errorf("bundled: %s", got)
+	}
+	installed := filepath.Join(programs, "Git", "cmd", "git.exe")
+	touch(installed)
+	if got := findGit(missing, dir, "windows", env); got != installed {
+		t.Errorf("installed, before the bundled one: %s", got)
+	}
+	if got := findGit(missing, dir, "darwin", env); got != "git" {
+		t.Errorf("not on Windows: %s", got)
 	}
 }

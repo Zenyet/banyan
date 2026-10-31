@@ -87,6 +87,22 @@ jobs:
           Get-Content smoke.log
           if ($app.ExitCode -ne 0 -or -not (Select-String -Quiet "smoke test passed" smoke.log)) { exit 1 }
 
+      # Again as on a computer without Git: the app opens this repository
+      # with the MinGit beside it.
+      - name: Smoke test without Git (Windows)
+        if: matrix.name == 'Windows'
+        timeout-minutes: 2
+        run: |
+          build\git\cmd\git.exe --version
+          $env:BANYAN_SMOKE_TEST = "1"
+          $env:PATH = "C:\Windows\System32;C:\Windows"
+          $env:ProgramFiles = "C:\NoProgramFiles"
+          $env:LOCALAPPDATA = "C:\NoLocalAppData"
+          $app = Start-Process build\banyan.exe -ArgumentList "." -Wait -PassThru -RedirectStandardOutput smoke-nogit.log
+          Get-Content smoke-nogit.log
+          $line = Select-String "smoke test passed: .* 1 repositories, git .*\\git\\cmd\\git.exe" smoke-nogit.log
+          if ($app.ExitCode -ne 0 -or -not $line) { exit 1 }
+
       - uses: actions/upload-artifact@v4
         with:
           name: banyan-${{ matrix.name }}

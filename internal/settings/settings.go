@@ -6,6 +6,7 @@ package settings
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -176,10 +177,67 @@ func (s *Settings) IsProtected(branch string) bool {
 	return false
 }
 
-// GitProgram is the git executable to run.
+// GitProgram is the git executable to run: the one the settings name,
+// else the one on the PATH, else the one Banyan's Windows packages bring.
 func (s *Settings) GitProgram() string {
 	if p := strings.TrimSpace(s.GitPath); p != "" {
 		return p
+	}
+	return defaultGit()
+}
+
+// defaultGit is the git to run when the settings name none, looked for
+// once, or again after FindGitAgain.
+func defaultGit() string {
+	gitFound.Lock()
+	defer gitFound.Unlock()
+	if gitFound.program == "" {
+		dir := ""
+		if exe, err := os.Executable(); err == nil {
+			dir = filepath.Dir(exe)
+		}
+		gitFound.program = findGit(exec.LookPath, dir, runtime.GOOS, os.Getenv)
+	}
+	return gitFound.program
+}
+
+var gitFound struct {
+	sync.Mutex
+	program string
+}
+
+// FindGitAgain looks for git again, as after installing it.
+func FindGitAgain() {
+	gitFound.Lock()
+	gitFound.program = ""
+	gitFound.Unlock()
+}
+
+// findGit is "git" when lookPath finds it. On Windows, it is else the one
+// Git for Windows installs, which the PATH of an app started before it
+// lacks, or else the one Banyan's packages bring beside the app in dir,
+// MinGit in git\. Without any it is "git" still, which then fails to run,
+// saying so.
+func findGit(lookPath func(string) (string, error), dir, goos string, getenv func(string) string) string {
+	if _, err := lookPath("git"); err == nil {
+		return "git"
+	}
+	if goos != "windows" {
+		return "git"
+	}
+	var candidates []string
+	for _, root := range []string{getenv("ProgramFiles"), filepath.Join(getenv("LOCALAPPDATA"), "Programs")} {
+		if root != "" && root != "Programs" {
+			candidates = append(candidates, filepath.Join(root, "Git", "cmd", "git.exe"))
+		}
+	}
+	if dir != "" {
+		candidates = append(candidates, filepath.Join(dir, "git", "cmd", "git.exe"))
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
 	}
 	return "git"
 }

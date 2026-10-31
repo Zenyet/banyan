@@ -148,7 +148,9 @@ where it builds with `cargo` as before.
 ## Installation
 
 Download the package for your system from the [latest release](https://github.com/Zenyet/banyan/releases/latest).
-Every platform needs `git` installed.
+Banyan runs `git` for everything it does. The Windows packages bring their own, Git for Windows' MinGit
+(GPLv2, its licenses inside), used when the computer has no Git; elsewhere, install `git` first. Without one,
+Banyan says how to get it.
 
 | System | Package |
 | --- | --- |
