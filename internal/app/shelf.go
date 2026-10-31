@@ -165,7 +165,7 @@ func (sv *ShelfView) shelfRows(c *ui.Context, shelf git.Shelf) {
 			}
 		})
 		fr.Children(func() {
-			ui.Icon(c, icon("file")).FontSize(t.FontSize - 1).TextColor(t.TextMuted)
+			ui.Image(c, fileIcon(file)).Size(t.FontSize+1, t.FontSize+1)
 			ui.Text(c, name).SingleLine()
 			muted(c, dir).SingleLine().Shrink(1)
 		})

@@ -155,7 +155,7 @@ func openConflicts(s *Shell, m *model.Model) {
 							}
 						}
 						row.Children(func() {
-							ui.Icon(c, icon("file")).FontSize(t.FontSize - 1).TextColor(t.Danger)
+							ui.Image(c, fileIcon(e.Path)).Size(t.FontSize+1, t.FontSize+1)
 							ui.Text(c, e.Path).SingleLine().Grow(1).Shrink(1)
 							ui.Text(c, o.Label()).Width(130).TextColor(t.TextMuted)
 							ui.Text(c, th.Label()).Width(130).TextColor(t.TextMuted)

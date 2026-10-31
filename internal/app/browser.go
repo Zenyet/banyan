@@ -23,7 +23,7 @@ func fileRow(c *ui.Context, f *git.FileChange, selected bool) ui.Element {
 		row.Background(hoverBG(t))
 	}
 	row.Children(func() {
-		ui.Icon(c, icon("file")).FontSize(t.FontSize - 1).TextColor(color)
+		ui.Image(c, fileIcon(f.Path)).Size(t.FontSize+1, t.FontSize+1)
 		ui.Text(c, f.Path).SingleLine().TextColor(color).Shrink(1)
 	})
 	return row

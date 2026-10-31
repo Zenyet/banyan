@@ -250,5 +250,5 @@ go test ./...      # graph layout, ref parsing, and git operations against throw
 ## Acknowledgements
 
 - [MyGo](https://github.com/egoist/mygo), the Go desktop framework whose native UI draws Banyan on the GPU
-- [MingCute](https://www.mingcute.com) (Apache License 2.0) and [Phosphor](https://phosphoricons.com) (MIT) icons
+- [MingCute](https://www.mingcute.com) (Apache License 2.0) and [Phosphor](https://phosphoricons.com) (MIT) icons, and [Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme)'s (MIT) for file types
 - The Git integration in JetBrains IDEs, which inspired the workflow

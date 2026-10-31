@@ -4,6 +4,10 @@ The icons here come from two sets, through Iconify (https://icones.js.org):
 - Phosphor (https://phosphoricons.com), under the MIT License, below:
   file-diff, git-commit-horizontal, moon, redo-2, triangle-alert, undo-2.
 
+The icons of file types in files/ are Material Icon Theme's
+(https://github.com/material-extensions/vscode-material-icon-theme),
+under the MIT License in files/LICENSE.
+
 ================================================================
 
 MIT License

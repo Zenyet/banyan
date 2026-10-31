@@ -1236,7 +1236,11 @@ func (lv *LogView) filesPanel(c *ui.Context) {
 				// The status's color is unreadable on the selection's.
 				color = t.AccentText
 			}
-			ui.Icon(c, icon(name)).FontSize(t.FontSize - 1).TextColor(color)
+			if name == "file" {
+				ui.Image(c, fileIcon(n.Path)).Size(t.FontSize+1, t.FontSize+1)
+			} else {
+				ui.Icon(c, icon(name)).FontSize(t.FontSize - 1).TextColor(color)
+			}
 			ui.Text(c, n.Name).SingleLine().TextColor(color).Shrink(1)
 			if isFile && change.OrigPath != "" {
 				muted(c, "from "+change.OrigPath).SingleLine().Shrink(1)

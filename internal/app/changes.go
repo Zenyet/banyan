@@ -618,7 +618,7 @@ func (cv *ChangesView) entryRow(c *ui.Context, e *git.StatusEntry) {
 		if ui.Checkbox(c.Key("include"), &checked, "").Changed() {
 			cv.toggle(path)
 		}
-		ui.Icon(c, icon("file")).FontSize(t.FontSize - 1).TextColor(color)
+		ui.Image(c, fileIcon(path)).Size(t.FontSize+1, t.FontSize+1)
 		ui.Text(c, name).TextColor(color).SingleLine()
 		muted(c, dir).SingleLine().Shrink(1)
 		if cv.isPartial(path) {
