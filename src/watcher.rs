@@ -6,10 +6,10 @@ use std::sync::{Arc, Mutex};
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher as _};
 
-/// Files and directories under `.git` whose changes matter to the views.
+/// Files and directories under `.git` whose changes matter to the views,
+/// besides the index.
 const GIT_ENTRIES: &[&str] = &[
     "HEAD",
-    "index",
     "refs",
     "packed-refs",
     "MERGE_HEAD",
@@ -22,7 +22,10 @@ const GIT_ENTRIES: &[&str] = &[
 /// Paths changed since the last [`take`](Changes::take), split by where they live.
 #[derive(Default)]
 pub struct Changes {
+    /// Refs, HEAD or an operation in progress.
     pub git: bool,
+    /// The index, which only the status depends on.
+    pub index: bool,
     pub worktree: Vec<PathBuf>,
 }
 
@@ -44,6 +47,7 @@ impl RepoWatcher {
             let mut pending = sink.lock().unwrap();
             for path in event.paths {
                 match path.strip_prefix(&watched_git_dir) {
+                    Ok(rel) if rel == Path::new("index") => pending.index = true,
                     Ok(rel) => pending.git |= is_relevant_git_path(rel),
                     Err(_) => pending.worktree.push(path),
                 }
@@ -83,7 +87,6 @@ mod tests {
     fn git_paths() {
         assert!(is_relevant_git_path(Path::new("HEAD")));
         assert!(is_relevant_git_path(Path::new("refs/heads/main")));
-        assert!(is_relevant_git_path(Path::new("index")));
         assert!(!is_relevant_git_path(Path::new("index.lock")));
         assert!(!is_relevant_git_path(Path::new("objects/ab/cdef")));
         assert!(!is_relevant_git_path(Path::new("logs/HEAD")));

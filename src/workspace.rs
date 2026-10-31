@@ -7,7 +7,9 @@ use gpui_kit::component::{
     h_flex,
     menu::{DropdownMenu as _, PopupMenuItem},
     notification::Notification,
+    spinner::Spinner,
     tab::{Tab, TabBar},
+    tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::assets::IconName;
@@ -101,11 +103,6 @@ impl Workspace {
             cx.observe_window_appearance(window, |_, _, cx| {
                 if Settings::read(|s| s.theme) == ThemeChoice::System {
                     crate::settings_window::apply_appearance(cx);
-                }
-            }),
-            cx.observe_window_activation(window, |this, window, cx| {
-                if window.is_window_active() {
-                    this.model.update(cx, |model, cx| model.refresh(cx));
                 }
             }),
         ];
@@ -356,6 +353,16 @@ impl Workspace {
             .border_color(cx.theme().border)
             .child(self.model.read(cx).repo.root().display().to_string())
             .child(div().flex_1())
+            .when_some(self.model.read(cx).activity(), |bar, activity| {
+                bar.child(
+                    h_flex()
+                        .id("activity")
+                        .gap_1()
+                        .child(Spinner::new().xsmall())
+                        .child(activity.label())
+                        .tooltip(move |window, cx| Tooltip::new(activity.detail()).build(window, cx)),
+                )
+            })
             .child(
                 self.model
                     .read(cx)
@@ -473,7 +480,7 @@ impl Workspace {
                         .gap_1()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(Icon::new(IconName::LoaderCircle).xsmall())
+                        .child(Spinner::new().xsmall())
                         .child(format!("{busy}…")),
                 )
             })

@@ -12,6 +12,7 @@ use gpui_kit::component::{
     list::ListItem,
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
     resizable_panel,
+    spinner::Spinner,
     tree::{TreeItem, TreeState, tree},
     v_flex, v_resizable,
 };
@@ -22,15 +23,19 @@ use gpui_kit::*;
 use crate::actions::{branch_menu, commit_menu, commits_menu, short};
 use crate::diff_pane::DiffPane;
 use crate::git::{Branch, Commit, CommitDetails, FileChange, LogFilter, RefKind};
-use crate::graph::{self, GraphRow, Half};
+use crate::graph::{self, Arrow, GraphRow, Half};
 use crate::model::{RepoEvent, RepoModel};
 use crate::settings::Settings;
 use crate::ui::{cached, SubView, selection_bg, FILE_PREFIX, file_count, file_tree, format_full_time, format_time, lane_color, path_tree, ref_colors, status_color};
 use crate::i18n::tr;
 
 const ROW_HEIGHT: Pixels = px(24.);
+/// Commits above one to go to that are too many to load.
+const FAR_DOWN: usize = 100_000;
 const LANE_WIDTH: Pixels = px(14.);
 const GRAPH_PADDING: Pixels = px(6.);
+/// Quick loads go without a spinner, so it doesn't flicker.
+const LOADING_DELAY: std::time::Duration = std::time::Duration::from_millis(400);
 const BRANCH_PREFIX: &str = "b:";
 
 actions!(
@@ -65,6 +70,11 @@ pub struct LogView {
     model: Entity<RepoModel>,
     commits: Arc<Vec<Commit>>,
     graph: Arc<Vec<GraphRow>>,
+    /// The graph with every long edge cut short; `graph` keeps the edges of
+    /// `whole`, the selected commit, whole instead.
+    cut_graph: Arc<Vec<GraphRow>>,
+    whole: Option<String>,
+    graph_task: Option<Task<()>>,
     /// Indices into `commits` of those on the current branch, drawn in bold
     /// when other branches are shown too, as JetBrains highlights them.
     on_head: Arc<HashSet<usize>>,
@@ -110,6 +120,8 @@ pub struct LogView {
     scroll: UniformListScrollHandle,
     focus: FocusHandle,
     loading: bool,
+    /// When loading started, to show it only once it takes a moment.
+    loading_since: std::time::Instant,
     /// How many commits to load; grows with "Load more".
     limit: usize,
     /// The model's `refs_version` the log was last loaded for.
@@ -155,12 +167,18 @@ impl LogView {
                 InputEvent::PressEnter { .. } => this.focus.focus(window, cx),
                 _ => {}
             }),
-            cx.observe(&branch_tree, |this, tree, cx| {
+            cx.observe_in(&branch_tree, window, |this, tree, window, cx| {
                 let id = tree.read(cx).selected_item().map(|item| item.id.clone());
                 if id != this.selected_branch {
                     this.selected_branch = id.clone();
                     if let Some(branch) = id.and_then(|id| this.branches.get(&id).cloned()) {
-                        this.reveal_commit(&branch.target, cx);
+                        let shown = this.rows.iter().any(|&ix| this.commits[ix].id == branch.target);
+                        if shown {
+                            this.reveal_commit(&branch.target, cx);
+                        } else {
+                            // Not loaded yet, as with an old tag.
+                            this.go_to(branch.name, window, cx);
+                        }
                     }
                 }
             }),
@@ -177,6 +195,9 @@ impl LogView {
             model,
             commits: Arc::default(),
             graph: Arc::default(),
+            cut_graph: Arc::default(),
+            whole: None,
+            graph_task: None,
             on_head: Arc::default(),
             rows: Rc::default(),
             selected: None,
@@ -207,6 +228,7 @@ impl LogView {
             scroll: UniformListScrollHandle::new(),
             focus: cx.focus_handle(),
             loading: true,
+            loading_since: std::time::Instant::now(),
             limit: Settings::read(|s| s.log_page_size),
             refs_version: 0,
             load_more_scheduled: false,
@@ -226,6 +248,11 @@ impl LogView {
             self.refs_version = version;
             self.reload(cx);
         }
+    }
+
+    /// Loading has taken long enough to say so.
+    fn slow_loading(&self) -> bool {
+        self.loading && self.loading_since.elapsed() >= LOADING_DELAY
     }
 
     fn report(&self, err: anyhow::Error, cx: &mut Context<Self>) {
@@ -249,13 +276,19 @@ impl LogView {
         };
         let limit = self.limit;
         self.loading = true;
+        self.loading_since = std::time::Instant::now();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(LOADING_DELAY).await;
+            this.update(cx, |_, cx| cx.notify()).ok();
+        })
+        .detach();
         cx.notify();
         self.log_task = Some(cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move {
                     let commits = repo.log(&filter, limit)?;
-                    let graph = graph::layout(&commits);
+                    let graph = graph::layout(&commits, None);
                     let head = repo.git(&["rev-parse", "HEAD"]).ok().map(|s| s.trim().to_string());
                     let on_head = reachable_from(&commits, head.as_deref());
                     anyhow::Ok((commits, graph, head, on_head))
@@ -267,6 +300,9 @@ impl LogView {
                     Ok((commits, graph, head, on_head)) => {
                         this.commits = Arc::new(commits);
                         this.graph = Arc::new(graph);
+                        this.cut_graph = this.graph.clone();
+                        this.whole = None;
+                        this.graph_task = None;
                         this.on_head = Arc::new(on_head);
                         this.head = head;
                         if this.author_filter.is_empty() {
@@ -276,11 +312,15 @@ impl LogView {
                     Err(err) => {
                         this.commits = Arc::default();
                         this.graph = Arc::default();
+                        this.cut_graph = Arc::default();
+                        this.whole = None;
+                        this.graph_task = None;
                         this.on_head = Arc::default();
                         this.report(err, cx);
                     }
                 }
                 this.apply_filter(cx);
+                this.keep_edges_whole(cx);
                 if let Some(id) = this.pending_reveal.take()
                     && this.rows.iter().any(|&ix| this.commits[ix].id == id)
                 {
@@ -467,16 +507,24 @@ impl LogView {
     pub fn go_to(&mut self, rev: String, window: &mut Window, cx: &mut Context<Self>) {
         let repo = self.model.read(cx).repo.clone();
         cx.spawn_in(window, async move |this, cx| {
-            let result = cx.background_executor().spawn(async move { repo.locate_commit(&rev) }).await;
+            let result = cx.background_executor().spawn({
+                let rev = rev.clone();
+                async move { repo.locate_commit(&rev) }
+            })
+            .await;
             this.update_in(cx, |this, window, cx| match result {
                 Ok((id, _)) if this.rows.iter().any(|&ix| this.commits[ix].id == id) => this.reveal_commit(&id, cx),
                 Ok((id, above)) => {
                     this.filter.update(cx, |input, cx| input.set_value("", window, cx));
-                    this.branch_filter = None;
+                    // Far down, as an old tag is in a big history, the log
+                    // starts there rather than loading everything above it.
+                    this.branch_filter = (above > FAR_DOWN).then(|| rev.clone());
                     this.author_filter.clear();
                     this.date_filter = None;
                     this.path_filter.clear();
-                    this.limit = this.limit.max(above + 100);
+                    if above <= FAR_DOWN {
+                        this.limit = this.limit.max(above + 100);
+                    }
                     this.pending_reveal = Some(id);
                     this.reload(cx);
                 }
@@ -504,7 +552,38 @@ impl LogView {
         self.selected = id;
         self.base = 0;
         self.load_details(cx);
+        self.keep_edges_whole(cx);
         cx.notify();
+    }
+
+    /// Draws the selected commit's long edges whole rather than cut short,
+    /// to show where its arrows lead, as JetBrains does.
+    fn keep_edges_whole(&mut self, cx: &mut Context<Self>) {
+        let row = self.selected.as_ref().and_then(|id| self.commits.iter().position(|c| &c.id == id));
+        let has_cut_edges = row.is_some_and(|row| {
+            self.cut_graph.iter().flat_map(|r| &r.arrows).any(|arrow| {
+                arrow.other_end.is_some() && (arrow.child == row || arrow.other_end == Some(row))
+            })
+        });
+        let whole = self.selected.clone().filter(|_| has_cut_edges);
+        if whole == self.whole {
+            return;
+        }
+        self.whole = whole.clone();
+        let Some(whole) = whole else {
+            self.graph_task = None;
+            self.graph = self.cut_graph.clone();
+            return;
+        };
+        let commits = self.commits.clone();
+        self.graph_task = Some(cx.spawn(async move |this, cx| {
+            let graph = cx.background_executor().spawn(async move { graph::layout(&commits, Some(&whole)) }).await;
+            this.update(cx, |this, cx| {
+                this.graph = Arc::new(graph);
+                cx.notify();
+            })
+            .ok();
+        }));
     }
 
     fn is_selected(&self, id: &str) -> bool {
@@ -909,8 +988,15 @@ impl LogView {
                     })
             })
             .child(div().flex_1())
-            .when(self.loading, |row| {
-                row.child(div().text_xs().text_color(cx.theme().muted_foreground).child(tr!("Loading…")))
+            .when(self.slow_loading(), |row| {
+                row.child(
+                    h_flex()
+                        .gap_1()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(Spinner::new().xsmall())
+                        .child(tr!("Loading commits…")),
+                )
             })
             .child(
                 div()
@@ -939,6 +1025,18 @@ impl LogView {
         let extra = (has_more || offer_grep) as usize;
         v_flex()
             .size_full()
+            .when(self.rows.is_empty() && self.slow_loading(), |list| {
+                list.child(
+                    h_flex()
+                        .flex_1()
+                        .justify_center()
+                        .gap_2()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(Spinner::new().small())
+                        .child(tr!("Loading commits…")),
+                )
+            })
             .child(
                 div()
                     .id("commit-list")
@@ -969,10 +1067,17 @@ impl LogView {
                             "commits",
                             self.rows.len() + extra,
                             cx.processor(move |this, range: std::ops::Range<usize>, window, cx| {
+                                // The rows in view share the graph's width, so their subjects line up.
+                                let lanes = range
+                                    .clone()
+                                    .filter_map(|row| this.rows.get(row).and_then(|&ix| this.graph.get(ix)))
+                                    .map(|graph| graph.width)
+                                    .max()
+                                    .unwrap_or(1);
                                 range
                                     .map(|row| {
                                         if row < this.rows.len() {
-                                            this.render_commit_row(row, show_graph, window, cx)
+                                            this.render_commit_row(row, show_graph.then_some(lanes), window, cx)
                                         } else if offer_grep {
                                             this.render_search_history(cx)
                                         } else {
@@ -1044,10 +1149,11 @@ impl LogView {
         }
     }
 
+    /// `graph_lanes`: how wide to draw the graph, if at all.
     fn render_commit_row(
         &self,
         row: usize,
-        show_graph: bool,
+        graph_lanes: Option<usize>,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -1059,11 +1165,13 @@ impl LogView {
         let bold = self.branch_filter.is_none()
             && self.on_head.len() < self.commits.len()
             && self.on_head.contains(&ix);
+        let show_graph = graph_lanes.is_some();
         let graph_row = self.graph.get(ix).cloned().unwrap_or_default();
-        let graph_width = if show_graph {
-            GRAPH_PADDING * 2. + LANE_WIDTH * graph_row.width as f32
-        } else {
-            px(8.)
+        let arrows = if show_graph { graph_row.arrows.clone() } else { Vec::new() };
+        let node = graph_row.node;
+        let graph_width = match graph_lanes {
+            Some(lanes) => GRAPH_PADDING * 2. + LANE_WIDTH * lanes as f32,
+            None => px(8.),
         };
         let muted = cx.theme().muted_foreground;
         let fg = cx.theme().foreground;
@@ -1114,6 +1222,42 @@ impl LogView {
                 }),
             )
             .child(canvas(|_, _, _| {}, move |bounds, _, window, cx| paint.paint(bounds, window, cx)).size_full())
+            // A long edge's arrow takes you to the commit at its other end.
+            .relative()
+            .children(arrows.into_iter().enumerate().map(|(n, arrow)| {
+                let (from, tip) = arrow_ends(&arrow);
+                let node_x = GRAPH_PADDING + LANE_WIDTH * (node as f32 + 0.5);
+                let slack = px(3.);
+                div()
+                    .id(("arrow", n))
+                    .absolute()
+                    .left(node_x + from.x.min(tip.x) - slack)
+                    .top(ROW_HEIGHT / 2. + from.y.min(tip.y) - slack)
+                    .w((from.x - tip.x).abs() + slack * 2.)
+                    .h((from.y - tip.y).abs() + slack * 2.)
+                    .cursor_pointer()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| {
+                            cx.stop_propagation();
+                            let target = match arrow.other_end {
+                                Some(row) => this.commits[row].id.clone(),
+                                None => this.commits[arrow.child].parents[arrow.parent].clone(),
+                            };
+                            this.go_to(target, window, cx);
+                        }),
+                    )
+                    .tooltip({
+                        let commits = self.commits.clone();
+                        move |window, cx| {
+                            let text = match arrow.other_end.map(|row| &commits[row]) {
+                                Some(commit) => format!("{}  {}", short(&commit.id), commit.subject),
+                                None => tr!("{} (not loaded yet)", short(&commits[arrow.child].parents[arrow.parent])),
+                            };
+                            gpui_kit::component::tooltip::Tooltip::new(text).build(window, cx)
+                        }
+                    })
+            }))
             .into_any_element()
     }
 
@@ -1538,7 +1682,7 @@ fn paint_graph(row: &GraphRow, is_head: bool, bounds: Bounds<Pixels>, window: &m
     let top = bounds.origin.y;
     let mid = top + bounds.size.height / 2.;
     let bottom = top + bounds.size.height;
-    for edge in &row.edges {
+    for edge in row.edges() {
         let (y0, y1) = match edge.half {
             Half::Top => (top, mid),
             Half::Bottom => (mid, bottom),
@@ -1548,6 +1692,31 @@ fn paint_graph(row: &GraphRow, is_head: bool, bounds: Bounds<Pixels>, window: &m
         path.line_to(point(x(edge.to), y1));
         if let Ok(path) = path.build() {
             window.paint_path(path, lane_color(edge.color));
+        }
+    }
+    // Cut edges, as arrows out of the node or into it.
+    let center = point(x(row.node), mid);
+    for arrow in &row.arrows {
+        let (from, tip) = arrow_ends(arrow);
+        let (from, tip) = (center + from, center + tip);
+        let color = lane_color(arrow.color);
+        let mut path = PathBuilder::stroke(px(1.5));
+        path.move_to(from);
+        path.line_to(tip);
+        if let Ok(path) = path.build() {
+            window.paint_path(path, color);
+        }
+        let (dx, dy) = (f32::from(tip.x - from.x), f32::from(tip.y - from.y));
+        let length = (dx * dx + dy * dy).sqrt();
+        let (ux, uy) = (dx / length, dy / length);
+        let base = point(tip.x - px(4.5 * ux), tip.y - px(4.5 * uy));
+        let mut head = PathBuilder::fill();
+        head.move_to(tip);
+        head.line_to(point(base.x - px(3.5 * uy), base.y + px(3.5 * ux)));
+        head.line_to(point(base.x + px(3.5 * uy), base.y - px(3.5 * ux)));
+        head.close();
+        if let Ok(head) = head.build() {
+            window.paint_path(head, color);
         }
     }
     let radius = if is_head { px(4.5) } else { px(3.5) };
@@ -1560,6 +1729,25 @@ fn paint_graph(row: &GraphRow, is_head: bool, bounds: Bounds<Pixels>, window: &m
         );
     } else {
         window.paint_quad(fill(node, color).corner_radii(radius));
+    }
+}
+
+/// Where a cut edge's arrow runs, from its tail to its tip, relative to the
+/// center of its node: out of the node and down, or down into it, fanning out
+/// right, left, then further right. Drawn on the node, so it's clear whose
+/// edge it is.
+fn arrow_ends(arrow: &Arrow) -> (Point<Pixels>, Point<Pixels>) {
+    let (dx, dy): (f32, f32) = match arrow.fan {
+        0 => (10., 10.),
+        1 => (-10., 10.),
+        _ => (13., 5.),
+    };
+    let length = (dx * dx + dy * dy).sqrt();
+    // Clear of the node's dot.
+    let gap = 6. / length;
+    match arrow.half {
+        Half::Bottom => (point(px(dx * gap), px(dy * gap)), point(px(dx), px(dy))),
+        Half::Top => (point(px(dx), px(-dy)), point(px(dx * gap), px(-dy * gap))),
     }
 }
 

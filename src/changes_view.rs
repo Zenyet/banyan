@@ -1,6 +1,7 @@
 //! The "Commit" tab: local changes with checkboxes, commit message and diff preview.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::rc::Rc;
 
 use gpui_kit::component::{
     ActiveTheme as _, Icon, Sizable as _, StyledExt as _,
@@ -79,7 +80,18 @@ pub struct ChangesView {
     excluded: HashMap<String, HashSet<ChangedLine>>,
     /// Hunks of the selected file showing their lines.
     expanded: HashSet<String>,
+    /// The groups as last rendered, with the rows of the list: each group's
+    /// header, then its files unless collapsed.
+    groups: Rc<Vec<(Group, Vec<StatusEntry>)>>,
+    rows: Rc<Vec<ChangeRow>>,
     _subscriptions: Vec<Subscription>,
+}
+
+#[derive(Clone, Copy)]
+enum ChangeRow {
+    Header(usize),
+    /// A group's file.
+    Entry(usize, usize),
 }
 
 impl ChangesView {
@@ -128,6 +140,8 @@ impl ChangesView {
             hunks: Vec::new(),
             excluded: HashMap::new(),
             expanded: HashSet::new(),
+            groups: Rc::default(),
+            rows: Rc::default(),
             _subscriptions: subscriptions,
         };
         this.sync_status(cx);
@@ -484,7 +498,7 @@ impl ChangesView {
         .into_any_element()
     }
 
-    fn render_group(&self, group: Group, entries: &[StatusEntry], cx: &mut Context<Self>) -> AnyElement {
+    fn render_group_header(&self, group: Group, entries: &[StatusEntry], cx: &mut Context<Self>) -> AnyElement {
         let collapsed = self.collapsed.contains(&group);
         let all = !entries.is_empty() && entries.iter().all(|e| self.included.contains(&e.path));
         let title = group.title();
@@ -492,18 +506,13 @@ impl ChangesView {
             Group::List(name) => self.model.read(cx).changelists.active() == name,
             _ => false,
         };
-        let mut rows = Vec::new();
-        if !collapsed {
-            for entry in entries {
-                rows.push(self.render_entry(entry, cx));
-            }
-        }
         let paths: Vec<String> = entries.iter().map(|e| e.path.clone()).collect();
         let (toggle, check, menu_group) = (group.clone(), group.clone(), group.clone());
         let model = self.model.clone();
         let header = h_flex()
             .id(SharedString::from(format!("group-{title}")))
             .h(px(24.))
+            .w_full()
             .px_2()
             .gap_1()
             .text_sm()
@@ -542,13 +551,20 @@ impl ChangesView {
                 }
                 cx.notify();
             }));
-        let header = match menu_group {
+        match menu_group {
             Group::List(name) => header
                 .context_menu(move |menu, _, _| changelist_menu(menu, &model, &name, active, paths.clone()))
                 .into_any_element(),
             _ => header.into_any_element(),
-        };
-        v_flex().child(header).children(rows).into_any_element()
+        }
+    }
+
+    fn render_row(&self, row: ChangeRow, cx: &mut Context<Self>) -> AnyElement {
+        let groups = self.groups.clone();
+        match row {
+            ChangeRow::Header(ix) => self.render_group_header(groups[ix].0.clone(), &groups[ix].1, cx),
+            ChangeRow::Entry(ix, entry) => self.render_entry(&groups[ix].1[entry], cx),
+        }
     }
 
     fn render_entry(&self, entry: &StatusEntry, cx: &mut Context<Self>) -> AnyElement {
@@ -568,6 +584,7 @@ impl ChangesView {
         h_flex()
             .id(SharedString::from(format!("change-{path}")))
             .h(px(24.))
+            .w_full()
             .pl(px(28.))
             .pr_2()
             .gap_1()
@@ -1025,11 +1042,19 @@ impl Render for ChangesView {
                 groups.push((group, members));
             }
         }
-        let mut rendered = Vec::new();
-        for (group, members) in &groups {
-            rendered.push(self.render_group(group.clone(), members, cx));
+        // Thousands of changed files stay quick: only the rows in view are
+        // laid out.
+        let mut rows = Vec::new();
+        for (ix, (group, members)) in groups.iter().enumerate() {
+            rows.push(ChangeRow::Header(ix));
+            if !self.collapsed.contains(group) {
+                rows.extend((0..members.len()).map(|entry| ChangeRow::Entry(ix, entry)));
+            }
         }
-        let list = if groups.is_empty() {
+        let is_empty = groups.is_empty();
+        self.groups = Rc::new(groups);
+        self.rows = Rc::new(rows);
+        let list = if is_empty {
             div()
                 .flex_1()
                 .flex()
@@ -1041,12 +1066,19 @@ impl Render for ChangesView {
                 .into_any_element()
         } else {
             div()
-                .id("changes-list")
                 .flex_1()
                 .min_h_0()
-                .overflow_y_scroll()
-                .py_1()
-                .children(rendered)
+                .child(
+                    uniform_list(
+                        "changes-list",
+                        self.rows.len(),
+                        cx.processor(|this, range: std::ops::Range<usize>, _, cx| {
+                            let rows = this.rows.clone();
+                            range.map(|ix| this.render_row(rows[ix], cx)).collect::<Vec<_>>()
+                        }),
+                    )
+                    .size_full(),
+                )
                 .into_any_element()
         };
 

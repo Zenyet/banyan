@@ -54,6 +54,11 @@ pub struct RepoModel {
     pub refs_version: u64,
     refs_key: Option<RefsKey>,
     refresh_task: Option<Task<()>>,
+    /// Another refresh was asked for while one ran; it runs once that ends.
+    refresh_pending: bool,
+    status_pending: bool,
+    refreshed: Option<Instant>,
+    activities: Vec<(Activity, Instant)>,
     /// When git's commit-graph was last brought up to date.
     graph_updated: Option<Instant>,
     index_refreshed: Option<Instant>,
@@ -66,6 +71,37 @@ pub struct RepoModel {
 type RefsKey = (Option<String>, Vec<(String, String)>);
 
 impl EventEmitter<RepoEvent> for RepoModel {}
+
+/// Work going on in the background that can take a while on a big
+/// repository, shown once it has.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Activity {
+    Refreshing,
+    IndexingHistory,
+    IndexingPaths,
+}
+
+impl Activity {
+    pub fn label(self) -> &'static str {
+        match self {
+            Activity::Refreshing => tr!("Checking for changes…"),
+            Activity::IndexingHistory => tr!("Indexing history…"),
+            Activity::IndexingPaths => tr!("Indexing file history…"),
+        }
+    }
+
+    pub fn detail(self) -> &'static str {
+        match self {
+            Activity::Refreshing => tr!("Reading the status of the work tree and the branches."),
+            Activity::IndexingHistory | Activity::IndexingPaths => {
+                tr!("Writing git's commit-graph, once per repository, so the log and file history load quickly.")
+            }
+        }
+    }
+}
+
+/// How long work goes on before it's shown, so quick work doesn't flicker.
+const ACTIVITY_DELAY: Duration = Duration::from_millis(400);
 
 struct Snapshot {
     head: Option<String>,
@@ -104,6 +140,10 @@ impl RepoModel {
             refs_version: 0,
             refs_key: None,
             refresh_task: None,
+            refresh_pending: false,
+            status_pending: false,
+            refreshed: None,
+            activities: Vec::new(),
             graph_updated: None,
             index_refreshed: None,
             _maintenance: None,
@@ -134,18 +174,42 @@ impl RepoModel {
         if self.graph_updated.is_some_and(|at| at.elapsed() < Duration::from_secs(30)) {
             return;
         }
+        // A first commit-graph of a big history is still being written.
+        if self.activities.iter().any(|(a, _)| *a != Activity::Refreshing) {
+            return;
+        }
         self.graph_updated = Some(Instant::now());
         let repo = self.repo.clone();
-        self._maintenance = Some(cx.spawn(async move |_, cx| {
-            cx.background_executor()
-                .spawn(async move {
-                    // Failing only means history stays slower; nothing to report.
-                    repo.update_commit_graph().ok();
-                    if opening {
-                        repo.refresh_index().ok();
+        self._maintenance = Some(cx.spawn(async move |this, cx| {
+            let executor = cx.background_executor().clone();
+            let run = |f: Box<dyn FnOnce(&Repo) -> bool + Send>| {
+                let repo = repo.clone();
+                executor.spawn(async move { f(&repo) })
+            };
+            // Failing only means history stays slower; nothing to report.
+            if run(Box::new(|repo| repo.has_commit_graph())).await {
+                run(Box::new(|repo| repo.update_commit_graph().is_ok())).await;
+            } else {
+                this.update(cx, |this, cx| this.start_activity(Activity::IndexingHistory, cx)).ok();
+                let written = run(Box::new(|repo| repo.write_quick_commit_graph().is_ok())).await;
+                this.update(cx, |this, cx| {
+                    this.end_activity(Activity::IndexingHistory, cx);
+                    if written {
+                        // The log can be put in date order quickly now.
+                        this.refs_version += 1;
+                        cx.emit(RepoEvent::Changed);
+                        this.start_activity(Activity::IndexingPaths, cx);
                     }
                 })
-                .await;
+                .ok();
+                if written {
+                    run(Box::new(|repo| repo.add_changed_paths().is_ok())).await;
+                    this.update(cx, |this, cx| this.end_activity(Activity::IndexingPaths, cx)).ok();
+                }
+            }
+            if opening {
+                run(Box::new(|repo| repo.refresh_index().is_ok())).await;
+            }
         }));
     }
 
@@ -187,11 +251,12 @@ impl RepoModel {
             loop {
                 cx.background_executor().timer(Duration::from_millis(500)).await;
                 let changes = watcher.take();
-                if !changes.git && changes.worktree.is_empty() {
+                if !changes.git && !changes.index && changes.worktree.is_empty() {
                     continue;
                 }
                 let repo = repo.clone();
                 let relevant = changes.git
+                    || changes.index
                     || cx
                         .background_executor()
                         .spawn(async move { repo.not_ignored(&changes.worktree) })
@@ -200,7 +265,7 @@ impl RepoModel {
                 if relevant && this.update(cx, |this, cx| {
                     // An operation of our own refreshes when it finishes.
                     if this.busy.is_none() {
-                        this.refresh(cx)
+                        if changes.git { this.refresh(cx) } else { this.refresh_status(cx) }
                     }
                 })
                 .is_err()
@@ -237,8 +302,47 @@ impl RepoModel {
         }
     }
 
+    /// The background work to show, if any has gone on for a moment.
+    pub fn activity(&self) -> Option<Activity> {
+        self.activities.iter().filter(|(_, since)| since.elapsed() >= ACTIVITY_DELAY).map(|(a, _)| *a).min()
+    }
+
+    fn start_activity(&mut self, activity: Activity, cx: &mut Context<Self>) {
+        self.activities.push((activity, Instant::now()));
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(ACTIVITY_DELAY).await;
+            this.update(cx, |_, cx| cx.notify()).ok();
+        })
+        .detach();
+    }
+
+    fn end_activity(&mut self, activity: Activity, cx: &mut Context<Self>) {
+        if let Some(ix) = self.activities.iter().position(|(a, _)| *a == activity) {
+            let (_, since) = self.activities.remove(ix);
+            if since.elapsed() >= ACTIVITY_DELAY {
+                cx.notify();
+            }
+        }
+    }
+
+    /// Refresh when coming back to the repository, like JetBrains does on
+    /// frame activation, unless it was read just now.
+    pub fn refresh_if_stale(&mut self, cx: &mut Context<Self>) {
+        let fresh = self.refreshed.is_some_and(|at| at.elapsed() < Duration::from_secs(2));
+        if self.refresh_task.is_none() && !fresh {
+            self.refresh(cx);
+        }
+    }
+
+    /// Read the repository again. A refresh asked for while one runs waits
+    /// for it, and several of them become one.
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        if self.refresh_task.is_some() {
+            self.refresh_pending = true;
+            return;
+        }
         let repo = self.repo.clone();
+        self.start_activity(Activity::Refreshing, cx);
         self.refresh_task = Some(cx.spawn(async move |this, cx| {
             let snapshot = cx
                 .background_executor()
@@ -289,18 +393,65 @@ impl RepoModel {
                 this.web = snapshot.web;
                 this.favorites = snapshot.favorites;
                 this.recent_branches = snapshot.recent_branches;
-                if snapshot.slow_status {
-                    this.refresh_index(cx);
-                }
-                let tracked = this.status.iter().filter(|e| !e.is_untracked()).map(|e| e.path.as_str());
-                if this.changelists.sync(tracked) {
-                    this.save_changelists();
-                }
-                cx.emit(RepoEvent::Changed);
-                cx.notify();
+                this.status_read(snapshot.slow_status, cx);
+                this.refreshed = Some(Instant::now());
+                this.status_pending = false;
+                this.refresh_done(cx);
             })
             .ok();
         }));
+    }
+
+    /// Read only the status again, for edits in the work tree: running the
+    /// dozen other git commands of a refresh each time adds up.
+    fn refresh_status(&mut self, cx: &mut Context<Self>) {
+        if self.refresh_task.is_some() {
+            self.status_pending = true;
+            return;
+        }
+        let repo = self.repo.clone();
+        self.start_activity(Activity::Refreshing, cx);
+        self.refresh_task = Some(cx.spawn(async move |this, cx| {
+            let (status, slow) = cx
+                .background_executor()
+                .spawn(async move {
+                    let started = Instant::now();
+                    let status = repo.status();
+                    (status, started.elapsed() > Duration::from_millis(100))
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                if let Ok(status) = status {
+                    this.status = status;
+                    this.status_read(slow, cx);
+                }
+                this.refresh_done(cx);
+            })
+            .ok();
+        }));
+    }
+
+    fn status_read(&mut self, slow: bool, cx: &mut Context<Self>) {
+        if slow {
+            self.refresh_index(cx);
+        }
+        let tracked = self.status.iter().filter(|e| !e.is_untracked()).map(|e| e.path.as_str());
+        if self.changelists.sync(tracked) {
+            self.save_changelists();
+        }
+        cx.emit(RepoEvent::Changed);
+        cx.notify();
+    }
+
+    /// Run the refresh asked for meanwhile, if any.
+    fn refresh_done(&mut self, cx: &mut Context<Self>) {
+        self.refresh_task = None;
+        self.end_activity(Activity::Refreshing, cx);
+        if std::mem::take(&mut self.refresh_pending) {
+            self.refresh(cx);
+        } else if std::mem::take(&mut self.status_pending) {
+            self.refresh_status(cx);
+        }
     }
 
     /// Run a git operation off the main thread, report the outcome and refresh.

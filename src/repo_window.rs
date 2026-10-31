@@ -193,8 +193,14 @@ pub struct RepoWindow {
 }
 
 impl RepoWindow {
-    fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
-        Self { tabs: Vec::new(), active: 0, _subscriptions: Vec::new() }
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        // Pick up changes made outside the app in the repository on show.
+        let activation = cx.observe_window_activation(window, |this, window, cx| {
+            if window.is_window_active() && !this.tabs.is_empty() {
+                this.model(this.active, cx).update(cx, |model, cx| model.refresh_if_stale(cx));
+            }
+        });
+        Self { tabs: Vec::new(), active: 0, _subscriptions: vec![activation] }
     }
 
     fn model(&self, ix: usize, cx: &App) -> Entity<RepoModel> {
@@ -220,6 +226,9 @@ impl RepoWindow {
 
     fn activate(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(workspace) = self.tabs.get(ix) else { return };
+        if ix != self.active {
+            self.model(ix, cx).update(cx, |model, cx| model.refresh_if_stale(cx));
+        }
         self.active = ix;
         let name = workspace.read(cx).model().read(cx).repo.name();
         window.set_window_title(&format!("{name} – Banyan"));

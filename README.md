@@ -35,7 +35,8 @@ the way git branches grow apart and merge back.
 ### Log
 
 - Branches tree (HEAD / Local / Remote / Tags) next to a commit graph with colored lanes and ref labels;
-  commits of the current branch are in bold. **Go to Hash, Branch or Tag** (<kbd>⌘</kbd> <kbd>G</kbd>) jumps to any commit.
+  commits of the current branch are in bold. Click a branch or tag in the tree to jump to its commit, even an old
+  tag far down a big history (the log then starts there). **Go to Hash, Branch or Tag** (<kbd>⌘</kbd> <kbd>G</kbd>) jumps to any commit.
 - Filter by text or hash, branch, date, any number of authors (with a "Me" shortcut), and files or folders; git does the filtering, so results reach past the commits loaded.
 - Commit details ("in N branches"), a changed-files tree, and a side-by-side or unified diff
   with syntax highlighting. **Ignore Whitespace** above any diff leaves out whitespace-only changes.
@@ -53,6 +54,10 @@ the way git branches grow apart and merge back.
   stashed around the rebase, and rewriting commits that are already pushed asks first.
 - **Open on GitHub** (or GitLab, Bitbucket, Gitea) and **Copy Link** for commits and files.
 - Loads 5000 commits at a time (configurable), and more when you scroll to the end.
+- Stays quick on big repositories such as the Linux kernel: git's commit-graph is kept up to date in the
+  background, and like JetBrains, an edge that would run a long way down the graph shows as an arrow at each end
+  (hover one to see the commit at the other end, click to jump there) rather than taking a lane all the way.
+  Select a commit and its own edges are drawn whole.
 
 ### Commit
 
@@ -230,6 +235,8 @@ are carried over on first launch.
 ```sh
 cargo run -- .     # run a debug build on this repository
 cargo test         # graph layout, ref parsing, and git operations against throwaway repositories
+BANYAN_BENCH_REPO=path/to/big/repo cargo test --release bench_ -- --ignored --nocapture   # time the git calls
+BANYAN_TRACE=1 cargo run --release -- .   # print every git command the app runs, with how long it took
 ```
 
 ### Project layout

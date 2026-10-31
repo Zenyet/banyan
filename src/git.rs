@@ -13,6 +13,8 @@ const RECORD: char = '\x1e';
 #[derive(Clone, Debug)]
 pub struct Repo {
     root: PathBuf,
+    /// The .git directory, which stays put for as long as the repository.
+    git_dir: PathBuf,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -813,11 +815,13 @@ pub struct Stash {
 
 impl Repo {
     pub fn open(path: &Path) -> Result<Self> {
-        let out = run(path, &["rev-parse", "--show-toplevel"])
+        let out = run(path, &["rev-parse", "--show-toplevel", "--absolute-git-dir"])
             .with_context(|| format!("{} is not a git repository", path.display()))?;
-        Ok(Self {
-            root: PathBuf::from(out.trim()),
-        })
+        let mut lines = out.lines();
+        let (Some(root), Some(git_dir)) = (lines.next(), lines.next()) else {
+            bail!("{} is not a git repository", path.display());
+        };
+        Ok(Self { root: PathBuf::from(root), git_dir: PathBuf::from(git_dir) })
     }
 
     /// Create a repository in `dir`.
@@ -877,13 +881,42 @@ impl Repo {
             options.push("--regexp-ignore-case".into());
             options.push(format!("--grep={}", escape_basic_regex(text)));
         }
+        // Finding the tags off branches is quick only with a commit-graph,
+        // and only putting the log in order needs it.
+        let ordered = self.has_commit_graph();
+        let loose_tags = if filter.refs.is_none() && ordered { self.tags_off_branches() } else { Vec::new() };
         let mut revs: Vec<&str> = match &filter.refs {
             Some(refs) => vec![refs],
+            // Not --tags: old tags make git walk the history down to them
+            // to put it in order. Commits on branches show their tags anyway.
+            None if ordered => {
+                ["--branches", "--remotes", "HEAD"].into_iter().chain(loose_tags.iter().map(String::as_str)).collect()
+            }
             None => vec!["--branches", "--remotes", "--tags", "HEAD"],
         };
         revs.extend(options.iter().map(String::as_str));
         let paths: Vec<&str> = filter.paths.iter().map(String::as_str).collect();
         self.log_paths(&revs, &paths, limit)
+    }
+
+    /// Tags of commits that no branch, remote branch or HEAD has.
+    fn tags_off_branches(&self) -> Vec<String> {
+        let Ok(branches) = self.git(&["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"]) else {
+            return Vec::new();
+        };
+        let mut args = vec!["for-each-ref".to_string(), "--format=%(objecttype) %(*objecttype) %(refname)".into()];
+        args.push("--no-merged=HEAD".into());
+        args.extend(branches.lines().filter(|b| !b.ends_with("/HEAD")).map(|b| format!("--no-merged={b}")));
+        args.push("refs/tags".into());
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let Ok(out) = self.git(&args) else { return Vec::new() };
+        out.lines()
+            .filter_map(|line| {
+                let (types, name) = line.rsplit_once(' ')?;
+                // A tag of a tree or blob has no history.
+                matches!(types.trim(), "commit" | "tag commit").then(|| name.to_string())
+            })
+            .collect()
     }
 
     /// The web page of the remote the current branch tracks, else `origin`,
@@ -937,7 +970,14 @@ impl Repo {
     fn log_paths(&self, revs: &[&str], paths: &[&str], limit: usize) -> Result<Vec<Commit>> {
         let format = format!("--format=%H{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%at{FIELD}%D{FIELD}%s{RECORD}");
         let limit = format!("-n{limit}");
-        let mut args = vec!["log", "--date-order", "--decorate=full", &format, &limit];
+        let mut args = vec!["log", "--decorate=full", &format, &limit];
+        // Without a commit-graph, --date-order reads every commit before
+        // printing one: seconds on a big repository. Until git has written
+        // one, take the commits in plain date order, which only puts a
+        // commit below its parent when their clocks disagree.
+        if self.has_commit_graph() {
+            args.insert(1, "--date-order");
+        }
         args.extend(revs);
         args.push("--");
         args.extend(paths);
@@ -976,14 +1016,44 @@ impl Repo {
     }
 
     /// Commits that changed `path`, following renames.
+    ///
+    /// Not `git log --follow`, which can't use the commit-graph's changed
+    /// paths and so reads every commit's tree: seconds on a big history.
+    /// The history of each name is quick; where it begins, a rename is
+    /// looked for in that one commit.
     pub fn file_history(&self, path: &str) -> Result<Vec<FileRevision>> {
+        let mut revisions = Vec::new();
+        let mut path = path.to_string();
+        let mut names = std::collections::HashSet::from([path.clone()]);
+        let mut from: Option<String> = None;
+        loop {
+            let segment = self.path_history(from.as_deref(), &path)?;
+            let origin = segment.last().map(|r| (r.commit.id.clone(), r.commit.parents.first().cloned()));
+            revisions.extend(segment);
+            let Some((id, Some(parent))) = origin else { break };
+            match self.renamed_from(&parent, &id, &path) {
+                Some(old) if names.insert(old.clone()) => {
+                    path = old;
+                    from = Some(parent);
+                }
+                _ => break,
+            }
+        }
+        Ok(revisions)
+    }
+
+    /// Commits from `from` (HEAD by default) that changed `path`.
+    fn path_history(&self, from: Option<&str>, path: &str) -> Result<Vec<FileRevision>> {
         let format = format!("--format={RECORD}%H{FIELD}%P{FIELD}%an{FIELD}%ae{FIELD}%at{FIELD}%s");
-        let out = self.git(&["log", "--follow", "--name-only", &format, "--", path])?;
+        // Like --follow, which shows no merges.
+        let mut args = vec!["log", "--no-merges", &format];
+        args.extend(from);
+        args.extend(["--", path]);
+        let out = self.git(&args)?;
         Ok(out
             .split(RECORD)
             .filter_map(|record| {
-                let (header, names) = record.split_once('\n').unwrap_or((record, ""));
-                let mut fields = header.split(FIELD);
+                let mut fields = record.trim_end_matches('\n').split(FIELD);
                 let id = fields.next()?.to_string();
                 if id.is_empty() {
                     return None;
@@ -993,11 +1063,6 @@ impl Repo {
                 let email = fields.next()?.to_string();
                 let time = fields.next()?.parse().unwrap_or(0);
                 let subject = fields.next().unwrap_or_default().to_string();
-                let path = names
-                    .lines()
-                    .find(|line| !line.trim().is_empty())
-                    .unwrap_or(path)
-                    .to_string();
                 Some(FileRevision {
                     commit: Commit {
                         id,
@@ -1008,10 +1073,34 @@ impl Repo {
                         subject,
                         refs: Vec::new(),
                     },
-                    path,
+                    path: path.to_string(),
                 })
             })
             .collect())
+    }
+
+    /// The name `path` had in `parent`, if commit `id` renamed it.
+    fn renamed_from(&self, parent: &str, id: &str, path: &str) -> Option<String> {
+        // Still there before: changed, not renamed.
+        if self.git(&["cat-file", "-e", &format!("{parent}:{path}")]).is_ok() {
+            return None;
+        }
+        let out = self.git(&["diff-tree", "-r", "-M", "--name-status", "-z", parent, id]).ok()?;
+        let mut fields = out.split('\0');
+        while let Some(status) = fields.next() {
+            if status.starts_with('R') {
+                let (old, new) = (fields.next()?, fields.next()?);
+                if new == path {
+                    return Some(old.to_string());
+                }
+            } else if status.starts_with('C') {
+                fields.next();
+                fields.next();
+            } else {
+                fields.next();
+            }
+        }
+        None
     }
 
     /// Patch of `path` introduced by commit `id` (against its first parent).
@@ -1058,7 +1147,7 @@ impl Repo {
     }
 
     pub fn git_dir(&self) -> Result<PathBuf> {
-        Ok(PathBuf::from(self.git(&["rev-parse", "--absolute-git-dir"])?.trim()))
+        Ok(self.git_dir.clone())
     }
 
     pub fn head(&self) -> Option<String> {
@@ -1203,14 +1292,16 @@ impl Repo {
 
     pub fn branches(&self) -> Result<Vec<Branch>> {
         let format = format!(
-            "--format=%(refname){FIELD}%(objectname){FIELD}%(upstream:short){FIELD}%(upstream:track,nobracket){FIELD}%(HEAD)"
+            "--format=%(refname){FIELD}%(objectname){FIELD}%(*objectname){FIELD}%(upstream:short){FIELD}%(upstream:track,nobracket){FIELD}%(HEAD)"
         );
         let out = self.git(&["for-each-ref", &format, "refs/heads", "refs/remotes", "refs/tags"])?;
         let mut branches = Vec::new();
         for line in out.lines() {
             let mut fields = line.split(FIELD);
             let refname = fields.next().unwrap_or_default();
-            let target = fields.next().unwrap_or_default().to_string();
+            let object = fields.next().unwrap_or_default();
+            // An annotated tag points at its commit through the tag object.
+            let target = fields.next().filter(|s| !s.is_empty()).unwrap_or(object).to_string();
             let upstream = fields.next().filter(|s| !s.is_empty()).map(str::to_string);
             let track = fields.next().filter(|s| !s.is_empty()).map(str::to_string);
             let is_head = fields.next() == Some("*");
@@ -1289,10 +1380,7 @@ impl Repo {
     }
 
     pub fn repo_state(&self) -> RepoState {
-        let Ok(git_dir) = self.git(&["rev-parse", "--absolute-git-dir"]) else {
-            return RepoState::Clean;
-        };
-        let git_dir = PathBuf::from(git_dir.trim());
+        let git_dir = &self.git_dir;
         if git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists() {
             RepoState::Rebasing
         } else if git_dir.join("MERGE_HEAD").exists() {
@@ -1308,8 +1396,7 @@ impl Repo {
 
     /// The prepared message of an in-progress merge, cherry-pick or revert.
     pub fn merge_message(&self) -> Option<String> {
-        let git_dir = self.git(&["rev-parse", "--absolute-git-dir"]).ok()?;
-        let text = std::fs::read_to_string(PathBuf::from(git_dir.trim()).join("MERGE_MSG")).ok()?;
+        let text = std::fs::read_to_string(self.git_dir.join("MERGE_MSG")).ok()?;
         let message: Vec<&str> = text.lines().filter(|line| !line.starts_with('#')).collect();
         Some(message.join("\n").trim().to_string()).filter(|m| !m.is_empty())
     }
@@ -2262,14 +2349,30 @@ impl Repo {
     /// are many times faster with it; `git gc` and `git maintenance` write
     /// the same file.
     pub fn update_commit_graph(&self) -> Result<()> {
-        let info = PathBuf::from(self.git(&["rev-parse", "--git-path", "objects/info"])?.trim());
-        let info = if info.is_absolute() { info } else { self.root.join(info) };
-        let exists = info.join("commit-graph").exists() || info.join("commit-graphs").exists();
         let mut args = vec!["commit-graph", "write", "--reachable", "--changed-paths"];
-        if exists {
+        if self.has_commit_graph() {
             args.push("--split");
         }
         self.git(&args).map(|_| ())
+    }
+
+    /// A first commit-graph, quickly: without the changed paths, which take
+    /// minutes on a big history. `add_changed_paths` adds them.
+    pub fn write_quick_commit_graph(&self) -> Result<()> {
+        self.git(&["commit-graph", "write", "--reachable"]).map(|_| ())
+    }
+
+    pub fn add_changed_paths(&self) -> Result<()> {
+        self.git(&["commit-graph", "write", "--reachable", "--changed-paths", "--split=replace"]).map(|_| ())
+    }
+
+    /// Whether git has written a commit-graph, without which ordering the
+    /// log means walking the whole history first.
+    pub fn has_commit_graph(&self) -> bool {
+        let Ok(info) = self.git(&["rev-parse", "--git-path", "objects/info"]) else { return false };
+        let info = PathBuf::from(info.trim());
+        let info = if info.is_absolute() { info } else { self.root.join(info) };
+        info.join("commit-graph").exists() || info.join("commit-graphs").exists()
     }
 
     /// Bring the file times cached in the index up to date. Status then
@@ -2700,6 +2803,9 @@ fn run(dir: &Path, args: &[&str]) -> Result<String> {
     let output = command(dir, args)
         .output()
         .context("failed to run git; is it installed? (Settings › Git)")?;
+    if std::env::var_os("BANYAN_TRACE").is_some() {
+        eprintln!("[{:>5} ms] git {}", started.elapsed().as_millis(), args.join(" "));
+    }
     if crate::console::is_recording() {
         crate::console::record(
             dir,
@@ -2978,6 +3084,32 @@ mod tests {
             .map(|subject| t.commit(&format!("{subject}.txt"), subject, subject))
             .collect();
         (t, ids)
+    }
+
+    #[test]
+    fn tags_point_at_their_commits() {
+        let (t, ids) = four_commits("tag-targets");
+        t.repo.git(&["tag", "-a", "-m", "Annotated", "annotated", &ids[1]]).unwrap();
+        t.repo.git(&["tag", "light", &ids[2]]).unwrap();
+        let target = |name: &str| t.repo.branches().unwrap().into_iter().find(|b| b.name == name).unwrap().target;
+        assert_eq!(target("annotated"), ids[1]);
+        assert_eq!(target("light"), ids[2]);
+    }
+
+    #[test]
+    fn log_shows_commits_only_a_tag_has() {
+        let (t, ids) = four_commits("loose-tag");
+        // A tagged commit on top of One that no branch has.
+        t.repo.git(&["checkout", "-q", "--detach", &ids[1]]).unwrap();
+        let loose = t.commit("Loose.txt", "Loose", "Loose");
+        t.repo.git(&["tag", "-a", "-m", "Loose", "loose"]).unwrap();
+        t.repo.git(&["tag", "on-branch", &ids[2]]).unwrap();
+        t.repo.git(&["checkout", "-q", "-"]).unwrap();
+
+        assert_eq!(t.repo.tags_off_branches(), vec!["refs/tags/loose"]);
+        let log = t.repo.log(&LogFilter::default(), 100).unwrap();
+        assert!(log.iter().any(|c| c.id == loose));
+        assert_eq!(log.len(), 5);
     }
 
     #[test]
@@ -3306,7 +3438,33 @@ mod tests {
                 commits = repo.log(&LogFilter::default(), limit).unwrap();
                 commits.len()
             });
-            time(&format!("graph layout {limit}"), &mut || crate::graph::layout(&commits).len());
+            let mut graph = Vec::new();
+            time(&format!("graph layout {limit}"), &mut || {
+                graph = crate::graph::layout(&commits, None);
+                graph.len()
+            });
+            let mut widths: Vec<usize> = graph.iter().map(|row| row.width).collect();
+            widths.sort_unstable();
+            let (widest, p90) = (widths.last().copied().unwrap_or(0), widths.get(widths.len() * 9 / 10).copied().unwrap_or(0));
+            let mb = crate::graph::heap_size(&graph) as f64 / 1e6;
+            eprintln!("{:<34} {widest} lanes at most, {p90} for 90% of rows, {mb:.1} MB", "");
+            // Selecting the commit with the most cut edges keeps them whole.
+            let mut ends = std::collections::HashMap::<usize, usize>::new();
+            for arrow in graph.iter().flat_map(|row| &row.arrows).filter(|a| a.half == crate::graph::Half::Bottom) {
+                if let Some(end) = arrow.other_end {
+                    *ends.entry(arrow.child).or_default() += 1;
+                    *ends.entry(end).or_default() += 1;
+                }
+            }
+            if let Some((&row, &count)) = ends.iter().max_by_key(|(_, count)| **count) {
+                let mut whole = Vec::new();
+                time(&format!("layout keeping {count} edges whole"), &mut || {
+                    whole = crate::graph::layout(&commits, Some(&commits[row].id));
+                    whole.len()
+                });
+                let widest = whole.iter().map(|row| row.width).max().unwrap_or(0);
+                eprintln!("{:<34} {widest} lanes at most", "");
+            }
         }
         time("branches", &mut || repo.branches().unwrap().len());
         time("status", &mut || repo.status().unwrap().len());

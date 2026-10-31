@@ -5,7 +5,7 @@ use std::rc::Rc;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Sizable as _, WindowExt as _, button::Button, h_flex, h_resizable,
     menu::{ContextMenuExt as _, PopupMenuItem},
-    resizable_panel, v_flex,
+    resizable_panel, spinner::Spinner, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -188,10 +188,12 @@ impl Render for HistoryView {
                     .px_2()
                     .flex()
                     .items_center()
+                    .gap_1()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .border_b_1()
                     .border_color(cx.theme().border)
+                    .when(self.loading, |row| row.child(Spinner::new().xsmall()))
                     .child(if self.loading {
                         tr!("Loading…").to_string()
                     } else {
