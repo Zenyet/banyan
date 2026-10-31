@@ -607,7 +607,11 @@ func (cv *ChangesView) entryRow(c *ui.Context, e *git.StatusEntry) {
 	}
 	if row.Clicked() {
 		cv.selectPath(path)
-		if e.IsConflicted() && row.DoubleClicked() {
+	}
+	// As in the Conflicts dialog, a double click is not under Clicked.
+	if row.DoubleClicked() {
+		cv.selectPath(path)
+		if e.IsConflicted() {
 			openMergeTool(cv.ws, path)
 		}
 	}

@@ -71,7 +71,10 @@ func (s *Shell) Open(d *Dialog) {
 		d.Width = 440
 	}
 	s.dialogs = append(s.dialogs, d)
-	s.Win.Invalidate()
+	// A shell of the tests has no window.
+	if s.Win != nil {
+		s.Win.Invalidate()
+	}
 }
 
 // HasDialog reports whether a dialog is open over the window.
@@ -109,7 +112,13 @@ func (s *Shell) view(c *ui.Context) {
 			}
 			d.Body(c, d)
 		})
-		panel.Width(d.Width).Radius(16)
+		// As macOS's windows and sheets: a hairline around, lighter in
+		// the dark, and a deep, soft shadow.
+		edge, shade := ui.RGBA(0, 0, 0, 0.12), ui.RGBA(0, 0, 0, 0.22)
+		if t.Dark {
+			edge, shade = ui.RGBA(255, 255, 255, 0.14), ui.RGBA(0, 0, 0, 0.55)
+		}
+		panel.Width(d.Width).Radius(16).Border(1, edge).Shadow(0, 18, 50, 0, shade)
 		if was && !d.open && panel.Dismissed() && d.OnDismiss != nil {
 			d.OnDismiss()
 		}

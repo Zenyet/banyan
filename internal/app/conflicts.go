@@ -150,9 +150,12 @@ func openConflicts(s *Shell, m *model.Model) {
 						}
 						if row.Clicked() {
 							selected = e.Path
-							if e.CanMergeText() && row.DoubleClicked() {
-								openMergeToolIn(s, m, e.Path)
-							}
+						}
+						// The second press of a double click comes as a frame of
+						// its own, before its release clicks: not under Clicked.
+						if row.DoubleClicked() && e.CanMergeText() {
+							selected = e.Path
+							openMergeToolIn(s, m, e.Path)
 						}
 						row.Children(func() {
 							ui.Image(c, fileIcon(e.Path)).Size(t.FontSize+1, t.FontSize+1)
