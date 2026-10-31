@@ -128,18 +128,40 @@ func applyTheme(c *ui.Context) {
 	if size >= 9 && size <= 24 {
 		t.FontSize = float32(size)
 	}
-	t.Spacing = 3.5
-	t.Accent = ui.Hex("#3574f0")
-	t.AccentHover = ui.Hex("#2f67d8")
-	t.AccentPressed = ui.Hex("#2a5cc0")
+	// Apple's system colors and the macOS window's grays.
+	t.Spacing = 4
+	t.Radius = 8
 	if t.Dark {
-		t.Background = ui.Hex("#1e1f22")
-		t.Surface = ui.Hex("#2b2d30")
-		t.SurfaceHover = ui.Hex("#35373b")
-		t.Border = ui.Hex("#393b40")
-		t.Text = ui.Hex("#dfe1e5")
-		t.TextMuted = ui.Hex("#8c8f96")
+		t.Background = ui.Hex("#1e1e1e")
+		t.Surface = ui.Hex("#2c2c2e")
+		t.SurfaceHover = ui.Hex("#3a3a3c")
+		t.SurfacePressed = ui.Hex("#48484a")
+		t.Border = ui.Hex("#38383a")
+		t.Text = ui.Hex("#f5f5f7")
+		t.TextMuted = ui.Hex("#98989d")
+		t.Accent = ui.Hex("#0a84ff")
+		t.AccentHover = ui.Hex("#3395ff")
+		t.AccentPressed = ui.Hex("#0071e3")
+		t.Danger = ui.Hex("#ff453a")
+		t.Warning = ui.Hex("#ff9f0a")
+		t.Success = ui.Hex("#30d158")
+	} else {
+		t.Background = ui.Hex("#ffffff")
+		t.Surface = ui.Hex("#f5f5f7")
+		t.SurfaceHover = ui.Hex("#ebebf0")
+		t.SurfacePressed = ui.Hex("#e0e0e6")
+		t.Border = ui.Hex("#e3e3e8")
+		t.Text = ui.Hex("#1d1d1f")
+		t.TextMuted = ui.Hex("#86868b")
+		t.Accent = ui.Hex("#007aff")
+		t.AccentHover = ui.Hex("#0a6fe0")
+		t.AccentPressed = ui.Hex("#0062cc")
+		t.Danger = ui.Hex("#ff3b30")
+		t.Warning = ui.Hex("#ff9500")
+		t.Success = ui.Hex("#34c759")
 	}
+	t.Selection = t.Accent.Alpha(0.25)
+	t.Focus = t.Accent.Alpha(0.5)
 	c.SetTheme(&t)
 }
 

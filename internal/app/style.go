@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 
 	"github.com/Zenyet/banyan/internal/git"
@@ -22,7 +23,7 @@ var iconFiles embed.FS
 
 var icons = map[string]*ui.SVG{}
 
-// icon is the Lucide icon of that name, from icons/.
+// icon is the icon of that name, from icons/ (MingCute and Phosphor).
 func icon(name string) *ui.SVG {
 	if svg, ok := icons[name]; ok {
 		return svg
@@ -44,7 +45,7 @@ var laneColors = []string{"#4d8ee8", "#e0a33d", "#58b25a", "#d85e8a", "#9a6ad6",
 func laneColor(ix int) ui.Color { return ui.Hex(laneColors[ix%len(laneColors)]) }
 
 // selectionBG is the selected row's background, readable in both themes.
-var selectionBG = ui.Hex("#4d8ee8").Alpha(0.22)
+var selectionBG = ui.Hex("#0a84ff").Alpha(0.2)
 
 func hoverBG(t *ui.Theme) ui.Color { return t.SurfaceHover }
 
@@ -271,6 +272,54 @@ func ghostButton(c *ui.Context, iconName, label string) ui.Element {
 		b.Background(hoverBG(t))
 	}
 	return b
+}
+
+// chromeBG is the background of the window's bars, around the content, as
+// a macOS window's toolbar.
+func chromeBG(t *ui.Theme) ui.Color {
+	if t.Dark {
+		return ui.Hex("#262628")
+	}
+	return ui.Hex("#f6f6f8")
+}
+
+// glassGroup is a capsule of Liquid Glass holding controls, as macOS's
+// toolbars group them.
+func glassGroup(c *ui.Context, fn func()) ui.Element {
+	return ui.Row(c).Height(36).Padding(3).Gap(2).Radius(18).Shrink(0).Material(glass.Glass{}).Children(fn)
+}
+
+// capsuleButton is a borderless button of a glassGroup: an icon, and a
+// label unless compact, which then shows as its tooltip; menu adds a
+// chevron, for a button opening a menu.
+func capsuleButton(c *ui.Context, iconName, label string, compact, menu bool) ui.Element {
+	t := c.Theme()
+	b := ui.Button(c, "").Label(label).Height(30).PaddingX(10).Radius(15).Gap(6).Background(ui.Color{}).Border(0, ui.Color{})
+	if compact {
+		b.PaddingX(8).Tooltip(label)
+	}
+	b.Children(func() {
+		ui.Icon(c, icon(iconName)).FontSize(t.FontSize + 2)
+		if !compact {
+			ui.Text(c, label).SingleLine().FontWeight(500)
+		}
+		if menu {
+			ui.Icon(c, icon("chevron-down")).FontSize(t.FontSize - 3).TextColor(t.TextMuted)
+		}
+	})
+	if b.Hovered() {
+		b.Background(t.Text.Alpha(0.07))
+	}
+	return b
+}
+
+// selectedPill is the face of the chosen segment of a capsule, as macOS's
+// segmented controls lift it.
+func selectedPill(e ui.Element, t *ui.Theme) ui.Element {
+	if t.Dark {
+		return e.Background(ui.RGBA(255, 255, 255, 0.14))
+	}
+	return e.Background(ui.RGB(255, 255, 255)).Shadow(0, 1, 3, 0, ui.RGBA(0, 0, 0, 0.12))
 }
 
 // emptyMessage fills its parent with a muted message in the middle.

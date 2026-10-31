@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 
 	"github.com/Zenyet/banyan/internal/git"
@@ -99,7 +100,6 @@ func (ws *Workspace) Command(id string) {
 }
 
 func (ws *Workspace) View(c *ui.Context) {
-	t := c.Theme()
 	// The commands of the keymap that have no menu item of their own work
 	// through the menus; Escape and the like are the views'.
 	if files := c.Root().DroppedFiles(); len(files) > 0 {
@@ -107,38 +107,7 @@ func (ws *Workspace) View(c *ui.Context) {
 			openPath(ws.Shell, files[0], false)
 		}
 	}
-	ws.toolbar(c)
 	operationBanner(c, ws)
-	ui.Row(c.Key("tabs")).Height(30).PaddingX(8).Gap(2).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
-		shelf := i18n.T("Shelf")
-		if n := len(ws.Model.Shelves); n > 0 {
-			shelf = i18n.Tf("Shelf ({})", n)
-		}
-		tabs := []struct{ icon, label string }{
-			{"git-graph", i18n.T("Log")},
-			{"git-commit-horizontal", i18n.Tf("Commit ({})", ws.changes.changeCount())},
-			{"inbox", shelf},
-			{"square-terminal", i18n.T("Console")},
-		}
-		for ix, tab := range tabs {
-			b := ui.Row(c.Key(ix)).Height(30).PaddingX(10).Gap(6).Cursor(ui.CursorPointer)
-			if ix == ws.tab {
-				b.BorderWidth(0, 0, 2, 0).BorderColor(t.Accent)
-			} else {
-				b.TextColor(t.TextMuted)
-				if b.Hovered() {
-					b.TextColor(t.Text)
-				}
-			}
-			if b.Clicked() {
-				ws.tab = ix
-			}
-			b.Children(func() {
-				ui.Icon(c, icon(tab.icon)).FontSize(t.FontSize)
-				ui.Text(c, tab.label).SingleLine()
-			})
-		}
-	})
 	ui.Column(c.Key("content")).Grow(1).MinHeight(0).Children(func() {
 		switch ws.tab {
 		case tabLog:
@@ -157,7 +126,7 @@ func (ws *Workspace) View(c *ui.Context) {
 func (ws *Workspace) statusBar(c *ui.Context) {
 	t := c.Theme()
 	m := ws.Model
-	ui.Row(c.Key("status")).Height(24).PaddingX(8).Gap(12).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).
+	ui.Row(c.Key("status")).Height(26).PaddingX(14).Gap(12).Background(chromeBG(t)).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).
 		FontSize(t.FontSize - 1).TextColor(t.TextMuted).Children(func() {
 		ui.Text(c, m.Repo.Root()).SingleLine().Shrink(1)
 		ui.Spacer(c)
@@ -175,41 +144,99 @@ func (ws *Workspace) statusBar(c *ui.Context) {
 	})
 }
 
-func (ws *Workspace) toolbar(c *ui.Context) {
+// titleBarHeight is the height of the window's title bar, which holds the
+// toolbar.
+const titleBarHeight = 52
+
+// header is the window's title bar, on Liquid Glass: the repository and its
+// branch, the views, and the VCS operations, clear of the window controls.
+// Narrow windows show the operations' icons alone.
+func (ws *Workspace) header(c *ui.Context) {
 	t := c.Theme()
 	m := ws.Model
-	ui.Row(c.Key("toolbar")).Height(40).PaddingX(8).Gap(2).Background(t.Surface).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
-		ghostButton(c.Key("repo"), "folder-git-2", m.Repo.Name()+" ▾").PopoverMenuButton(ws.repoMenu)
-		ghostButton(c.Key("branch"), "git-branch", ws.branchLabel()+" ▾").PopoverMenuButton(ws.branchPopup)
-		ui.Box(c).Size(1, 18).Margin(0, 4).Background(t.Border)
-		if ghostButton(c.Key("fetch"), "refresh-ccw", i18n.T("Fetch")).Clicked() {
-			ws.Command("fetch")
-		}
-		if ghostButton(c.Key("update"), "arrow-down-to-line", i18n.T("Update")).Tooltip(i18n.T("Update Project (⌘T)")).Clicked() {
-			openUpdate(ws)
-		}
-		if ghostButton(c.Key("push"), "arrow-up-from-line", i18n.T("Push")).Clicked() {
-			openPush(ws)
-		}
-		ghostButton(c.Key("stashes"), "archive", i18n.Tf("Stashes ({})", len(m.Stashes))+" ▾").PopoverMenuButton(ws.stashMenu)
+	bar := c.TitleBar()
+	compact := c.Root().Bounds().W < 1180
+	ui.Row(c.Key("toolbar")).Height(titleBarHeight).Shrink(0).Padding(0, bar.Right+12, 0, bar.Left+12).Gap(8).
+		Background(chromeBG(t)).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).ClipX().DragWindow().Children(func() {
+		glassGroup(c.Key("where"), func() {
+			capsuleButton(c.Key("repo"), "folder-git-2", m.Repo.Name(), false, true).PopoverMenuButton(ws.repoMenu)
+			capsuleButton(c.Key("branch"), "git-branch", ws.branchLabel(), false, true).PopoverMenuButton(ws.branchPopup)
+		}).Shrink(1).MinWidth(0)
+		ui.Spacer(c)
+		ws.views(c)
 		ui.Spacer(c)
 		if m.Busy != "" {
-			ui.Row(c).Gap(4).FontSize(t.FontSize - 1).TextColor(t.TextMuted).Children(func() {
+			ui.Row(c).Gap(4).Shrink(1).MinWidth(0).FontSize(t.FontSize - 1).TextColor(t.TextMuted).Children(func() {
 				ui.Spinner(c).Size(12, 12)
-				ui.Text(c, m.Busy+"…").SingleLine()
+				ui.Text(c, m.Busy+"…").SingleLine().Shrink(1)
 			})
 		}
+		glassGroup(c.Key("vcs"), func() {
+			if capsuleButton(c.Key("fetch"), "refresh-ccw", i18n.T("Fetch"), compact, false).Clicked() {
+				ws.Command("fetch")
+			}
+			if capsuleButton(c.Key("update"), "arrow-down-to-line", i18n.T("Update"), compact, false).Tooltip(i18n.T("Update Project (⌘T)")).Clicked() {
+				openUpdate(ws)
+			}
+			if capsuleButton(c.Key("push"), "arrow-up-from-line", i18n.T("Push"), compact, false).Clicked() {
+				openPush(ws)
+			}
+			capsuleButton(c.Key("stashes"), "archive", i18n.Tf("Stashes ({})", len(m.Stashes)), compact, true).PopoverMenuButton(ws.stashMenu)
+		})
 		themeIcon := "moon"
 		if t.Dark {
 			themeIcon = "sun"
 		}
-		if iconButton(c.Key("theme"), themeIcon, i18n.T("Toggle Theme")).Clicked() {
+		toggle := ui.ButtonBase(c.Key("theme")).Size(36, 36).Radius(18).Center().Shrink(0).Material(glass.Glass{Interactive: true}).
+			Label(i18n.T("Toggle Theme")).Tooltip(i18n.T("Toggle Theme"))
+		toggle.Children(func() { ui.Icon(c, icon(themeIcon)).FontSize(t.FontSize + 2) })
+		if toggle.Clicked() {
 			dark := t.Dark
 			changeSettings(func(s *settings.Settings) {
 				if dark {
 					s.Theme = settings.ThemeLight
 				} else {
 					s.Theme = settings.ThemeDark
+				}
+			})
+		}
+	})
+}
+
+// views switches among Log, Commit, Shelf and Console: a segmented
+// control of glass, the chosen view lifted on a pill, with the count of
+// changes and of shelves as badges.
+func (ws *Workspace) views(c *ui.Context) {
+	t := c.Theme()
+	tabs := []struct {
+		icon, label string
+		count       int
+	}{
+		{"git-graph", i18n.T("Log"), 0},
+		{"git-commit-horizontal", i18n.T("Commit"), ws.changes.changeCount()},
+		{"inbox", i18n.T("Shelf"), len(ws.Model.Shelves)},
+		{"square-terminal", i18n.T("Console"), 0},
+	}
+	glassGroup(c.Key("views"), func() {
+		for ix, tab := range tabs {
+			b := ui.Row(c.Key(ix)).Height(30).PaddingX(12).Gap(6).Radius(15).Cursor(ui.CursorPointer).Label(tab.label)
+			if ix == ws.tab {
+				selectedPill(b, t)
+			} else {
+				b.TextColor(t.TextMuted)
+				if b.Hovered() {
+					b.Background(t.Text.Alpha(0.06)).TextColor(t.Text)
+				}
+			}
+			if b.Clicked() {
+				ws.tab = ix
+			}
+			b.Children(func() {
+				ui.Icon(c, icon(tab.icon)).FontSize(t.FontSize + 1)
+				ui.Text(c, tab.label).SingleLine().FontWeight(500)
+				if tab.count > 0 {
+					ui.Text(c, itoa(tab.count)).FontSize(t.FontSize - 2).FontWeight(600).SingleLine().
+						PaddingX(6).Height(16).Radius(8).Background(t.Text.Alpha(0.1)).TextColor(t.TextMuted)
 				}
 			})
 		}

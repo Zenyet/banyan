@@ -510,7 +510,7 @@ func (cv *ChangesView) View(c *ui.Context) {
 					} else {
 						cv.entryRow(c, &g.entries[r.entry])
 					}
-				}).Grow(1).MinHeight(0)
+				}).Grow(1).PaddingX(6).MinHeight(0)
 			}
 			cv.commitBox(c)
 		})

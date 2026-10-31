@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 
 	"github.com/Zenyet/banyan/internal/git"
@@ -72,7 +73,10 @@ func openRepos(repos []*git.Repo, newWindow bool) {
 }
 
 func newWindow_(rw *repoWindow) *Shell {
-	s := newWindow(mygo.WindowOptions{Title: "Banyan", Width: 1440, Height: 920, MinWidth: 720, MinHeight: 480},
+	// The title bar hides, its traffic lights inset over the view's own,
+	// which holds the toolbar, as macOS apps have it.
+	s := newWindow(mygo.WindowOptions{Title: "Banyan", Width: 1440, Height: 920, MinWidth: 720, MinHeight: 480,
+		TitleBarStyle: mygo.TitleBarHiddenInset, TitleBarHeight: titleBarHeight},
 		func(s *Shell, c *ui.Context) { rw.view(c) })
 	s.onClosed = func() {
 		for _, ws := range rw.tabs {
@@ -251,19 +255,19 @@ func (rw *repoWindow) view(c *ui.Context) {
 		// A folder dropped on the window opens as another repository.
 		openPath(rw.shell, files[0], false)
 	}
+	ws := rw.tabs[rw.active]
+	ws.header(c)
 	if len(rw.tabs) > 1 {
-		ui.Row(c.Key("repo-tabs")).Height(32).Background(t.Surface).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).ClipX().Children(func() {
+		ui.Row(c.Key("repo-tabs")).Height(36).PaddingX(12).Gap(4).Background(chromeBG(t)).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).
+			ClipX().Children(func() {
 			for ix := range rw.tabs {
 				rw.tab(c, ix)
 			}
-			ui.Box(c).PaddingX(4).Children(func() {
-				if iconButton(c.Key("open-tab"), "plus", i18n.T("Open Repository…")).Clicked() {
-					promptOpenRepo(rw.shell)
-				}
-			})
+			if iconButton(c.Key("open-tab"), "plus", i18n.T("Open Repository…")).Radius(14).Clicked() {
+				promptOpenRepo(rw.shell)
+			}
 		})
 	}
-	ws := rw.tabs[rw.active]
 	ui.Column(c.Key(ws)).Grow(1).MinHeight(0).Children(func() { ws.View(c) })
 }
 
@@ -274,14 +278,14 @@ func (rw *repoWindow) tab(c *ui.Context, ix int) {
 	t := c.Theme()
 	m := rw.tabs[ix].Model
 	active := ix == rw.active
-	tab := ui.Row(c.Key(m)).Height(32).PaddingStart(12).PaddingEnd(4).Gap(6).BorderWidth(0, 1, 0, 0).BorderColor(t.Border).
+	tab := ui.Row(c.Key(m)).Height(28).Radius(14).PaddingStart(12).PaddingEnd(3).Gap(6).Shrink(0).
 		Drag(draggedTab{ix}).Tooltip(tilde(m.Repo.Root())).Cursor(ui.CursorPointer)
 	if active {
-		tab.Background(t.Background)
+		tab.Material(glass.Glass{})
 	} else {
 		tab.TextColor(t.TextMuted)
 		if tab.Hovered() {
-			tab.Background(t.SurfaceHover)
+			tab.Background(t.Text.Alpha(0.06))
 		}
 	}
 	if dropped, ok := ui.Drop[draggedTab](tab); ok {
@@ -320,7 +324,7 @@ func (rw *repoWindow) tab(c *ui.Context, ix int) {
 		if m.Busy != "" {
 			ui.Text(c, "●").FontSize(t.FontSize - 2).TextColor(t.Accent)
 		}
-		if iconButton(c.Key("close"), "x", i18n.T("Close Repository")).Clicked() {
+		if iconButton(c.Key("close"), "x", i18n.T("Close Repository")).Radius(11).Padding(3).Clicked() {
 			rw.close(ix)
 		}
 	})

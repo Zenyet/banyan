@@ -693,7 +693,7 @@ func (lv *LogView) branchesPanel(c *ui.Context) {
 					muted(c, formatTrack(r.branch.Track)).SingleLine()
 				}
 			})
-		}).Grow(1)
+		}).Grow(1).PaddingX(6)
 	})
 	// A branch chosen in the tree takes the log to its commit.
 	if lv.branchSelected != lv.branchShown {
@@ -880,7 +880,7 @@ func (lv *LogView) commitList(c *ui.Context) {
 			return
 		}
 		lv.commitRow(c, row, showGraph, graphWidth)
-	}).Grow(1).MinHeight(0).Children(func() {
+	}).Grow(1).PaddingX(6).MinHeight(0).Children(func() {
 		if len(lv.rows) == 0 && lv.slowLoading() {
 			ui.Row(c).Grow(1).Center().Gap(8).Children(func() {
 				ui.Spinner(c).Size(16, 16)
@@ -1135,13 +1135,17 @@ func (lv *LogView) filesPanel(c *ui.Context) {
 			case !lv.fileClosed[n.Path]:
 				name = "folder-open"
 			}
+			if i == lv.fileRow {
+				// The status's color is unreadable on the selection's.
+				color = t.AccentText
+			}
 			ui.Icon(c, icon(name)).FontSize(t.FontSize - 1).TextColor(color)
 			ui.Text(c, n.Name).SingleLine().TextColor(color).Shrink(1)
 			if isFile && change.OrigPath != "" {
 				muted(c, "from "+change.OrigPath).SingleLine().Shrink(1)
 			}
 		})
-	}).Grow(1)
+	}).Grow(1).PaddingX(6)
 	if lv.fileRow >= 0 && lv.fileRow < len(lv.fileRows) {
 		if n := lv.fileRows[lv.fileRow].Node; !n.IsDir && n.Path != lv.shownFile {
 			lv.showFile(n.Path)
