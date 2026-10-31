@@ -30,6 +30,10 @@ It drives the `git` you already have installed, so it works with your existing c
 The name comes from the banyan tree, whose branches drop roots that grow into new trunks,
 the way git branches grow apart and merge back.
 
+Banyan was first written in Rust with [GPUI](https://gpui.rs), up to 0.1.6; it is now written in Go with
+[MyGo](https://github.com/egoist/mygo), and new work goes there. The Rust version still lives in [`rust/`](rust/README.md),
+where it builds with `cargo` as before.
+
 ## Features
 
 ### Log
@@ -246,6 +250,7 @@ go test ./...      # graph layout, ref parsing, and git operations against throw
 | `internal/app` | The interface: windows, the Log, Commit, Shelf and Console tabs, dialogs, menus and shortcuts |
 | `scripts/bundle.sh` | Builds `Banyan.app` (icon, `Info.plist`, ad-hoc signature) |
 | `scripts/make_icon.swift` | Draws the app icon |
+| `rust/` | The Rust version, with its own [README](rust/README.md) |
 
 ## Acknowledgements
 

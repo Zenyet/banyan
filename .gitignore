@@ -1,3 +1,5 @@
 /dist
 /build
 .DS_Store
+/rust/target
+/rust/dist
