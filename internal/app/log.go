@@ -92,8 +92,11 @@ type LogView struct {
 	// commits loaded, after "Search the whole history".
 	grep string
 
-	branchRows     []branchRow
-	branchClosed   map[string]bool
+	branchRows   []branchRow
+	branchClosed map[string]bool
+	// branchesStale asks for the tree's rows again, once a menu of its
+	// changed which groups are open, before the list is next built.
+	branchesStale  bool
 	branchList     ui.ListState
 	branchSelected int
 	branchShown    int
@@ -270,6 +273,10 @@ type branchRow struct {
 	depth  int
 	folder bool
 	branch *git.Branch
+	// kind is the group's of a group or folder, and path a folder's in
+	// it, "" for the group's own row.
+	kind git.RefKind
+	path string
 }
 
 func (lv *LogView) rebuildBranches() {
@@ -289,7 +296,7 @@ func (lv *LogView) rebuildBranches() {
 			continue
 		}
 		group := "group:" + g.label
-		rows = append(rows, branchRow{key: group, label: g.label, folder: true})
+		rows = append(rows, branchRow{key: group, label: g.label, folder: true, kind: g.kind})
 		if lv.branchClosed[group] {
 			continue
 		}
@@ -304,7 +311,7 @@ func (lv *LogView) rebuildBranches() {
 			for _, n := range nodes {
 				key := "b:" + g.label + ":" + n.Path
 				if n.IsDir {
-					rows = append(rows, branchRow{key: key, label: n.Name, depth: depth, folder: true})
+					rows = append(rows, branchRow{key: key, label: n.Name, depth: depth, folder: true, kind: g.kind, path: n.Path})
 					if !lv.branchClosed[key] {
 						walk(n.Children, depth+1)
 					}
@@ -666,12 +673,18 @@ func (lv *LogView) branchesPanel(c *ui.Context) {
 		// A group opened or closed changes the rows once the list is
 		// built, not under it.
 		toggled := false
+		if lv.branchesStale {
+			lv.branchesStale = false
+			lv.rebuildBranches()
+		}
 		ui.List(c.Key("branches"), &lv.branchList, len(lv.branchRows), func(i int) {
 			r := lv.branchRows[i]
 			row := ui.Row(c.Key(r.key)).Height(22).PaddingStart(float32(6 + r.depth*12)).PaddingEnd(6).Gap(4)
 			if r.branch != nil {
 				b := *r.branch
 				row.ContextMenu(func(menu *ui.Menu) { branchMenu(menu, lv.ws, b) })
+			} else {
+				row.ContextMenu(func(menu *ui.Menu) { lv.groupMenu(menu, r) })
 			}
 			if r.folder && row.Clicked() {
 				lv.branchClosed[r.key] = !lv.branchClosed[r.key]
@@ -715,6 +728,79 @@ func (lv *LogView) branchesPanel(c *ui.Context) {
 			}
 		}
 	}
+}
+
+// groupMenu is the menu of a group of the branches tree, Local, Remote or
+// Tags, or of a folder in one: what applies to all it holds, and opening
+// or closing every folder in it.
+func (lv *LogView) groupMenu(menu *ui.Menu, r branchRow) {
+	ws := lv.ws
+	switch {
+	case r.kind == git.RefLocal && r.path == "":
+		if menu.Item(i18n.T("New Branch...")).Chosen() {
+			newBranch(ws, "HEAD")
+		}
+		menu.Separator()
+	case r.kind == git.RefRemote && r.path == "":
+		if menu.Item(i18n.T("Fetch")).Chosen() {
+			ws.Command("fetch")
+		}
+		if menu.Item(i18n.T("Manage Remotes…")).Chosen() {
+			openRemotes(ws)
+		}
+		menu.Separator()
+	case r.kind == git.RefRemote && !strings.Contains(r.path, "/"):
+		// A remote's own folder.
+		remote := r.path
+		if menu.Item(i18n.Tf("Fetch '{}'", remote)).Chosen() {
+			ws.run(i18n.Tf("Fetch {}", remote), func(repo *git.Repo) (string, error) { return repo.FetchRemote(remote) })
+		}
+		if menu.Item(i18n.T("Manage Remotes…")).Chosen() {
+			openRemotes(ws)
+		}
+		menu.Separator()
+	case r.kind == git.RefTag && r.path == "":
+		if menu.Item(i18n.T("New Tag...")).Chosen() {
+			openTagDialog(ws, "HEAD")
+		}
+		if menu.Item(i18n.T("Push All Tags")).Chosen() {
+			ws.run(i18n.T("Push all tags"), (*git.Repo).PushTags)
+		}
+		menu.Separator()
+	}
+	if menu.Item(i18n.T("Expand All")).Chosen() {
+		lv.setFoldersClosed(r, false)
+	}
+	if menu.Item(i18n.T("Collapse All")).Chosen() {
+		lv.setFoldersClosed(r, true)
+	}
+}
+
+// setFoldersClosed opens or closes the group or folder of r and every
+// folder inside it.
+func (lv *LogView) setFoldersClosed(r branchRow, closed bool) {
+	label := map[git.RefKind]string{git.RefLocal: i18n.T("Local"), git.RefRemote: i18n.T("Remote"), git.RefTag: i18n.T("Tags")}[r.kind]
+	var names []string
+	for _, b := range lv.ws.Model.BranchesOf(r.kind) {
+		names = append(names, b.Name)
+	}
+	var walk func(nodes []*pathNode)
+	walk = func(nodes []*pathNode) {
+		for _, n := range nodes {
+			if !n.IsDir {
+				continue
+			}
+			if r.path == "" || n.Path == r.path || strings.HasPrefix(n.Path, r.path+"/") {
+				lv.branchClosed["b:"+label+":"+n.Path] = closed
+			}
+			walk(n.Children)
+		}
+	}
+	walk(pathTree(names))
+	if r.path == "" {
+		lv.branchClosed["group:"+label] = closed
+	}
+	lv.branchesStale = true
 }
 
 func (lv *LogView) branchNames() []string {

@@ -287,6 +287,16 @@ func (r *Repo) PushTag(name string) (string, error) {
 	return r.Git("push", remote, "refs/tags/"+name)
 }
 
+// PushTags pushes every tag to the remote the current branch tracks, else
+// origin.
+func (r *Repo) PushTags() (string, error) {
+	remote, ok := r.DefaultRemote()
+	if !ok {
+		return "", errors.New("the repository has no remote")
+	}
+	return r.Git("push", remote, "--tags")
+}
+
 func (r *Repo) DeleteTag(name string) (string, error) { return r.Git("tag", "-d", name) }
 
 func (r *Repo) Merge(name string) (string, error) { return r.MergeWith(name, &MergeOptions{}) }
@@ -545,6 +555,11 @@ func (r *Repo) commitLabel(id string) string {
 }
 
 func (r *Repo) Fetch() (string, error) { return r.Git("fetch", "--all", "--prune") }
+
+// FetchRemote fetches one remote, pruning its branches gone from it.
+func (r *Repo) FetchRemote(remote string) (string, error) {
+	return r.Git("fetch", "--prune", remote)
+}
 
 // FetchQuietly fetches in the background: it never asks for credentials, as
 // a prompt nobody asked for would be confusing. Stored credentials still

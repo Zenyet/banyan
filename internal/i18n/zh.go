@@ -615,4 +615,9 @@ var zh = map[string]string{
 	"Binary file": "二进制文件",
 	"Finding the branches that contain it…":                                                 "正在查找包含它的分支…",
 	"Downloading the file's contents from the remote (this repository is a partial clone)…": "正在从远端下载文件内容（这是一个部分克隆的仓库）…",
+	"Fetch '{}'":    "获取“{}”",
+	"Push All Tags": "推送全部标签",
+	"Push all tags": "推送全部标签",
+	"Expand All":    "全部展开",
+	"Collapse All":  "全部折叠",
 }

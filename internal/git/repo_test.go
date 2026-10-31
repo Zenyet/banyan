@@ -407,6 +407,29 @@ func TestPushedCommitsAreReported(t *testing.T) {
 	}
 }
 
+func TestFetchesOneRemoteAndPushesTags(t *testing.T) {
+	r, id := fourCommits(t)
+	origin, other := bareRemote(t), bareRemote(t)
+	r.git("remote", "add", "origin", origin.dir)
+	r.git("remote", "add", "other", other.dir)
+	r.git("push", "-q", "origin", id[1]+":refs/heads/main")
+	r.git("push", "-q", "other", id[1]+":refs/heads/main")
+	// Pushing noted where the remotes are: forget it, to fetch.
+	r.git("update-ref", "-d", "refs/remotes/origin/main")
+	r.git("update-ref", "-d", "refs/remotes/other/main")
+	must[string](t)(r.repo.FetchRemote("origin"))
+	if _, ok := r.repo.trimmed("rev-parse", "--verify", "-q", "origin/main"); !ok {
+		t.Fatal("origin fetched")
+	}
+	if _, ok := r.repo.trimmed("rev-parse", "--verify", "-q", "other/main"); ok {
+		t.Fatal("other fetched too")
+	}
+	r.git("tag", "v1", id[1])
+	r.git("tag", "v2", id[2])
+	must[string](t)(r.repo.PushTags())
+	equal(t, strings.Fields(origin.git("tag")), []string{"v1", "v2"})
+}
+
 func TestComparesTwoRevisions(t *testing.T) {
 	r, id := fourCommits(t)
 	files := must[[]FileChange](t)(r.repo.ChangesBetween(id[1], id[3]))
