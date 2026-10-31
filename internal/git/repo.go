@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,6 +21,9 @@ type Repo struct {
 	gitDir string
 	// recorded puts the commands run in the Git console.
 	recorded bool
+	// partial is a partial clone, whose file contents git downloads from
+	// the remote the first time they are needed.
+	partial bool
 }
 
 func Open(path string) (*Repo, error) {
@@ -31,7 +35,34 @@ func Open(path string) (*Repo, error) {
 	if len(ls) < 2 {
 		return nil, fmt.Errorf("%s is not a git repository", path)
 	}
-	return &Repo{root: filepath.FromSlash(ls[0]), gitDir: filepath.FromSlash(ls[1])}, nil
+	r := &Repo{root: filepath.FromSlash(ls[0]), gitDir: filepath.FromSlash(ls[1])}
+	if out, err := run(r.root, []string{"config", "--get-regexp", `^remote\..*\.promisor$`}, false); err == nil {
+		r.partial = strings.Contains(out, " true")
+	}
+	return r, nil
+}
+
+// IsPartialClone reports whether the repository is a partial clone, as
+// with git clone --filter=blob:none: the contents of files come from the
+// remote the first time they are needed, which takes seconds.
+func (r *Repo) IsPartialClone() bool { return r.partial }
+
+// Prefetch downloads, in a partial clone, the contents of every file commit
+// id changed against base ("" for a root commit), in one round trip rather
+// than one per file shown. Canceling ctx stops it.
+func (r *Repo) Prefetch(ctx context.Context, base, id string) error {
+	if !r.partial {
+		return nil
+	}
+	args := []string{"diff-tree", "-r", "-p", "--no-renames", base, id}
+	if base == "" {
+		args = []string{"diff-tree", "-r", "-p", "--no-renames", "--root", id}
+	}
+	// git fetches what a diff needs in one batch; the patch itself is not
+	// wanted.
+	cmd := commandContext(ctx, r.root, args)
+	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+	return cmd.Run()
 }
 
 // Init creates a repository in dir.

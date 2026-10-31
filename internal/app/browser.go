@@ -47,6 +47,7 @@ type commitBrowser struct {
 func newCommitBrowser(ws *Workspace) *commitBrowser {
 	b := &commitBrowser{ws: ws, diff: newDiffPane(), emptyMessage: i18n.T("No commits"), selected: -1, width: 380, filesHeight: 150}
 	b.diff.Clear()
+	b.diff.Remote = ws.Model.Repo.IsPartialClone()
 	return b
 }
 

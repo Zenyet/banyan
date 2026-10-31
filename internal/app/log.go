@@ -119,7 +119,8 @@ type LogView struct {
 	logGen        int
 	detailsGen    int
 	// extrasLoaded says the details' branches and signature are in;
-	// cancelExtras stops looking for them.
+	// cancelExtras stops looking for them, and downloading the commit's
+	// files in a partial clone.
 	extrasLoaded bool
 	cancelExtras context.CancelFunc
 	shownRow     int
@@ -149,6 +150,7 @@ func newLogView(ws *Workspace) *LogView {
 		topPercent:     64,
 		filesPercent:   60,
 	}
+	lv.diff.Remote = ws.Model.Repo.IsPartialClone()
 	lv.list.Key = func(i int) any { return lv.commits[lv.rows[i]].ID }
 	lv.list.Selected = &lv.selectedRow
 	lv.list.Selection = &lv.chosen
@@ -599,14 +601,15 @@ func (lv *LogView) loadExtras(d *git.CommitDetails) {
 	lv.cancelExtras = cancel
 	lv.extrasLoaded = false
 	repo := lv.ws.Model.Repo
+	// In a partial clone, download what the commit changed at once: the
+	// diff of each of its files would wait seconds for the remote.
+	go repo.Prefetch(ctx, d.BaseParent(), d.ID)
 	go func() {
 		branches, sig, err := repo.CommitExtras(ctx, d.ID)
 		model.Post(func() {
 			if ctx.Err() != nil || lv.details != d {
 				return
 			}
-			cancel()
-			lv.cancelExtras = nil
 			if err == nil {
 				d.Branches, d.Signature = branches, sig
 				lv.extrasLoaded = true

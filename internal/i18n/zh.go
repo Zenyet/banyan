@@ -613,5 +613,6 @@ var zh = map[string]string{
 	"New Worktree":                    "新建工作树",
 	"An existing branch is checked out there; a new name creates a branch from the current commit.": "已有分支会直接签出到那里；输入新名称则从当前提交创建分支。",
 	"Binary file": "二进制文件",
-	"Finding the branches that contain it…": "正在查找包含它的分支…",
+	"Finding the branches that contain it…":                                                 "正在查找包含它的分支…",
+	"Downloading the file's contents from the remote (this repository is a partial clone)…": "正在从远端下载文件内容（这是一个部分克隆的仓库）…",
 }

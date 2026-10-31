@@ -1114,6 +1114,34 @@ func TestCommitExtrasListBranchesAndStopWhenCanceled(t *testing.T) {
 	}
 }
 
+func TestPartialClonesPrefetchACommitsFiles(t *testing.T) {
+	source, id := fourCommits(t)
+	source.git("config", "uploadpack.allowFilter", "true")
+	source.git("config", "uploadpack.allowAnySHA1InWant", "true")
+	if r := must[*Repo](t)(Open(source.dir)); r.IsPartialClone() {
+		t.Fatal("a plain repository is not partial")
+	}
+	dest := filepath.Join(t.TempDir(), "partial")
+	must[string](t)(run(source.dir, []string{"clone", "-q", "--no-checkout", "--filter=blob:none", "file://" + source.dir, dest}, false))
+	r := must[*Repo](t)(Open(dest))
+	if !r.IsPartialClone() {
+		t.Fatal("partial")
+	}
+	blob := strings.TrimSpace(must[string](t)(r.Git("rev-parse", id[2]+":Two.txt")))
+	missing := func() bool {
+		cmd := command(dest, []string{"cat-file", "-e", blob})
+		cmd.Env = append(cmd.Env, "GIT_NO_LAZY_FETCH=1")
+		return cmd.Run() != nil
+	}
+	if !missing() {
+		t.Skip("this git fetched the contents anyway")
+	}
+	check(t, r.Prefetch(context.Background(), id[1], id[2]))
+	if missing() {
+		t.Fatal("prefetched")
+	}
+}
+
 func TestShowsAMergeAgainstEitherParent(t *testing.T) {
 	r := newTempRepo(t)
 	r.commit("base.txt", "base\n", "Base")

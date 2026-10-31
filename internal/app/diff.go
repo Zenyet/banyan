@@ -1,6 +1,8 @@
 package app
 
 import (
+	"time"
+
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
 
@@ -21,7 +23,17 @@ type DiffPane struct {
 	generation int
 	// line is a line of the new file to scroll to once shown, from 1.
 	line int
+	// loading is set while the loader runs, since loadingFrom.
+	loading     bool
+	loadingFrom time.Time
+	// Remote says the patches come from a partial clone, whose file
+	// contents may have to be downloaded first.
+	Remote bool
 }
+
+// loadingDelay is how long a diff takes before it says it's loading, so
+// quick ones don't flicker.
+const diffLoadingDelay = 250 * time.Millisecond
 
 func newDiffPane() *DiffPane {
 	return &DiffPane{message: i18n.T("Select a file to see its changes")}
@@ -39,12 +51,18 @@ func (p *DiffPane) run() {
 	p.whitespace = settings.Read(func(s *settings.Settings) bool { return s.IgnoreWhitespace })
 	p.generation++
 	generation, load, title := p.generation, p.loader, p.title
+	p.loading, p.loadingFrom = true, time.Now()
+	go func() {
+		time.Sleep(diffLoadingDelay)
+		model.Post(func() {})
+	}()
 	go func() {
 		patch, err := load()
 		model.Post(func() {
 			if p.generation != generation {
 				return
 			}
+			p.loading = false
 			if err != nil {
 				p.setMessage(title, err.Error())
 				return
@@ -80,6 +98,7 @@ func (p *DiffPane) setPatch(patch string) {
 func (p *DiffPane) ShowMessage(title, message string) {
 	p.loader = nil
 	p.generation++
+	p.loading = false
 	p.setMessage(title, message)
 }
 
@@ -143,6 +162,19 @@ func (p *DiffPane) View(c *ui.Context) {
 				changeSettings(func(s *settings.Settings) { s.UnifiedDiff = true })
 			}
 		})
+		// What showed before is another file's: rather than leave it under
+		// this one's title, say the diff is on its way.
+		if p.loading && time.Since(p.loadingFrom) >= diffLoadingDelay {
+			message := i18n.T("Loading…")
+			if p.Remote {
+				message = i18n.T("Downloading the file's contents from the remote (this repository is a partial clone)…")
+			}
+			ui.Column(c.Key("loading")).Grow(1).Center().Gap(8).Padding(16).Children(func() {
+				ui.Spinner(c).Size(16, 16)
+				ui.Text(c, message).TextColor(t.TextMuted).TextAlign(ui.Center)
+			})
+			return
+		}
 		if p.state == nil {
 			emptyMessage(c, p.message)
 			return
