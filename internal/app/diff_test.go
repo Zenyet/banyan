@@ -37,3 +37,24 @@ func TestSlowDiffSaysItIsLoading(t *testing.T) {
 	}
 	close(release)
 }
+
+// A diff in a window of its own leaves the view it belongs to without
+// it, and comes back there once it is docked.
+func TestDetachedDiffLeavesTheLog(t *testing.T) {
+	ws := branchesWorkspace(t)
+	tt := ui.NewTester(func(c *ui.Context) { ws.log.View(c) }, 1200, 800)
+	if !tt.HasText("Side-by-side") {
+		t.Fatalf("no diff under the log: %q", tt.Texts())
+	}
+	// A window of the tests: a shell without one.
+	ws.log.diff.window = &Shell{}
+	tt.Frame()
+	if tt.HasText("Side-by-side") {
+		t.Fatal("the diff is still under the log")
+	}
+	ws.log.diff.window = nil
+	tt.Frame()
+	if !tt.HasText("Side-by-side") {
+		t.Fatal("the diff did not come back")
+	}
+}

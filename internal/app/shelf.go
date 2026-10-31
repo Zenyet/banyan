@@ -71,11 +71,12 @@ func (sv *ShelfView) View(c *ui.Context) {
 	t := c.Theme()
 	if sv.diff == nil {
 		sv.diff = newDiffPane()
+		sv.diff.WindowTitle = func() string { return i18n.Tf("Shelf – {}", sv.ws.Model.Repo.Name()) }
 		sv.width = 420
 	}
 	sv.sync()
 	ws := sv.ws
-	ui.Split(c.Key("shelf"), &sv.width, func() {
+	list := func() {
 		ui.Column(c).Fill().Background(t.Surface).Children(func() {
 			panelHeader(c, i18n.T("Shelf"))
 			ui.Row(c.Key("shelf-toolbar")).Height(36).PaddingX(8).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
@@ -98,7 +99,13 @@ func (sv *ShelfView) View(c *ui.Context) {
 				}
 			})
 		})
-	}, func() {
+	}
+	// The diff in a window of its own leaves the shelves the whole width.
+	if sv.diff.Detached() {
+		ui.Column(c.Key("shelf")).Fill().Children(list)
+		return
+	}
+	ui.Split(c.Key("shelf"), &sv.width, list, func() {
 		ui.Column(c).Fill().Children(func() { sv.diff.View(c) })
 	}).Fill()
 }

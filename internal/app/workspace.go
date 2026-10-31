@@ -54,6 +54,12 @@ func newWorkspace(s *Shell, m *model.Model) *Workspace {
 func (ws *Workspace) Close() {
 	ws.off()
 	ws.Model.Close()
+	// Its diffs in windows of their own go with it.
+	ws.log.diff.Dock()
+	ws.changes.diff.Dock()
+	if ws.shelf.diff != nil {
+		ws.shelf.diff.Dock()
+	}
 }
 
 // run runs a git operation of the repository.

@@ -3,6 +3,7 @@ package app
 import (
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
 
@@ -29,6 +30,10 @@ type DiffPane struct {
 	// Remote says the patches come from a partial clone, whose file
 	// contents may have to be downloaded first.
 	Remote bool
+	// WindowTitle, when set, lets the pane move to a window of its own and
+	// back, which it names; window is that window while the pane is in it.
+	WindowTitle func() string
+	window      *Shell
 }
 
 // loadingDelay is how long a diff takes before it says it's loading, so
@@ -45,6 +50,39 @@ func (p *DiffPane) Load(title string, load func() (string, error)) {
 	p.title = title
 	p.loader = load
 	p.run()
+	p.redraw()
+}
+
+// Detached reports whether the pane shows in a window of its own, where
+// the view it belongs to leaves no room for it.
+func (p *DiffPane) Detached() bool { return p.window != nil }
+
+// detach moves the pane to a window of its own, which closing brings it
+// back from.
+func (p *DiffPane) detach() {
+	s := newWindow(mygo.WindowOptions{Title: p.WindowTitle(), Width: 1100, Height: 760, MinWidth: 480, MinHeight: 320},
+		func(_ *Shell, c *ui.Context) { p.View(c) })
+	s.onClosed = func() {
+		p.window = nil
+		// The view it belongs to makes room for it again.
+		model.Post(func() {})
+	}
+	p.window = s
+}
+
+// Dock moves the pane back from its window, if it is in one.
+func (p *DiffPane) Dock() {
+	if w := p.window; w != nil {
+		w.Win.Close()
+	}
+}
+
+// redraw shows a change made to the pane in its window, which the view
+// making it does not draw.
+func (p *DiffPane) redraw() {
+	if p.window != nil {
+		p.window.Win.Invalidate()
+	}
 }
 
 func (p *DiffPane) run() {
@@ -100,6 +138,7 @@ func (p *DiffPane) ShowMessage(title, message string) {
 	p.generation++
 	p.loading = false
 	p.setMessage(title, message)
+	p.redraw()
 }
 
 func (p *DiffPane) setMessage(title, message string) {
@@ -117,6 +156,7 @@ func (p *DiffPane) ScrollToLine(line int) {
 	if p.state != nil {
 		p.goToLine(line)
 	}
+	p.redraw()
 }
 
 func (p *DiffPane) goToLine(line int) {
@@ -163,6 +203,15 @@ func (p *DiffPane) View(c *ui.Context) {
 					changeSettings(func(s *settings.Settings) { s.UnifiedDiff = true })
 				}
 			})
+			if p.WindowTitle != nil {
+				if p.Detached() {
+					if iconButton(c.Key("dock"), "dock", i18n.T("Back to the Main Window")).Clicked() {
+						p.Dock()
+					}
+				} else if iconButton(c.Key("detach"), "open-window", i18n.T("Open in a New Window")).Clicked() {
+					p.detach()
+				}
+			}
 		})
 		// What showed before is another file's: rather than leave it under
 		// this one's title, say the diff is on its way.

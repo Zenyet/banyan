@@ -113,6 +113,7 @@ func newChangesView(ws *Workspace) *ChangesView {
 		diff:       newDiffPane(),
 		listWidth:  420,
 	}
+	cv.diff.WindowTitle = func() string { return i18n.Tf("Local Changes – {}", ws.Model.Repo.Name()) }
 	cv.syncStatus()
 	return cv
 }
@@ -495,7 +496,7 @@ func (cv *ChangesView) buildRows() {
 func (cv *ChangesView) View(c *ui.Context) {
 	t := c.Theme()
 	cv.buildRows()
-	ui.Split(c.Key("changes"), &cv.listWidth, func() {
+	list := func() {
 		ui.Column(c).Fill().Background(t.Surface).Children(func() {
 			panelHeader(c, i18n.T("Local Changes"))
 			cv.toolbar(c)
@@ -514,15 +515,26 @@ func (cv *ChangesView) View(c *ui.Context) {
 			}
 			cv.commitBox(c)
 		})
-	}, func() {
+	}
+	e, ok := cv.entry(cv.selected)
+	conflicted := ok && e.IsConflicted()
+	// The diff in a window of its own leaves the list the whole width,
+	// unless a conflict or the changes to choose from want the room.
+	if cv.diff.Detached() && !conflicted && len(cv.hunks) == 0 {
+		ui.Column(c.Key("changes")).Fill().Children(list)
+		return
+	}
+	ui.Split(c.Key("changes"), &cv.listWidth, list, func() {
 		ui.Column(c).Fill().Children(func() {
-			if e, ok := cv.entry(cv.selected); ok && e.IsConflicted() {
+			if conflicted {
 				cv.conflictCard(c, &e)
 			}
 			if len(cv.hunks) > 0 {
 				cv.hunkRows(c)
 			}
-			cv.diff.View(c)
+			if !cv.diff.Detached() {
+				cv.diff.View(c)
+			}
 		})
 	}).Fill()
 }

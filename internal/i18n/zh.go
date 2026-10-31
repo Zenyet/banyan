@@ -629,4 +629,9 @@ var zh = map[string]string{
 	"Not set: git refuses to commit until it is.":                                      "未设置：设置之前 git 会拒绝提交。",
 	"Commits are made as this.":                                                        "提交会使用这个身份。",
 	"Could not save: {}":                                                               "无法保存：{}",
+	"Local Changes – {}":                                                               "本地变更 – {}",
+	"Back to the Main Window":                                                          "放回主窗口",
+	"Open in a New Window":                                                             "在新窗口中打开",
+	"Log Diff – {}":                                                                    "日志差异 – {}",
+	"Shelf – {}":                                                                       "搁置 – {}",
 }

@@ -154,6 +154,7 @@ func newLogView(ws *Workspace) *LogView {
 		filesPercent:   60,
 	}
 	lv.diff.Remote = ws.Model.Repo.IsPartialClone()
+	lv.diff.WindowTitle = func() string { return i18n.Tf("Log Diff – {}", ws.Model.Repo.Name()) }
 	lv.list.Key = func(i int) any { return lv.commits[lv.rows[i]].ID }
 	lv.list.Selected = &lv.selectedRow
 	lv.list.Selection = &lv.chosen
@@ -648,7 +649,7 @@ func (lv *LogView) loadMore() {
 }
 
 func (lv *LogView) View(c *ui.Context) {
-	ui.SplitVerticalPercent(c.Key("log-main"), &lv.topPercent, func() {
+	top := func() {
 		ui.Split(c.Key("log-columns"), &lv.branchesWidth, func() {
 			lv.branchesPanel(c)
 		}, func() {
@@ -661,7 +662,13 @@ func (lv *LogView) View(c *ui.Context) {
 				lv.detailsPanel(c)
 			}).Fill()
 		}).Fill()
-	}, func() {
+	}
+	// The diff in a window of its own leaves the log the whole height.
+	if lv.diff.Detached() {
+		ui.Column(c.Key("log-main")).Fill().Children(top)
+		return
+	}
+	ui.SplitVerticalPercent(c.Key("log-main"), &lv.topPercent, top, func() {
 		lv.diff.View(c)
 	}).Fill()
 }
