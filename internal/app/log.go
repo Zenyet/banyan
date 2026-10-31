@@ -663,6 +663,9 @@ func (lv *LogView) branchesPanel(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c).Fill().Background(t.Surface).Children(func() {
 		panelHeader(c, i18n.T("Branches"))
+		// A group opened or closed changes the rows once the list is
+		// built, not under it.
+		toggled := false
 		ui.List(c.Key("branches"), &lv.branchList, len(lv.branchRows), func(i int) {
 			r := lv.branchRows[i]
 			row := ui.Row(c.Key(r.key)).Height(22).PaddingStart(float32(6 + r.depth*12)).PaddingEnd(6).Gap(4)
@@ -672,7 +675,7 @@ func (lv *LogView) branchesPanel(c *ui.Context) {
 			}
 			if r.folder && row.Clicked() {
 				lv.branchClosed[r.key] = !lv.branchClosed[r.key]
-				lv.rebuildBranches()
+				toggled = true
 			}
 			row.Children(func() {
 				name, color := "git-branch", t.TextMuted
@@ -694,6 +697,9 @@ func (lv *LogView) branchesPanel(c *ui.Context) {
 				}
 			})
 		}).Grow(1).PaddingX(6)
+		if toggled {
+			lv.rebuildBranches()
+		}
 	})
 	// A branch chosen in the tree takes the log to its commit.
 	if lv.branchSelected != lv.branchShown {
@@ -1119,6 +1125,9 @@ func (lv *LogView) filesPanel(c *ui.Context) {
 			})
 		})
 	}
+	// As in the branches tree, a folder opened or closed changes the rows
+	// once the list is built.
+	toggled := false
 	ui.List(c.Key("files"), &lv.fileList, len(lv.fileRows), func(i int) {
 		r := lv.fileRows[i]
 		n := r.Node
@@ -1126,7 +1135,7 @@ func (lv *LogView) filesPanel(c *ui.Context) {
 		row.ContextMenu(func(menu *ui.Menu) { lv.fileMenu(menu, n) })
 		if n.IsDir && row.Clicked() {
 			lv.fileClosed[n.Path] = !lv.fileClosed[n.Path]
-			lv.fileRows = flatten(lv.fileNodes, lv.fileClosed)
+			toggled = true
 		}
 		row.Children(func() {
 			change, isFile := lv.files[n.Path]
@@ -1148,6 +1157,9 @@ func (lv *LogView) filesPanel(c *ui.Context) {
 			}
 		})
 	}).Grow(1).PaddingX(6)
+	if toggled {
+		lv.fileRows = flatten(lv.fileNodes, lv.fileClosed)
+	}
 	if lv.fileRow >= 0 && lv.fileRow < len(lv.fileRows) {
 		if n := lv.fileRows[lv.fileRow].Node; !n.IsDir && n.Path != lv.shownFile {
 			lv.showFile(n.Path)
