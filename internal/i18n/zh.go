@@ -620,4 +620,13 @@ var zh = map[string]string{
 	"Push all tags": "推送全部标签",
 	"Expand All":    "全部展开",
 	"Collapse All":  "全部折叠",
+	"Identity":      "身份",
+	"Who your commits are by, in your global git config (~/.gitconfig). A repository can still set its own.": "提交的作者，保存在全局 git 配置（~/.gitconfig）中。单个仓库仍可以设置自己的。",
+	"Your Name":                    "你的名字",
+	"Email":                        "邮箱",
+	"An email address needs an @.": "邮箱地址需要包含 @。",
+	"Not set: git makes your commits as {}, from your login and this computer's name.": "未设置：git 会用登录名和这台电脑的名字，以 {} 的身份提交。",
+	"Not set: git refuses to commit until it is.":                                      "未设置：设置之前 git 会拒绝提交。",
+	"Commits are made as this.":                                                        "提交会使用这个身份。",
+	"Could not save: {}":                                                               "无法保存：{}",
 }

@@ -1329,3 +1329,24 @@ func TestDiffWithWorktreeSinceARevision(t *testing.T) {
 		t.Fatal(p)
 	}
 }
+
+func TestGlobalIdentity(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	if id := GlobalIdentity(); id.IsSet() {
+		t.Fatalf("a fresh home has %v", id)
+	}
+	if err := SetGlobalIdentity(Identity{Name: " Ada Lovelace ", Email: "ada@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	equal(t, GlobalIdentity(), Identity{Name: "Ada Lovelace", Email: "ada@example.com"})
+	if ident := FallbackIdent(); ident != "Ada Lovelace <ada@example.com>" {
+		t.Fatal(ident)
+	}
+	if err := SetGlobalIdentity(Identity{Name: "Ada Lovelace"}); err != nil {
+		t.Fatal(err)
+	}
+	equal(t, GlobalIdentity(), Identity{Name: "Ada Lovelace"})
+}

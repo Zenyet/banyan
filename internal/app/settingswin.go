@@ -25,6 +25,14 @@ type settingsWindow struct {
 	gitChecked, gitVersion string
 	gitPath, protected     string
 	shortcuts              map[string]string
+	// identity is the global git identity as last read, for the git
+	// identityOf; name and email are the fields editing it, and fallback
+	// who git makes commits by while none is set.
+	identity            git.Identity
+	identityOf          string
+	name, email         string
+	fallback, saveError string
+	saving              bool
 }
 
 func openSettings() {
@@ -225,6 +233,7 @@ func (sw *settingsWindow) versionControl(c *ui.Context, s *settings.Settings) {
 			})
 		}()
 	}
+	sw.identityGroup(c, s.GitProgram())
 	settingsGroup(c, i18n.T("Git"), "", func() {
 		settingRow(c, "open-in", i18n.T("Open repositories in"), "", false, func() {
 			current := "tab"
@@ -271,6 +280,78 @@ func (sw *settingsWindow) versionControl(c *ui.Context, s *settings.Settings) {
 			choice(c, options, strconv.Itoa(s.AutoFetchMinutes), func(s *settings.Settings, v string) { s.AutoFetchMinutes, _ = strconv.Atoi(v) })
 		})
 	})
+}
+
+// identityGroup shows and edits who commits are made by: user.name and
+// user.email in the global git config, which program reads.
+func (sw *settingsWindow) identityGroup(c *ui.Context, program string) {
+	t := c.Theme()
+	if program != sw.identityOf {
+		sw.identityOf = program
+		sw.loadIdentity()
+	}
+	edited := git.Identity{Name: strings.TrimSpace(sw.name), Email: strings.TrimSpace(sw.email)}
+	valid := edited.Email == "" || strings.Contains(edited.Email, "@")
+	settingsGroup(c, i18n.T("Identity"), i18n.T("Who your commits are by, in your global git config (~/.gitconfig). A repository can still set its own."), func() {
+		settingRow(c, "name", i18n.T("Name"), "", false, func() {
+			ui.TextInput(c.Key("name"), &sw.name).Placeholder(i18n.T("Your Name")).Width(260)
+		})
+		settingRow(c, "email", i18n.T("Email"), "", false, func() {
+			ui.TextInput(c.Key("email"), &sw.email).Placeholder("you@example.com").Width(260)
+		})
+		ui.Row(c.Key("identity-save")).Gap(12).PaddingY(10).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() {
+			switch {
+			case sw.saveError != "":
+				ui.Text(c, sw.saveError).TextColor(t.Danger).Grow(1).Shrink(1)
+			case !valid:
+				ui.Text(c, i18n.T("An email address needs an @.")).TextColor(t.Danger).Grow(1).Shrink(1)
+			case !sw.identity.IsSet() && sw.fallback != "":
+				ui.Text(c, i18n.Tf("Not set: git makes your commits as {}, from your login and this computer's name.", sw.fallback)).
+					TextColor(t.Warning).Grow(1).Shrink(1)
+			case !sw.identity.IsSet():
+				ui.Text(c, i18n.T("Not set: git refuses to commit until it is.")).TextColor(t.Warning).Grow(1).Shrink(1)
+			default:
+				muted(c, i18n.T("Commits are made as this.")).Grow(1).Shrink(1)
+			}
+			if primaryButton(c.Key("save"), i18n.T("Save")).Disabled(edited == sw.identity || !valid || sw.saving).Clicked() {
+				sw.saveIdentity(edited)
+			}
+		})
+	})
+}
+
+// loadIdentity reads the global identity, and who git falls back to,
+// off the main thread.
+func (sw *settingsWindow) loadIdentity() {
+	program := sw.identityOf
+	go func() {
+		id, fallback := git.GlobalIdentity(), git.FallbackIdent()
+		mygo.RunOnMain(func() {
+			if sw.identityOf != program {
+				return
+			}
+			sw.identity, sw.fallback = id, fallback
+			sw.name, sw.email = id.Name, id.Email
+			if settingsShell != nil {
+				settingsShell.Win.Invalidate()
+			}
+		})
+	}()
+}
+
+// saveIdentity writes id to the global git config, then reads it back.
+func (sw *settingsWindow) saveIdentity(id git.Identity) {
+	sw.saving, sw.saveError = true, ""
+	go func() {
+		err := git.SetGlobalIdentity(id)
+		mygo.RunOnMain(func() {
+			sw.saving = false
+			if err != nil {
+				sw.saveError = i18n.Tf("Could not save: {}", err.Error())
+			}
+			sw.loadIdentity()
+		})
+	}()
 }
 
 func (sw *settingsWindow) diffAndLog(c *ui.Context, s *settings.Settings) {
