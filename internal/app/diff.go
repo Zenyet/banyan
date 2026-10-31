@@ -86,7 +86,7 @@ func (p *DiffPane) setPatch(patch string) {
 		p.state = nil
 	default:
 		p.message = ""
-		p.state = &editor.DiffState{}
+		p.state = &editor.DiffState{RenderSeparator: separator}
 		p.state.SetPatch(files[0])
 		if p.line > 0 {
 			p.goToLine(p.line)
@@ -184,6 +184,28 @@ func (p *DiffPane) View(c *ui.Context) {
 			p.state.Layout = editor.DiffUnified
 		}
 		editor.DiffView(c.Key(p.state), p.state).Grow(1).FillWidth().MinHeight(0)
+	})
+}
+
+// separator draws a hunk's header as the viewer's own separator does,
+// letting the pointer through it, every part of it, to the lines under it.
+// MyGo lays separators over its editors rather than in them, so the wheel
+// over one reached no editor and scrolled nothing. Separators of unchanged
+// lines, which have buttons to expand them, keep the viewer's look; the
+// patches shown here have none.
+func separator(c *ui.Context, sep ui.Element, s *editor.DiffSeparator) {
+	if s.Lines > 0 {
+		editor.DefaultSeparator(c, sep, s)
+		return
+	}
+	t := c.Theme()
+	ct := s.Theme()
+	sep.Padding(4).PassThrough().Children(func() {
+		ui.Row(c).Grow(1).AlignSelf(ui.Stretch).PaddingX(t.Space(1.5)).Radius(6).
+			Background(ct.Background.Mix(ct.Text, 0.06)).PassThrough().Children(func() {
+			ui.Text(c, s.Header).Font(s.Font().Family).FontSize(s.Font().Size - 1).TextColor(t.TextMuted).
+				SingleLine().Shrink(1).PassThrough()
+		})
 	})
 }
 
