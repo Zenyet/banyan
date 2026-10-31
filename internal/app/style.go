@@ -237,8 +237,8 @@ func isHex(s string) bool {
 // panelHeader is the small title over a panel.
 func panelHeader(c *ui.Context, title string) {
 	t := c.Theme()
-	ui.Row(c).Height(28).PaddingX(8).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
-		ui.Text(c, title).FontSize(t.FontSize - 1).Bold().TextColor(t.TextMuted).SingleLine()
+	ui.Row(c).Height(28).PaddingX(12).Children(func() {
+		ui.Text(c, title).FontSize(t.FontSize - 1).FontWeight(600).TextColor(t.TextMuted).SingleLine()
 	})
 }
 
@@ -248,10 +248,61 @@ func muted(c *ui.Context, text string) ui.Element {
 	return ui.Text(c, text).FontSize(t.FontSize - 1).TextColor(t.TextMuted)
 }
 
+// button is a push button, a capsule as macOS draws them.
+func button(c *ui.Context, label string) ui.Element { return ui.Button(c, label).Radius(14) }
+
+// primaryButton is the default button of a dialog, a capsule of the
+// accent's color.
+func primaryButton(c *ui.Context, label string) ui.Element {
+	return ui.PrimaryButton(c, label).Radius(14)
+}
+
+// filterButton opens a menu of a filter: a pill showing the filter's
+// value, with a chevron.
+func filterButton(c *ui.Context, label string) ui.Element {
+	t := c.Theme()
+	b := button(c, "").Label(label).Height(24).PaddingX(10).Gap(4).Background(t.Text.Alpha(0.06)).Border(0, ui.Color{})
+	b.Children(func() {
+		ui.Text(c, label).FontSize(t.FontSize - 1).SingleLine()
+		ui.Icon(c, icon("chevron-down")).FontSize(t.FontSize - 3).TextColor(t.TextMuted)
+	})
+	if b.Hovered() {
+		b.Background(t.Text.Alpha(0.1))
+	}
+	return b
+}
+
+// segments is a track of segments, as macOS's segmented controls: the
+// segment chosen lifts on a pill.
+func segments(c *ui.Context, fn func()) ui.Element {
+	t := c.Theme()
+	return ui.Row(c).Height(26).Padding(2).Gap(2).Radius(13).Shrink(0).Background(t.Text.Alpha(0.06)).Children(fn)
+}
+
+// segment is a segment of a segments track, lifted when on.
+func segment(c *ui.Context, label string, on bool) ui.Element {
+	t := c.Theme()
+	b := ui.ButtonBase(c).Label(label).Height(22).PaddingX(10).Radius(11).Center().Cursor(ui.CursorPointer)
+	if on {
+		selectedPill(b, t)
+	} else if b.Hovered() {
+		b.Background(t.Text.Alpha(0.06))
+	}
+	b.Children(func() {
+		text := ui.Text(c, label).FontSize(t.FontSize - 1).SingleLine()
+		if on {
+			text.FontWeight(500)
+		} else {
+			text.TextColor(t.TextMuted)
+		}
+	})
+	return b
+}
+
 // iconButton is a small borderless button showing an icon, with a tooltip.
 func iconButton(c *ui.Context, name, tip string) ui.Element {
 	t := c.Theme()
-	b := ui.Button(c, "").Label(tip).Tooltip(tip).Padding(4).Background(ui.Color{}).Border(0, ui.Color{})
+	b := button(c, "").Label(tip).Tooltip(tip).Padding(4).Background(ui.Color{}).Border(0, ui.Color{})
 	b.Children(func() { ui.Icon(c, icon(name)).FontSize(t.FontSize + 1) })
 	if b.Hovered() {
 		b.Background(hoverBG(t))
@@ -263,7 +314,7 @@ func iconButton(c *ui.Context, name, tip string) ui.Element {
 // label.
 func ghostButton(c *ui.Context, iconName, label string) ui.Element {
 	t := c.Theme()
-	b := ui.Button(c, "").Label(label).PaddingX(8).PaddingY(4).Background(ui.Color{}).Border(0, ui.Color{})
+	b := button(c, "").Label(label).PaddingX(8).PaddingY(4).Background(ui.Color{}).Border(0, ui.Color{})
 	b.Children(func() {
 		if iconName != "" {
 			ui.Icon(c, icon(iconName)).FontSize(t.FontSize)
@@ -296,7 +347,7 @@ func glassGroup(c *ui.Context, fn func()) ui.Element {
 // chevron, for a button opening a menu.
 func capsuleButton(c *ui.Context, iconName, label string, compact, menu bool) ui.Element {
 	t := c.Theme()
-	b := ui.Button(c, "").Label(label).Height(30).PaddingX(10).Radius(15).Gap(6).Background(ui.Color{}).Border(0, ui.Color{})
+	b := button(c, "").Label(label).Height(30).PaddingX(10).Radius(15).Gap(6).Background(ui.Color{}).Border(0, ui.Color{})
 	if compact {
 		b.PaddingX(8).Tooltip(label)
 	}

@@ -725,7 +725,7 @@ func (lv *LogView) toolbar(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c.Key("log-toolbar")).Height(36).PaddingX(8).Gap(6).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 		before := lv.query
-		search := ui.SearchField(c.Key("search"), &lv.query).Placeholder(i18n.T("Text or hash")).Width(240).Bind(&lv.search)
+		search := ui.SearchField(c.Key("search"), &lv.query).Placeholder(i18n.T("Text or hash")).Width(240).Radius(14).Bind(&lv.search)
 		if lv.focusSearchNext {
 			lv.focusSearchNext = false
 			lv.search.Focus()
@@ -748,7 +748,7 @@ func (lv *LogView) toolbar(c *ui.Context) {
 		if lv.branchFilter != "" {
 			label = i18n.Tf("Branch: {}", lv.branchFilter)
 		}
-		ghostButton(c.Key("branch-filter"), "", label+" ▾").PopoverMenuButton(func(menu *ui.Menu) {
+		filterButton(c.Key("branch-filter"), label).Menu(func(menu *ui.Menu) {
 			if menu.Item(i18n.T("All")).Checked(lv.branchFilter == "").Chosen() {
 				lv.branchFilter = ""
 				lv.reload()
@@ -771,7 +771,7 @@ func (lv *LogView) toolbar(c *ui.Context) {
 		case len(lv.authorFilter) > 1:
 			label = i18n.Tf("User: {} +{}", lv.authorFilter[0], len(lv.authorFilter)-1)
 		}
-		ghostButton(c.Key("author-filter"), "", label+" ▾").PopoverMenuButton(func(menu *ui.Menu) {
+		filterButton(c.Key("author-filter"), label).Menu(func(menu *ui.Menu) {
 			if menu.Item(i18n.T("All")).Checked(len(lv.authorFilter) == 0).Chosen() {
 				lv.authorFilter = nil
 				lv.reload()
@@ -791,7 +791,7 @@ func (lv *LogView) toolbar(c *ui.Context) {
 		if lv.dateFilter >= 0 {
 			label = i18n.Tf("Date: {}", dateFilterLabel(lv.dateFilter))
 		}
-		ghostButton(c.Key("date-filter"), "", label+" ▾").PopoverMenuButton(func(menu *ui.Menu) {
+		filterButton(c.Key("date-filter"), label).Menu(func(menu *ui.Menu) {
 			if menu.Item(i18n.T("All")).Checked(lv.dateFilter < 0).Chosen() {
 				lv.dateFilter = -1
 				lv.reload()
@@ -812,7 +812,7 @@ func (lv *LogView) toolbar(c *ui.Context) {
 		case len(lv.pathFilter) > 1:
 			label = i18n.Tf("Paths: {} +{}", lv.pathFilter[0], len(lv.pathFilter)-1)
 		}
-		ghostButton(c.Key("path-filter"), "", label+" ▾").PopoverMenuButton(func(menu *ui.Menu) {
+		filterButton(c.Key("path-filter"), label).Menu(func(menu *ui.Menu) {
 			if menu.Item(i18n.T("All")).Checked(len(lv.pathFilter) == 0).Chosen() {
 				lv.pathFilter = nil
 				lv.reload()
@@ -969,8 +969,8 @@ func (lv *LogView) commitRow(c *ui.Context, row int, showGraph bool, graphWidth 
 		ui.Row(c).Grow(1).Shrink(1).MinWidth(0).Gap(4).ClipX().Children(func() {
 			for _, ref := range commit.Refs {
 				bg, fg := refColors(ref.Kind, t)
-				ui.Box(c).PaddingX(4).Height(16).Radius(3).Background(bg).Center().Children(func() {
-					ui.Text(c, ref.Name).FontSize(t.FontSize - 2).TextColor(fg).SingleLine()
+				ui.Box(c).PaddingX(6).Height(17).Radius(8.5).Background(bg).Center().Children(func() {
+					ui.Text(c, ref.Name).FontSize(t.FontSize - 2).FontWeight(600).TextColor(fg).SingleLine()
 				})
 			}
 			subject := ui.Text(c, commit.Subject).SingleLine().Shrink(1)
@@ -1109,12 +1109,14 @@ func (lv *LogView) filesPanel(c *ui.Context) {
 		// For a merge commit: which parent its changes are shown against.
 		ui.Row(c.Key("parents")).PaddingX(8).PaddingY(4).Gap(4).Wrap().BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 			muted(c, i18n.T("Compare with"))
-			for ix, parent := range d.Parents {
-				if toggleButton(c.Key(ix), i18n.Tf("Parent {} ({})", ix+1, short(parent)), ix == d.Base).Clicked() && lv.base != ix {
-					lv.base = ix
-					lv.loadDetails()
+			segments(c, func() {
+				for ix, parent := range d.Parents {
+					if segment(c.Key(ix), i18n.Tf("Parent {} ({})", ix+1, short(parent)), ix == d.Base).Clicked() && lv.base != ix {
+						lv.base = ix
+						lv.loadDetails()
+					}
 				}
-			}
+			})
 		})
 	}
 	ui.List(c.Key("files"), &lv.fileList, len(lv.fileRows), func(i int) {

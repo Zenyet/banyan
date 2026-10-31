@@ -252,14 +252,14 @@ func openPush(ws *Workspace) {
 			}
 			ui.Checkbox(c.Key("tags"), &tags, i18n.T("Push tags"))
 			ui.Spacer(c)
-			if ui.Button(c.Key("cancel"), i18n.T("Cancel")).Clicked() {
+			if button(c.Key("cancel"), i18n.T("Cancel")).Clicked() {
 				d.Close()
 			}
 			label := i18n.T("Push")
 			if force {
 				label = i18n.T("Force Push")
 			}
-			ok := ui.PrimaryButton(c.Key("push"), label).Disabled(!canPush)
+			ok := primaryButton(c.Key("push"), label).Disabled(!canPush)
 			if force {
 				ok.Background(t.Danger)
 			}
@@ -312,12 +312,14 @@ func openCompare(ws *Workspace, branch, base string) {
 	}()
 	ws.Shell.Open(&Dialog{Title: title, Width: 1200, Body: func(c *ui.Context, d *Dialog) {
 		ui.Row(c).Gap(8).Children(func() {
-			if toggleButton(c.Key("in"), i18n.Tf("In {} but not in {} ({})", branch, current, len(incoming)), showingIncoming).Clicked() {
-				show(true)
-			}
-			if toggleButton(c.Key("out"), i18n.Tf("In {} but not in {} ({})", current, branch, len(outgoing)), !showingIncoming).Clicked() {
-				show(false)
-			}
+			segments(c, func() {
+				if segment(c.Key("in"), i18n.Tf("In {} but not in {} ({})", branch, current, len(incoming)), showingIncoming).Clicked() {
+					show(true)
+				}
+				if segment(c.Key("out"), i18n.Tf("In {} but not in {} ({})", current, branch, len(outgoing)), !showingIncoming).Clicked() {
+					show(false)
+				}
+			})
 			ui.Spacer(c)
 			if loading {
 				muted(c, i18n.T("Loading…"))
@@ -363,18 +365,18 @@ func openStashViewer(ws *Workspace) {
 			name = stashes[b.selected].Name
 		}
 		ui.Row(c).Gap(8).Children(func() {
-			if ui.PrimaryButton(c.Key("pop"), i18n.T("Pop")).Disabled(!has).Clicked() {
+			if primaryButton(c.Key("pop"), i18n.T("Pop")).Disabled(!has).Clicked() {
 				ws.run(i18n.T("Pop")+" "+name, func(r *git.Repo) (string, error) { return r.StashPop(name) })
 			}
-			if ui.Button(c.Key("apply"), i18n.T("Apply")).Disabled(!has).Clicked() {
+			if button(c.Key("apply"), i18n.T("Apply")).Disabled(!has).Clicked() {
 				ws.run(i18n.T("Apply")+" "+name, func(r *git.Repo) (string, error) { return r.StashApply(name) })
 			}
-			if ui.Button(c.Key("drop"), i18n.T("Drop")).TextColor(t.Danger).Disabled(!has).Clicked() {
+			if button(c.Key("drop"), i18n.T("Drop")).TextColor(t.Danger).Disabled(!has).Clicked() {
 				ws.Shell.Confirm(i18n.T("Drop Stash"), i18n.T("Drop this stash? This cannot be undone."), i18n.T("Drop"), func() {
 					ws.run(i18n.T("Drop")+" "+name, func(r *git.Repo) (string, error) { return r.StashDrop(name) })
 				})
 			}
-			br := ui.Button(c.Key("branch"), i18n.T("Unstash as Branch…")).Disabled(!has).
+			br := button(c.Key("branch"), i18n.T("Unstash as Branch…")).Disabled(!has).
 				Tooltip(i18n.T("Check out a new branch where the stash was made and apply it there"))
 			if br.Clicked() {
 				d.Close()
@@ -383,7 +385,7 @@ func openStashViewer(ws *Workspace) {
 				})
 			}
 			ui.Spacer(c)
-			if ui.Button(c.Key("close"), i18n.T("Close")).Clicked() {
+			if button(c.Key("close"), i18n.T("Close")).Clicked() {
 				d.Close()
 			}
 		})

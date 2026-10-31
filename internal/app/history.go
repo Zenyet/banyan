@@ -191,19 +191,19 @@ func annotate(ws *Workspace, rev, path string) {
 		ui.Row(c.Key("line-bar")).Gap(8).Children(func() {
 			ui.Text(c, git.Short(l.ID)+"  "+l.Summary).SingleLine().Grow(1).Shrink(1)
 			muted(c, l.Author+", "+formatTime(l.Time)).SingleLine()
-			if ui.Button(c.Key("previous"), i18n.T("Annotate Previous Revision")).Disabled(l.Previous == "").Clicked() {
+			if button(c.Key("previous"), i18n.T("Annotate Previous Revision")).Disabled(l.Previous == "").Clicked() {
 				// Blame the file as it was before the line's commit, at the
 				// same line, the way JetBrains steps back through a line's
 				// history.
 				load(l.Previous, l.PreviousPath, l.OrigLine)
 			}
-			if ui.Button(c.Key("diff"), i18n.T("Show Diff")).Disabled(l.Previous == "").Clicked() {
+			if button(c.Key("diff"), i18n.T("Show Diff")).Disabled(l.Previous == "").Clicked() {
 				openWorktreeDiff(ws, l.Previous, l.ID, l.Path)
 			}
-			if m := ws.Model; m.HasWeb && ui.Button(c.Key("web"), i18n.Tf("Open on {}", m.Web.Name())).Clicked() {
+			if m := ws.Model; m.HasWeb && button(c.Key("web"), i18n.Tf("Open on {}", m.Web.Name())).Clicked() {
 				mygo.Shell.OpenExternal(m.Web.FileURL(l.ID, l.Path, l.OrigLine))
 			}
-			if ui.Button(c.Key("copy"), i18n.T("Copy Revision Number")).Clicked() {
+			if button(c.Key("copy"), i18n.T("Copy Revision Number")).Clicked() {
 				mygo.Clipboard.WriteText(l.ID)
 			}
 		})

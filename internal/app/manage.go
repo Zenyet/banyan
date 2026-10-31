@@ -105,7 +105,7 @@ func openWorktrees(ws *Workspace, branch string) {
 						})
 						muted(c, tilde(tree.Path)).SingleLine()
 					})
-					if !tree.IsCurrent && !tree.Prunable && ui.Button(c.Key("open"), i18n.T("Open")).Clicked() {
+					if !tree.IsCurrent && !tree.Prunable && button(c.Key("open"), i18n.T("Open")).Clicked() {
 						openPath(ws.Shell, tree.Path, false)
 					}
 					if !tree.IsMain && !tree.IsCurrent && !tree.Prunable && iconButton(c.Key("remove"), "x", i18n.T("Remove Worktree")).Clicked() {
@@ -125,7 +125,7 @@ func openWorktrees(ws *Workspace, branch string) {
 		if prunable {
 			ui.Row(c).Gap(8).Children(func() {
 				muted(c, i18n.T("Some worktree folders are gone.")).Grow(1)
-				if ui.Button(c.Key("prune"), i18n.T("Forget Missing")).Clicked() {
+				if button(c.Key("prune"), i18n.T("Forget Missing")).Clicked() {
 					ws.run(i18n.T("Prune worktrees"), (*git.Repo).PruneWorktrees)
 				}
 			})
@@ -142,7 +142,7 @@ func openWorktrees(ws *Workspace, branch string) {
 			if ui.TextInput(c.Key("path"), &path).Placeholder(i18n.T("Location")).Grow(1).Changed() {
 				pathEdited = true
 			}
-			if ui.PrimaryButton(c.Key("add"), i18n.T("Add")).Clicked() {
+			if primaryButton(c.Key("add"), i18n.T("Add")).Clicked() {
 				b, p := strings.TrimSpace(branch), strings.TrimSpace(path)
 				if b == "" || p == "" {
 					m.Fail(errorf("%s", i18n.T("Enter a branch and a location")))
@@ -204,10 +204,10 @@ func openSubmodules(ws *Workspace) {
 								ui.Text(c, git.Short(sub.Commit)).TextColor(t.TextMuted)
 							})
 						})
-						if sub.State != git.SubmoduleUpToDate && ui.Button(c.Key("update"), i18n.T("Update")).Clicked() {
+						if sub.State != git.SubmoduleUpToDate && button(c.Key("update"), i18n.T("Update")).Clicked() {
 							update([]string{sub.Path})
 						}
-						if sub.State != git.SubmoduleUninitialized && ui.Button(c.Key("open"), i18n.T("Open")).Clicked() {
+						if sub.State != git.SubmoduleUninitialized && button(c.Key("open"), i18n.T("Open")).Clicked() {
 							openPath(ws.Shell, filepath.Join(m.Repo.Root(), filepath.FromSlash(sub.Path)), false)
 						}
 					})
@@ -216,7 +216,7 @@ func openSubmodules(ws *Workspace) {
 		}
 		ui.Row(c).Gap(8).Children(func() {
 			muted(c, i18n.T("Updating clones missing submodules and checks each out at the commit this repository records.")).Grow(1).Shrink(1)
-			if ui.PrimaryButton(c.Key("all"), i18n.T("Update All")).Disabled(!needsUpdate).Clicked() {
+			if primaryButton(c.Key("all"), i18n.T("Update All")).Disabled(!needsUpdate).Clicked() {
 				update(nil)
 			}
 		})
@@ -268,14 +268,14 @@ func openRemotes(ws *Workspace) {
 		ui.Row(c).Gap(8).Children(func() {
 			ui.TextInput(c.Key("name"), &name).Placeholder("origin").Width(140)
 			ui.TextInput(c.Key("url"), &url).Placeholder("https://github.com/owner/repo.git").Grow(1)
-			if editing != "" && ui.Button(c.Key("cancel"), i18n.T("Cancel")).Clicked() {
+			if editing != "" && button(c.Key("cancel"), i18n.T("Cancel")).Clicked() {
 				editing, name, url = "", "", ""
 			}
 			label := i18n.T("Add")
 			if editing != "" {
 				label = i18n.T("Save")
 			}
-			if ui.PrimaryButton(c.Key("save"), label).Clicked() {
+			if primaryButton(c.Key("save"), label).Clicked() {
 				n, u, old := strings.TrimSpace(name), strings.TrimSpace(url), editing
 				if n == "" || u == "" {
 					return
@@ -296,7 +296,7 @@ func openRemotes(ws *Workspace) {
 			}
 		})
 		ui.Row(c).Justify(ui.End).Children(func() {
-			if ui.Button(c.Key("close"), i18n.T("Close")).Clicked() {
+			if button(c.Key("close"), i18n.T("Close")).Clicked() {
 				d.Close()
 			}
 		})
@@ -369,7 +369,7 @@ func openClone(s *Shell) {
 			if in.Submitted() {
 				start()
 			}
-			if ui.Button(c.Key("browse"), i18n.T("Browse…")).Clicked() {
+			if button(c.Key("browse"), i18n.T("Browse…")).Clicked() {
 				go func() {
 					paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: s.Win, Title: i18n.T("Clone Into"), Directory: true})
 					if err != nil || len(paths) == 0 {
@@ -389,10 +389,10 @@ func openClone(s *Shell) {
 			if cloning {
 				muted(c, i18n.T("Cloning…"))
 			}
-			if ui.Button(c.Key("cancel"), i18n.T("Cancel")).Clicked() {
+			if button(c.Key("cancel"), i18n.T("Cancel")).Clicked() {
 				d.Close()
 			}
-			if ui.PrimaryButton(c.Key("clone"), i18n.T("Clone")).Disabled(cloning).Clicked() {
+			if primaryButton(c.Key("clone"), i18n.T("Clone")).Disabled(cloning).Clicked() {
 				start()
 			}
 		})

@@ -113,7 +113,7 @@ func showRebase(ws *Workspace, from string, commits []git.Commit) {
 					case git.Drop:
 						color = t.Danger
 					}
-					ghostButton(c.Key("action"), "", label+" ▾").Width(90).TextColor(color).PopoverMenuButton(func(menu *ui.Menu) {
+					filterButton(c.Key("action"), label).Width(96).TextColor(color).Menu(func(menu *ui.Menu) {
 						for _, a := range actions {
 							if menu.Item(a.label).Chosen() {
 								e.action = git.RebaseAction{Kind: a.kind}
@@ -156,10 +156,10 @@ func showRebase(ws *Workspace, from string, commits []git.Commit) {
 				ui.Text(c, problem).TextColor(t.Danger)
 			}
 			ui.Spacer(c)
-			if ui.Button(c.Key("cancel"), i18n.T("Cancel")).Clicked() {
+			if button(c.Key("cancel"), i18n.T("Cancel")).Clicked() {
 				d.Close()
 			}
-			if ui.PrimaryButton(c.Key("start"), i18n.T("Start Rebasing")).Disabled(problem != "" || unchanged()).Clicked() {
+			if primaryButton(c.Key("start"), i18n.T("Start Rebasing")).Disabled(problem != "" || unchanged()).Clicked() {
 				if refuseIfProtected(ws, from) {
 					return
 				}

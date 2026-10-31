@@ -159,8 +159,8 @@ func (ws *Workspace) header(c *ui.Context) {
 	ui.Row(c.Key("toolbar")).Height(titleBarHeight).Shrink(0).Padding(0, bar.Right+12, 0, bar.Left+12).Gap(8).
 		Background(chromeBG(t)).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).ClipX().DragWindow().Children(func() {
 		glassGroup(c.Key("where"), func() {
-			capsuleButton(c.Key("repo"), "folder-git-2", m.Repo.Name(), false, true).PopoverMenuButton(ws.repoMenu)
-			capsuleButton(c.Key("branch"), "git-branch", ws.branchLabel(), false, true).PopoverMenuButton(ws.branchPopup)
+			capsuleButton(c.Key("repo"), "folder-git-2", m.Repo.Name(), false, true).Menu(ws.repoMenu)
+			capsuleButton(c.Key("branch"), "git-branch", ws.branchLabel(), false, true).Menu(ws.branchPopup)
 		}).Shrink(1).MinWidth(0)
 		ui.Spacer(c)
 		ws.views(c)
@@ -181,7 +181,7 @@ func (ws *Workspace) header(c *ui.Context) {
 			if capsuleButton(c.Key("push"), "arrow-up-from-line", i18n.T("Push"), compact, false).Clicked() {
 				openPush(ws)
 			}
-			capsuleButton(c.Key("stashes"), "archive", i18n.Tf("Stashes ({})", len(m.Stashes)), compact, true).PopoverMenuButton(ws.stashMenu)
+			capsuleButton(c.Key("stashes"), "archive", i18n.Tf("Stashes ({})", len(m.Stashes)), compact, true).Menu(ws.stashMenu)
 		})
 		themeIcon := "moon"
 		if t.Dark {
@@ -428,14 +428,14 @@ func offerSmartCheckout(s *Shell, m *model.Model, target string, remote bool, me
 		})
 		muted(c, i18n.T("Smart Checkout stashes the changes, checks out and restores them."))
 		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-			if ui.Button(c.Key("cancel"), i18n.T("Cancel")).Clicked() {
+			if button(c.Key("cancel"), i18n.T("Cancel")).Clicked() {
 				d.Close()
 			}
-			if ui.Button(c.Key("force"), i18n.T("Force Checkout")).TextColor(t.Danger).Clicked() {
+			if button(c.Key("force"), i18n.T("Force Checkout")).TextColor(t.Danger).Clicked() {
 				d.Close()
 				model.Run(m, i18n.Tf("Force checkout {}", short(target)), func(r *git.Repo) (string, error) { return r.ForceCheckout(target, remote) })
 			}
-			if ui.PrimaryButton(c.Key("smart"), i18n.T("Smart Checkout")).Clicked() {
+			if primaryButton(c.Key("smart"), i18n.T("Smart Checkout")).Clicked() {
 				d.Close()
 				model.Run(m, i18n.Tf("Smart checkout {}", short(target)), func(r *git.Repo) (string, error) { return r.SmartCheckout(target, remote) })
 			}

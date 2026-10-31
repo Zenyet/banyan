@@ -273,11 +273,11 @@ func showCredentialPrompt(r *askpass.Request) {
 			submit()
 		}
 		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-			if ui.Button(c.Key("cancel"), "Cancel").Clicked() {
+			if button(c.Key("cancel"), "Cancel").Clicked() {
 				d.Close()
 				answer(nil)
 			}
-			if ui.PrimaryButton(c.Key("ok"), "OK").Clicked() {
+			if primaryButton(c.Key("ok"), "OK").Clicked() {
 				submit()
 			}
 		})

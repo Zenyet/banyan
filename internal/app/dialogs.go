@@ -102,12 +102,12 @@ func openMergeDialog(ws *Workspace, branch string) {
 	ws.Shell.Open(&Dialog{Title: i18n.Tf("Merge '{}' into '{}'", branch, current), Width: 480, Body: func(c *ui.Context, d *Dialog) {
 		if !o.Squash {
 			label(c, i18n.T("Fast-forward"))
-			ui.Row(c).Gap(4).Wrap().Children(func() {
+			segments(c, func() {
 				for _, ff := range []struct {
 					value git.FastForward
 					label string
 				}{{git.FastForwardAllow, i18n.T("When possible")}, {git.FastForwardOnly, i18n.T("Only fast-forward")}, {git.FastForwardNever, i18n.T("Always create a merge commit")}} {
-					if toggleButton(c.Key(ff.value), ff.label, o.FastForward == ff.value).Clicked() {
+					if segment(c.Key(ff.value), ff.label, o.FastForward == ff.value).Clicked() {
 						o.FastForward = ff.value
 					}
 				}

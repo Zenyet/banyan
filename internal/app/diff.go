@@ -155,12 +155,14 @@ func (p *DiffPane) View(c *ui.Context) {
 			if ws.Clicked() {
 				changeSettings(func(s *settings.Settings) { s.IgnoreWhitespace = !s.IgnoreWhitespace })
 			}
-			if toggleButton(c.Key("split"), i18n.T("Side-by-side"), !unified).Clicked() {
-				changeSettings(func(s *settings.Settings) { s.UnifiedDiff = false })
-			}
-			if toggleButton(c.Key("unified"), i18n.T("Unified"), unified).Clicked() {
-				changeSettings(func(s *settings.Settings) { s.UnifiedDiff = true })
-			}
+			segments(c.Key("layout"), func() {
+				if segment(c.Key("split"), i18n.T("Side-by-side"), !unified).Clicked() {
+					changeSettings(func(s *settings.Settings) { s.UnifiedDiff = false })
+				}
+				if segment(c.Key("unified"), i18n.T("Unified"), unified).Clicked() {
+					changeSettings(func(s *settings.Settings) { s.UnifiedDiff = true })
+				}
+			})
 		})
 		// What showed before is another file's: rather than leave it under
 		// this one's title, say the diff is on its way.
@@ -212,12 +214,12 @@ func separator(c *ui.Context, sep ui.Element, s *editor.DiffSeparator) {
 // toggleButton is a small borderless button that shows whether it is on.
 func toggleButton(c *ui.Context, label string, on bool) ui.Element {
 	t := c.Theme()
-	b := ui.Button(c, label).PaddingX(8).PaddingY(3).FontSize(t.FontSize-1).Border(0, ui.Color{})
+	b := button(c, label).Height(24).PaddingX(10).FontSize(t.FontSize-1).Border(0, ui.Color{})
 	switch {
 	case on:
-		b.Background(t.Accent.Alpha(0.18)).TextColor(t.Text)
+		b.Background(t.Accent.Alpha(0.16)).TextColor(t.Accent)
 	case b.Hovered():
-		b.Background(hoverBG(t))
+		b.Background(t.Text.Alpha(0.08))
 	default:
 		b.Background(ui.Color{}).TextColor(t.TextMuted)
 	}

@@ -267,10 +267,10 @@ func (mt *mergeTool) view(c *ui.Context, d *Dialog) {
 		undoKeys, redoKeys = "⌘Z", "⇧⌘Z"
 	}
 	ui.Row(c.Key("footer")).Gap(8).Children(func() {
-		if ui.Button(c.Key("yours"), i18n.T("Accept Yours")).Tooltip(i18n.T("Take your side for every conflict")).Clicked() {
+		if button(c.Key("yours"), i18n.T("Accept Yours")).Tooltip(i18n.T("Take your side for every conflict")).Clicked() {
 			mt.acceptAll(true)
 		}
-		if ui.Button(c.Key("theirs"), i18n.T("Accept Theirs")).Tooltip(i18n.T("Take their side for every conflict")).Clicked() {
+		if button(c.Key("theirs"), i18n.T("Accept Theirs")).Tooltip(i18n.T("Take their side for every conflict")).Clicked() {
 			mt.acceptAll(false)
 		}
 		if iconButton(c.Key("undo"), "undo-2", i18n.Tf("Undo ({})", undoKeys)).Disabled(len(mt.undo) == 0).Clicked() {
@@ -284,10 +284,10 @@ func (mt *mergeTool) view(c *ui.Context, d *Dialog) {
 			color = t.Success
 		}
 		ui.Text(c, status).TextColor(color).Grow(1)
-		if ui.Button(c.Key("cancel"), i18n.T("Cancel")).Clicked() {
+		if button(c.Key("cancel"), i18n.T("Cancel")).Clicked() {
 			d.Close()
 		}
-		if ui.PrimaryButton(c.Key("apply"), i18n.T("Apply")).Disabled(!done).Clicked() {
+		if primaryButton(c.Key("apply"), i18n.T("Apply")).Disabled(!done).Clicked() {
 			mt.apply(d)
 		}
 	})
@@ -411,7 +411,7 @@ func (mt *mergeTool) conflictRows(c *ui.Context, ix int, cf *conflict.Conflict, 
 					if toggleButton(c.Key("cancel"), i18n.T("Cancel"), false).Clicked() {
 						mt.editing = -1
 					}
-					if ui.PrimaryButton(c.Key("done"), i18n.T("Done")).Clicked() {
+					if primaryButton(c.Key("done"), i18n.T("Done")).Clicked() {
 						mt.finishEdit()
 					}
 				})

@@ -174,10 +174,10 @@ func applyTheme(c *ui.Context) {
 // buttons are a dialog's buttons at its bottom right: Cancel, then ok.
 func dialogButtons(c *ui.Context, d *Dialog, okLabel string, danger, disabled bool, onOK func()) {
 	ui.Row(c).Gap(8).Justify(ui.End).Margin(8, 0, 0, 0).Children(func() {
-		if ui.Button(c.Key("cancel"), i18n.T("Cancel")).Clicked() {
+		if button(c.Key("cancel"), i18n.T("Cancel")).Clicked() {
 			d.Close()
 		}
-		ok := ui.PrimaryButton(c.Key("ok"), okLabel).Disabled(disabled)
+		ok := primaryButton(c.Key("ok"), okLabel).Disabled(disabled)
 		if danger {
 			ok.Background(c.Theme().Danger)
 		}

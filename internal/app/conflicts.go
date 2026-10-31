@@ -64,13 +64,13 @@ func operationBanner(c *ui.Context, ws *Workspace) {
 		muted(c, detail).SingleLine()
 		ui.Spacer(c)
 		if conflicts > 0 {
-			if ui.PrimaryButton(c.Key("resolve"), i18n.T("Resolve Conflicts…")).Clicked() {
+			if primaryButton(c.Key("resolve"), i18n.T("Resolve Conflicts…")).Clicked() {
 				openConflicts(ws.Shell, m)
 			}
-		} else if ui.PrimaryButton(c.Key("continue"), op.State.ContinueLabel()).Disabled(busy).Clicked() {
+		} else if primaryButton(c.Key("continue"), op.State.ContinueLabel()).Disabled(busy).Clicked() {
 			proceed(m)
 		}
-		if ui.Button(c.Key("abort"), i18n.Tf("Abort {}", op.State.Noun())).TextColor(t.Danger).Disabled(busy).Clicked() {
+		if button(c.Key("abort"), i18n.Tf("Abort {}", op.State.Noun())).TextColor(t.Danger).Disabled(busy).Clicked() {
 			abortOperation(ws.Shell, m)
 		}
 	})
@@ -94,11 +94,11 @@ func openConflicts(s *Shell, m *model.Model) {
 		}
 		footer := func(extra func()) {
 			ui.Row(c.Key("footer")).Gap(8).Children(func() {
-				if op != nil && ui.Button(c.Key("abort"), i18n.Tf("Abort {}", op.State.Noun())).TextColor(t.Danger).Disabled(busy).Clicked() {
+				if op != nil && button(c.Key("abort"), i18n.Tf("Abort {}", op.State.Noun())).TextColor(t.Danger).Disabled(busy).Clicked() {
 					abortOperation(s, m)
 				}
 				ui.Spacer(c)
-				if ui.Button(c.Key("close"), i18n.T("Close")).Clicked() {
+				if button(c.Key("close"), i18n.T("Close")).Clicked() {
 					d.Close()
 				}
 				if extra != nil {
@@ -115,7 +115,7 @@ func openConflicts(s *Shell, m *model.Model) {
 				muted(c, i18n.T("Review the result in the Commit tab, then finish the operation."))
 			}
 			footer(func() {
-				if op != nil && ui.PrimaryButton(c.Key("continue"), op.State.ContinueLabel()).Disabled(busy).Clicked() {
+				if op != nil && primaryButton(c.Key("continue"), op.State.ContinueLabel()).Disabled(busy).Clicked() {
 					d.Close()
 					proceed(m)
 				}
@@ -172,13 +172,13 @@ func openConflicts(s *Shell, m *model.Model) {
 					}
 					model.Run(m, label, func(r *git.Repo) (string, error) { return r.ResolveConflict(path, &side) })
 				}
-				if ui.Button(c.Key("yours"), i18n.T("Accept Yours")).FillWidth().Disabled(entry == nil || busy).Clicked() {
+				if button(c.Key("yours"), i18n.T("Accept Yours")).FillWidth().Disabled(entry == nil || busy).Clicked() {
 					resolve(true)
 				}
-				if ui.Button(c.Key("theirs"), i18n.T("Accept Theirs")).FillWidth().Disabled(entry == nil || busy).Clicked() {
+				if button(c.Key("theirs"), i18n.T("Accept Theirs")).FillWidth().Disabled(entry == nil || busy).Clicked() {
 					resolve(false)
 				}
-				if ui.PrimaryButton(c.Key("merge"), i18n.T("Merge…")).FillWidth().Disabled(!mergeable || busy).Clicked() {
+				if primaryButton(c.Key("merge"), i18n.T("Merge…")).FillWidth().Disabled(!mergeable || busy).Clicked() {
 					openMergeToolIn(s, m, selected)
 				}
 			})

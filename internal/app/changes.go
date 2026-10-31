@@ -822,13 +822,13 @@ func (cv *ChangesView) conflictCard(c *ui.Context, e *git.StatusEntry) {
 			muted(c, i18n.Tf("Yours ({}): {}  ·  Theirs ({}): {}", oursName, ours.Label(), theirsName, theirs.Label())).SingleLine()
 		})
 		yes, no := true, false
-		if ui.Button(c.Key("yours"), i18n.T("Accept Yours")).Clicked() {
+		if button(c.Key("yours"), i18n.T("Accept Yours")).Clicked() {
 			ws.run(i18n.Tf("Accept yours for {}", path), func(r *git.Repo) (string, error) { return r.ResolveConflict(path, &yes) })
 		}
-		if ui.Button(c.Key("theirs"), i18n.T("Accept Theirs")).Clicked() {
+		if button(c.Key("theirs"), i18n.T("Accept Theirs")).Clicked() {
 			ws.run(i18n.Tf("Accept theirs for {}", path), func(r *git.Repo) (string, error) { return r.ResolveConflict(path, &no) })
 		}
-		if e.CanMergeText() && ui.PrimaryButton(c.Key("merge"), i18n.T("Merge…")).Clicked() {
+		if e.CanMergeText() && primaryButton(c.Key("merge"), i18n.T("Merge…")).Clicked() {
 			openMergeTool(ws, path)
 		}
 	})
@@ -861,8 +861,8 @@ func (cv *ChangesView) optionsSummary() string {
 
 func (cv *ChangesView) commitBox(c *ui.Context) {
 	t := c.Theme()
-	ui.Column(c.Key("commit-box")).Padding(8).Gap(8).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() {
-		box := ui.TextArea(c.Key("message"), &cv.message).Placeholder(i18n.T("Commit Message")).Lines(4, 12).FillWidth().Bind(&cv.messageBox)
+	ui.Column(c.Key("commit-box")).Padding(10).Gap(8).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() {
+		box := ui.TextArea(c.Key("message"), &cv.message).Placeholder(i18n.T("Commit Message")).Lines(4, 12).FillWidth().Radius(10).Bind(&cv.messageBox)
 		if cv.focusMessageNext {
 			cv.focusMessageNext = false
 			cv.messageBox.Focus()
@@ -882,7 +882,7 @@ func (cv *ChangesView) commitBox(c *ui.Context) {
 			if ui.Checkbox(c.Key("amend"), &amend, i18n.T("Amend")).Changed() {
 				cv.setAmend(amend)
 			}
-			iconButton(c.Key("history"), "clock", i18n.T("Commit Message History")).PopoverMenuButton(func(menu *ui.Menu) {
+			iconButton(c.Key("history"), "clock", i18n.T("Commit Message History")).Menu(func(menu *ui.Menu) {
 				messages := settings.Get().Messages
 				if len(messages) == 0 {
 					menu.Item(i18n.T("No recent messages")).Disabled(true)
@@ -906,10 +906,10 @@ func (cv *ChangesView) commitBox(c *ui.Context) {
 				openCommitOptions(cv.ws, cv.options, func(o git.CommitOptions) { cv.options = o })
 			}
 			ui.Spacer(c)
-			if ui.Button(c.Key("commit-push"), i18n.T("Commit and Push")).Clicked() {
+			if button(c.Key("commit-push"), i18n.T("Commit and Push")).Clicked() {
 				cv.commit(true)
 			}
-			if ui.PrimaryButton(c.Key("commit"), i18n.T("Commit")).Clicked() {
+			if primaryButton(c.Key("commit"), i18n.T("Commit")).Clicked() {
 				cv.commit(false)
 			}
 		})

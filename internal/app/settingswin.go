@@ -60,7 +60,7 @@ func choice(c *ui.Context, options []option, current string, set func(*settings.
 			selected = o.label
 		}
 	}
-	if ui.Select(c.Key("choice"), &selected, labels).Changed() {
+	if ui.Select(c.Key("choice"), &selected, labels).Radius(14).Changed() {
 		ix := slices.Index(labels, selected)
 		if ix >= 0 {
 			key := options[ix].key
