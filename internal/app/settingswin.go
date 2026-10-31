@@ -43,7 +43,8 @@ func openSettings() {
 		// In the field, ⌘ or Ctrl by name rather than secondary.
 		sw.shortcuts[cmd.ID] = strings.ReplaceAll(cmd.Keys(), "secondary-", primary)
 	}
-	settingsShell = newWindow(mygo.WindowOptions{Title: i18n.T("Settings"), Width: 780, Height: 560}, func(_ *Shell, c *ui.Context) { sw.view(c) })
+	settingsShell = newWindow(withSidebar(mygo.WindowOptions{Title: i18n.T("Settings"), Width: 820, Height: 600}),
+		func(_ *Shell, c *ui.Context) { sw.view(c) })
 	settingsShell.onClosed = func() { settingsShell = nil }
 }
 
@@ -68,14 +69,22 @@ func choice(c *ui.Context, options []option, current string, set func(*settings.
 	}
 }
 
+// firstSetting is whether the next settingRow is the first of its group,
+// which draws no separator above it.
+var firstSetting bool
+
 // settingRow is a setting: its name and description on the left, its
 // control on the right, or below them when vertical.
 func settingRow(c *ui.Context, key, title, description string, vertical bool, control func()) {
 	t := c.Theme()
-	row := ui.Row(c.Key(key)).Gap(16).PaddingY(10).BorderWidth(0, 0, 1, 0).BorderColor(t.Border)
+	row := ui.Row(c.Key(key)).Gap(16).PaddingY(10)
 	if vertical {
-		row = ui.Column(c.Key(key)).Gap(6).PaddingY(10).BorderWidth(0, 0, 1, 0).BorderColor(t.Border)
+		row = ui.Column(c.Key(key)).Gap(6).PaddingY(10)
 	}
+	if !firstSetting {
+		row.BorderWidth(1, 0, 0, 0).BorderColor(t.Border)
+	}
+	firstSetting = false
 	row.Children(func() {
 		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(2).Children(func() {
 			ui.Text(c, title)
@@ -87,11 +96,16 @@ func settingRow(c *ui.Context, key, title, description string, vertical bool, co
 	})
 }
 
-func settingsGroup(c *ui.Context, title, description string) {
-	ui.Text(c, title).FontWeight(600).Margin(16, 0, 4, 0)
+// settingsGroup is a titled group of settings, which rows builds, on a
+// rounded card, as macOS's System Settings groups them.
+func settingsGroup(c *ui.Context, title, description string, rows func()) {
+	t := c.Theme()
+	ui.Text(c, title).FontWeight(600).Margin(18, 4, 6, 4)
 	if description != "" {
-		muted(c, description)
+		muted(c, description).Margin(0, 4, 8, 4)
 	}
+	firstSetting = true
+	ui.Column(c.Key(title)).PaddingX(14).Radius(12).Background(t.Surface).Border(1, t.Border.Alpha(0.6)).Children(rows)
 }
 
 func (sw *settingsWindow) view(c *ui.Context) {
@@ -104,80 +118,87 @@ func (sw *settingsWindow) view(c *ui.Context) {
 		{"keyboard", i18n.T("Keyboard Shortcuts")},
 	}
 	ui.Row(c).Fill().Children(func() {
-		ui.Column(c.Key("sidebar")).Width(200).FillHeight().Padding(12, 8).Gap(2).Background(t.Surface).BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
-			for ix, p := range pages {
-				item := ui.Row(c.Key(ix)).Height(30).PaddingX(10).Gap(8).Radius(t.Radius).Cursor(ui.CursorPointer)
-				switch {
-				case ix == sw.page:
-					item.Background(selectionBG)
-				case item.Hovered():
-					item.Background(hoverBG(t))
+		sidebar(c, 210, func() {
+			ui.Column(c).Padding(0, 10, 10, 10).Gap(2).Children(func() {
+				for ix, p := range pages {
+					item := ui.Row(c.Key(ix)).Height(30).PaddingX(10).Gap(8).Radius(8).Cursor(ui.CursorPointer)
+					switch {
+					case ix == sw.page:
+						item.Background(t.Accent).TextColor(t.AccentText)
+					case item.Hovered():
+						item.Background(t.Text.Alpha(0.06))
+					}
+					if item.Clicked() {
+						sw.page = ix
+					}
+					item.Children(func() {
+						ui.Icon(c, icon(p.icon)).FontSize(t.FontSize + 1)
+						ui.Text(c, p.title).SingleLine()
+					})
 				}
-				if item.Clicked() {
-					sw.page = ix
-				}
-				item.Children(func() {
-					ui.Icon(c, icon(p.icon))
-					ui.Text(c, p.title).SingleLine()
-				})
-			}
+			})
 		})
-		ui.Scroll(c.Key(sw.page)).Grow(1).FillHeight().Padding(8, 24, 24, 24).Children(func() {
-			switch sw.page {
-			case 0:
-				sw.appearance(c, &s)
-			case 1:
-				sw.versionControl(c, &s)
-			case 2:
-				sw.diffAndLog(c, &s)
-			default:
-				sw.keymap(c)
-			}
+		ui.Column(c.Key("pane")).Grow(1).MinWidth(0).FillHeight().Background(t.Background).Children(func() {
+			paneTitle(c, pages[sw.page].title)
+			ui.Scroll(c.Key(sw.page)).Grow(1).Padding(0, 24, 24, 24).Children(func() {
+				switch sw.page {
+				case 0:
+					sw.appearance(c, &s)
+				case 1:
+					sw.versionControl(c, &s)
+				case 2:
+					sw.diffAndLog(c, &s)
+				default:
+					sw.keymap(c)
+				}
+			})
 		})
 	})
 }
 
 func (sw *settingsWindow) appearance(c *ui.Context, s *settings.Settings) {
-	settingsGroup(c, i18n.T("Theme"), "")
-	settingRow(c, "theme", i18n.T("Theme"), i18n.T("Sync with OS follows the macOS appearance."), false, func() {
-		var options []option
-		for _, th := range settings.AllThemes {
-			options = append(options, option{th.Key(), th.Label()})
-		}
-		choice(c, options, s.Theme.Key(), func(s *settings.Settings, v string) {
+	settingsGroup(c, i18n.T("Theme"), "", func() {
+		settingRow(c, "theme", i18n.T("Theme"), i18n.T("Sync with OS follows the macOS appearance."), false, func() {
+			var options []option
 			for _, th := range settings.AllThemes {
-				if th.Key() == v {
-					s.Theme = th
+				options = append(options, option{th.Key(), th.Label()})
+			}
+			choice(c, options, s.Theme.Key(), func(s *settings.Settings, v string) {
+				for _, th := range settings.AllThemes {
+					if th.Key() == v {
+						s.Theme = th
+					}
+				}
+			})
+		})
+		settingRow(c, "font", i18n.T("Font size"), i18n.T("Size of the interface text; diffs scale with it."), false, func() {
+			var options []option
+			for size := 11; size <= 18; size++ {
+				options = append(options, option{strconv.Itoa(size), strconv.Itoa(size) + " px"})
+			}
+			choice(c, options, strconv.Itoa(s.FontSize), func(s *settings.Settings, v string) { s.FontSize, _ = strconv.Atoi(v) })
+		})
+		settingRow(c, "language", i18n.T("Language"), "", false, func() {
+			// Until one is chosen, the system's language is the one in use.
+			current := s.Language
+			if current != "en" && current != "zh" {
+				current = "en"
+				if i18n.IsChinese() {
+					current = "zh"
 				}
 			}
+			choice(c, []option{{"en", "English"}, {"zh", "简体中文"}}, current, func(s *settings.Settings, v string) { s.Language = v })
 		})
 	})
-	settingRow(c, "font", i18n.T("Font size"), i18n.T("Size of the interface text; diffs scale with it."), false, func() {
-		var options []option
-		for size := 11; size <= 18; size++ {
-			options = append(options, option{strconv.Itoa(size), strconv.Itoa(size) + " px"})
-		}
-		choice(c, options, strconv.Itoa(s.FontSize), func(s *settings.Settings, v string) { s.FontSize, _ = strconv.Atoi(v) })
-	})
-	settingRow(c, "language", i18n.T("Language"), "", false, func() {
-		// Until one is chosen, the system's language is the one in use.
-		current := s.Language
-		if current != "en" && current != "zh" {
-			current = "en"
-			if i18n.IsChinese() {
-				current = "zh"
+	settingsGroup(c, i18n.T("Log"), "", func() {
+		settingRow(c, "dates", i18n.T("Commit dates"), "", false, func() {
+			current := "absolute"
+			if s.RelativeDates {
+				current = "relative"
 			}
-		}
-		choice(c, []option{{"en", "English"}, {"zh", "简体中文"}}, current, func(s *settings.Settings, v string) { s.Language = v })
-	})
-	settingsGroup(c, i18n.T("Log"), "")
-	settingRow(c, "dates", i18n.T("Commit dates"), "", false, func() {
-		current := "absolute"
-		if s.RelativeDates {
-			current = "relative"
-		}
-		choice(c, []option{{"relative", i18n.T("Relative (3 minutes ago)")}, {"absolute", i18n.T("Date and time")}}, current,
-			func(s *settings.Settings, v string) { s.RelativeDates = v == "relative" })
+			choice(c, []option{{"relative", i18n.T("Relative (3 minutes ago)")}, {"absolute", i18n.T("Date and time")}}, current,
+				func(s *settings.Settings, v string) { s.RelativeDates = v == "relative" })
+		})
 	})
 }
 
@@ -198,129 +219,135 @@ func (sw *settingsWindow) versionControl(c *ui.Context, s *settings.Settings) {
 			})
 		}()
 	}
-	settingsGroup(c, i18n.T("Git"), "")
-	settingRow(c, "open-in", i18n.T("Open repositories in"), "", false, func() {
-		current := "tab"
-		if s.OpenInNewWindow {
-			current = "window"
-		}
-		choice(c, []option{{"tab", i18n.T("A tab of the current window")}, {"window", i18n.T("A new window")}}, current,
-			func(s *settings.Settings, v string) { s.OpenInNewWindow = v == "window" })
-	})
-	settingRow(c, "git", i18n.T("Path to Git executable"), i18n.Tf("Leave empty to use git from the PATH. {}", sw.gitVersion), true, func() {
-		if ui.TextInput(c.Key("git-path"), &sw.gitPath).FillWidth().Changed() {
-			path := strings.TrimSpace(sw.gitPath)
-			changeSettings(func(s *settings.Settings) { s.GitPath = path })
-		}
-	})
-	settingRow(c, "protected", i18n.T("Protected branches"),
-		i18n.T("Never force pushed, and their pushed commits are not rewritten. Separate names with spaces; * matches anything."), true, func() {
-			if ui.TextInput(c.Key("protected"), &sw.protected).FillWidth().Changed() {
-				p := strings.TrimSpace(sw.protected)
-				changeSettings(func(s *settings.Settings) { s.ProtectedBranches = p })
+	settingsGroup(c, i18n.T("Git"), "", func() {
+		settingRow(c, "open-in", i18n.T("Open repositories in"), "", false, func() {
+			current := "tab"
+			if s.OpenInNewWindow {
+				current = "window"
+			}
+			choice(c, []option{{"tab", i18n.T("A tab of the current window")}, {"window", i18n.T("A new window")}}, current,
+				func(s *settings.Settings, v string) { s.OpenInNewWindow = v == "window" })
+		})
+		settingRow(c, "git", i18n.T("Path to Git executable"), i18n.Tf("Leave empty to use git from the PATH. {}", sw.gitVersion), true, func() {
+			if ui.TextInput(c.Key("git-path"), &sw.gitPath).FillWidth().Changed() {
+				path := strings.TrimSpace(sw.gitPath)
+				changeSettings(func(s *settings.Settings) { s.GitPath = path })
 			}
 		})
-	settingsGroup(c, i18n.T("Update and Fetch"), "")
-	settingRow(c, "update", i18n.T("Update Project"), i18n.T("The default in the Update Project dialog."), false, func() {
-		var options []option
-		for _, m := range git.AllUpdateMethods {
-			options = append(options, option{m.Key(), m.Label()})
-		}
-		choice(c, options, s.UpdateMethod.Key(), func(s *settings.Settings, v string) { s.UpdateMethod = git.UpdateMethodFromKey(v) })
+		settingRow(c, "protected", i18n.T("Protected branches"),
+			i18n.T("Never force pushed, and their pushed commits are not rewritten. Separate names with spaces; * matches anything."), true, func() {
+				if ui.TextInput(c.Key("protected"), &sw.protected).FillWidth().Changed() {
+					p := strings.TrimSpace(sw.protected)
+					changeSettings(func(s *settings.Settings) { s.ProtectedBranches = p })
+				}
+			})
 	})
-	settingRow(c, "fetch", i18n.T("Fetch in the background"), i18n.T("Keeps remote branches current. Never asks for credentials; stored ones are used."), false, func() {
-		var options []option
-		for _, minutes := range []int{0, 5, 10, 15, 30, 60} {
-			label := i18n.Tf("Every {} minutes", minutes)
-			switch minutes {
-			case 0:
-				label = i18n.T("Never")
-			case 60:
-				label = i18n.T("Every hour")
+	settingsGroup(c, i18n.T("Update and Fetch"), "", func() {
+		settingRow(c, "update", i18n.T("Update Project"), i18n.T("The default in the Update Project dialog."), false, func() {
+			var options []option
+			for _, m := range git.AllUpdateMethods {
+				options = append(options, option{m.Key(), m.Label()})
 			}
-			options = append(options, option{strconv.Itoa(minutes), label})
-		}
-		choice(c, options, strconv.Itoa(s.AutoFetchMinutes), func(s *settings.Settings, v string) { s.AutoFetchMinutes, _ = strconv.Atoi(v) })
+			choice(c, options, s.UpdateMethod.Key(), func(s *settings.Settings, v string) { s.UpdateMethod = git.UpdateMethodFromKey(v) })
+		})
+		settingRow(c, "fetch", i18n.T("Fetch in the background"), i18n.T("Keeps remote branches current. Never asks for credentials; stored ones are used."), false, func() {
+			var options []option
+			for _, minutes := range []int{0, 5, 10, 15, 30, 60} {
+				label := i18n.Tf("Every {} minutes", minutes)
+				switch minutes {
+				case 0:
+					label = i18n.T("Never")
+				case 60:
+					label = i18n.T("Every hour")
+				}
+				options = append(options, option{strconv.Itoa(minutes), label})
+			}
+			choice(c, options, strconv.Itoa(s.AutoFetchMinutes), func(s *settings.Settings, v string) { s.AutoFetchMinutes, _ = strconv.Atoi(v) })
+		})
 	})
 }
 
 func (sw *settingsWindow) diffAndLog(c *ui.Context, s *settings.Settings) {
-	settingsGroup(c, i18n.T("Diff"), "")
-	settingRow(c, "diff", i18n.T("Show diffs"), "", false, func() {
-		current := "split"
-		if s.UnifiedDiff {
-			current = "unified"
-		}
-		choice(c, []option{{"split", i18n.T("Side by side")}, {"unified", i18n.T("Unified")}}, current,
-			func(s *settings.Settings, v string) { s.UnifiedDiff = v == "unified" })
+	settingsGroup(c, i18n.T("Diff"), "", func() {
+		settingRow(c, "diff", i18n.T("Show diffs"), "", false, func() {
+			current := "split"
+			if s.UnifiedDiff {
+				current = "unified"
+			}
+			choice(c, []option{{"split", i18n.T("Side by side")}, {"unified", i18n.T("Unified")}}, current,
+				func(s *settings.Settings, v string) { s.UnifiedDiff = v == "unified" })
+		})
+		settingRow(c, "whitespace", i18n.T("Whitespace changes"), i18n.T("Also the Ignore Whitespace button above every diff."), false, func() {
+			current := "show"
+			if s.IgnoreWhitespace {
+				current = "ignore"
+			}
+			choice(c, []option{{"show", i18n.T("Show")}, {"ignore", i18n.T("Ignore")}}, current,
+				func(s *settings.Settings, v string) { s.IgnoreWhitespace = v == "ignore" })
+		})
 	})
-	settingRow(c, "whitespace", i18n.T("Whitespace changes"), i18n.T("Also the Ignore Whitespace button above every diff."), false, func() {
-		current := "show"
-		if s.IgnoreWhitespace {
-			current = "ignore"
-		}
-		choice(c, []option{{"show", i18n.T("Show")}, {"ignore", i18n.T("Ignore")}}, current,
-			func(s *settings.Settings, v string) { s.IgnoreWhitespace = v == "ignore" })
-	})
-	settingsGroup(c, i18n.T("Log"), "")
-	settingRow(c, "page", i18n.T("Commits loaded at a time"), i18n.T("More are loaded when you scroll to the end. Applies from the next refresh."), false, func() {
-		var options []option
-		for _, n := range []int{1000, 2000, 5000, 10000, 20000} {
-			options = append(options, option{strconv.Itoa(n), strconv.Itoa(n)})
-		}
-		choice(c, options, strconv.Itoa(s.LogPageSize), func(s *settings.Settings, v string) { s.LogPageSize, _ = strconv.Atoi(v) })
+	settingsGroup(c, i18n.T("Log"), "", func() {
+		settingRow(c, "page", i18n.T("Commits loaded at a time"), i18n.T("More are loaded when you scroll to the end. Applies from the next refresh."), false, func() {
+			var options []option
+			for _, n := range []int{1000, 2000, 5000, 10000, 20000} {
+				options = append(options, option{strconv.Itoa(n), strconv.Itoa(n)})
+			}
+			choice(c, options, strconv.Itoa(s.LogPageSize), func(s *settings.Settings, v string) { s.LogPageSize, _ = strconv.Atoi(v) })
+		})
 	})
 }
 
 func (sw *settingsWindow) keymap(c *ui.Context) {
 	t := c.Theme()
-	settingsGroup(c, i18n.T("Commands"), i18n.T("Type keys such as cmd-shift-k (ctrl-shift-k on Windows and Linux), or leave empty for none."))
-	for _, cmd := range commands() {
-		def := i18n.T("none")
-		if cmd.DefaultKeys != "" {
-			def = displayKeys(cmd.DefaultKeys)
-		}
-		settingRow(c, cmd.ID, cmd.Label, i18n.Tf("Default: {}", def), false, func() {
-			value := sw.shortcuts[cmd.ID]
-			if ui.TextInput(c.Key("keys"), &value).Width(200).Font(monoFont).Changed() {
-				sw.shortcuts[cmd.ID] = value
-				keys := strings.ToLower(strings.TrimSpace(value))
-				// Applied as soon as it's typed, once it reads as keys.
-				if keys != "" && accelerator(keys) == "" {
-					return
-				}
-				isDefault := accelerator(keys) == accelerator(cmd.DefaultKeys)
-				id := cmd.ID
-				changeSettings(func(s *settings.Settings) {
-					s.Shortcuts = slices.DeleteFunc(s.Shortcuts, func(sc settings.Shortcut) bool { return sc.ID == id })
-					if !isDefault {
-						s.Shortcuts = append(s.Shortcuts, settings.Shortcut{ID: id, Keys: keys})
-					}
-				})
+	settingsGroup(c, i18n.T("Commands"), i18n.T("Type keys such as cmd-shift-k (ctrl-shift-k on Windows and Linux), or leave empty for none."), func() {
+		for _, cmd := range commands() {
+			def := i18n.T("none")
+			if cmd.DefaultKeys != "" {
+				def = displayKeys(cmd.DefaultKeys)
 			}
-		})
-	}
-	settingsGroup(c, i18n.T("Fixed"), "")
-	for _, fixed := range []struct {
-		label string
-		keys  []string
-	}{
-		{i18n.T("Commit from the message box"), []string{"secondary-enter"}},
-		{i18n.T("From the search box to the commits"), []string{"enter"}},
-		{i18n.T("Previous / next commit"), []string{"up", "down"}},
-		{i18n.T("First / last commit"), []string{"home", "end"}},
-		{i18n.T("Page up / down"), []string{"pageup", "pagedown"}},
-		{i18n.T("Undo a choice in the merge tool"), []string{"secondary-z"}},
-		{i18n.T("Redo a choice in the merge tool"), []string{"secondary-shift-z"}},
-	} {
-		var shown []string
-		for _, k := range fixed.keys {
-			shown = append(shown, displayKeys(k))
-		}
-		settingRow(c, fixed.label, fixed.label, "", false, func() {
-			ui.Box(c).PaddingX(8).PaddingY(2).Radius(4).Border(1, t.Border).Background(t.Surface).Children(func() {
-				ui.Text(c, strings.Join(shown, "  /  ")).Font(monoFont)
+			settingRow(c, cmd.ID, cmd.Label, i18n.Tf("Default: {}", def), false, func() {
+				value := sw.shortcuts[cmd.ID]
+				if ui.TextInput(c.Key("keys"), &value).Width(200).Font(monoFont).Changed() {
+					sw.shortcuts[cmd.ID] = value
+					keys := strings.ToLower(strings.TrimSpace(value))
+					// Applied as soon as it's typed, once it reads as keys.
+					if keys != "" && accelerator(keys) == "" {
+						return
+					}
+					isDefault := accelerator(keys) == accelerator(cmd.DefaultKeys)
+					id := cmd.ID
+					changeSettings(func(s *settings.Settings) {
+						s.Shortcuts = slices.DeleteFunc(s.Shortcuts, func(sc settings.Shortcut) bool { return sc.ID == id })
+						if !isDefault {
+							s.Shortcuts = append(s.Shortcuts, settings.Shortcut{ID: id, Keys: keys})
+						}
+					})
+				}
 			})
-		})
-	}
+		}
+	})
+	settingsGroup(c, i18n.T("Fixed"), "", func() {
+		for _, fixed := range []struct {
+			label string
+			keys  []string
+		}{
+			{i18n.T("Commit from the message box"), []string{"secondary-enter"}},
+			{i18n.T("From the search box to the commits"), []string{"enter"}},
+			{i18n.T("Previous / next commit"), []string{"up", "down"}},
+			{i18n.T("First / last commit"), []string{"home", "end"}},
+			{i18n.T("Page up / down"), []string{"pageup", "pagedown"}},
+			{i18n.T("Undo a choice in the merge tool"), []string{"secondary-z"}},
+			{i18n.T("Redo a choice in the merge tool"), []string{"secondary-shift-z"}},
+		} {
+			var shown []string
+			for _, k := range fixed.keys {
+				shown = append(shown, displayKeys(k))
+			}
+			settingRow(c, fixed.label, fixed.label, "", false, func() {
+				ui.Box(c).PaddingX(8).PaddingY(2).Radius(4).Border(1, t.Border).Background(t.Surface).Children(func() {
+					ui.Text(c, strings.Join(shown, "  /  ")).Font(monoFont)
+				})
+			})
+		}
+	})
 }

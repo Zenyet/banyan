@@ -92,9 +92,15 @@ func (s *Shell) Toast(kind, message string) {
 func (s *Shell) view(c *ui.Context) {
 	applyTheme(c)
 	t := c.Theme()
-	ui.Column(c).Fill().Background(t.Background).TextColor(t.Text).Children(func() {
-		s.content(c)
-	})
+	root := ui.Column(c).Fill().TextColor(t.Text)
+	if c.Vibrancy() {
+		// The window's material shows where the view draws no background:
+		// its sidebar.
+		c.Root().Background(ui.Transparent)
+	} else {
+		root.Background(t.Background)
+	}
+	root.Children(func() { s.content(c) })
 	for _, d := range s.dialogs {
 		was := d.open
 		panel := ui.Modal(c.Key(d), &d.open, func() {
@@ -103,7 +109,7 @@ func (s *Shell) view(c *ui.Context) {
 			}
 			d.Body(c, d)
 		})
-		panel.Width(d.Width)
+		panel.Width(d.Width).Radius(16)
 		if was && !d.open && panel.Dismissed() && d.OnDismiss != nil {
 			d.OnDismiss()
 		}

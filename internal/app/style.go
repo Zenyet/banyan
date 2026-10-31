@@ -6,10 +6,12 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 
@@ -320,6 +322,41 @@ func selectedPill(e ui.Element, t *ui.Theme) ui.Element {
 		return e.Background(ui.RGBA(255, 255, 255, 0.14))
 	}
 	return e.Background(ui.RGB(255, 255, 255)).Shadow(0, 1, 3, 0, ui.RGBA(0, 0, 0, 0.12))
+}
+
+// withSidebar gives a window a hidden title bar, its traffic lights inset
+// over a sidebar of the system's material on macOS, as System Settings.
+func withSidebar(o mygo.WindowOptions) mygo.WindowOptions {
+	o.TitleBarStyle, o.TitleBarHeight = mygo.TitleBarHiddenInset, titleBarHeight
+	if runtime.GOOS == "darwin" {
+		o.Vibrancy = mygo.VibrancySidebar
+	}
+	return o
+}
+
+// sidebar is the sidebar of a window withSidebar, under the room its
+// window controls take: of the window's material where it shows one, else
+// of the chrome's gray.
+func sidebar(c *ui.Context, width float32, fn func()) ui.Element {
+	t := c.Theme()
+	side := ui.Column(c.Key("sidebar")).Width(width).FillHeight().Shrink(0).BorderWidth(0, 1, 0, 0).BorderColor(t.Border)
+	if !c.Vibrancy() {
+		side.Background(chromeBG(t))
+	}
+	return side.Children(func() {
+		ui.Box(c).Height(titleBarHeight).Shrink(0).DragWindow()
+		fn()
+	})
+}
+
+// paneTitle is the title of the pane beside a sidebar, in the window's
+// title bar, which it drags, clear of the window controls on the right.
+func paneTitle(c *ui.Context, title string) {
+	t := c.Theme()
+	bar := c.TitleBar()
+	ui.Row(c.Key("title")).Height(titleBarHeight).Shrink(0).Padding(0, bar.Right+16, 0, 24).DragWindow().Children(func() {
+		ui.Text(c, title).FontSize(t.FontSize + 4).Bold().SingleLine()
+	})
 }
 
 // emptyMessage fills its parent with a muted message in the middle.
