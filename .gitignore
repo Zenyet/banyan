@@ -3,3 +3,4 @@
 .DS_Store
 /rust/target
 /rust/dist
+/rsrc_windows_*.syso
