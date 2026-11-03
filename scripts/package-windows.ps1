@@ -6,8 +6,18 @@ Set-Location (Split-Path $PSScriptRoot)
 $version = (Select-String -Path main.go -Pattern '^var version = "(.*)"').Matches[0].Groups[1].Value
 New-Item -ItemType Directory -Force build | Out-Null
 $env:CGO_ENABLED = "0"
-go build -trimpath -tags mygo_noinspector -ldflags "-s -w -H windowsgui -X main.version=$version -X github.com/egoist/mygo.production=1" -o build\banyan.exe .
+# The executable's resources: its icon, which MyGo gives the windows and
+# the taskbar (resource 1), a manifest and version information. Go links
+# the .syso file of the main package in; it goes once built.
+go run github.com/tc-hib/go-winres@v0.3.3 make --in packaging\windows\winres.json --out rsrc --arch amd64 `
+    --product-version "$version.0" --file-version "$version.0"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+try {
+    go build -trimpath -tags mygo_noinspector -ldflags "-s -w -H windowsgui -X main.version=$version -X github.com/egoist/mygo.production=1" -o build\banyan.exe .
+    if ($LASTEXITCODE -ne 0) { throw "go build failed" }
+} finally {
+    Remove-Item -ErrorAction SilentlyContinue rsrc_windows_amd64.syso
+}
 
 # MinGit, Git for Windows' own minimal Git, goes beside banyan.exe in
 # git\, which Banyan runs when the computer has no Git. Its licenses come
