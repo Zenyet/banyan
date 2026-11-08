@@ -645,4 +645,5 @@ var zh = map[string]string{
 	"Download Git":  "下载 Git",
 	"Check Again":   "重新检查",
 	"Found Git: {}": "已找到 Git：{}",
+	"Copy Message":  "复制消息",
 }

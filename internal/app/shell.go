@@ -2,6 +2,7 @@ package app
 
 import (
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -17,6 +18,10 @@ type Shell struct {
 	Win     *mygo.Window
 	dialogs []*Dialog
 	toasts  []ui.Toast
+	// toastTop is how far from the top of the window the notifications
+	// show, clear of the toolbar; toastSeen holds when each came.
+	toastTop  float32
+	toastSeen map[string]time.Time
 	// content builds the window's own interface.
 	content func(c *ui.Context)
 	// onClosed runs once the window is gone.
@@ -41,7 +46,7 @@ var shells = map[*mygo.Window]*Shell{}
 
 // newWindow opens a window of native UI around content.
 func newWindow(opts mygo.WindowOptions, content func(s *Shell, c *ui.Context)) *Shell {
-	s := &Shell{}
+	s := &Shell{toastTop: float32(opts.TitleBarHeight) + 10}
 	s.content = func(c *ui.Context) { content(s, c) }
 	opts.Content = ui.View(s.view)
 	s.Win = mygo.NewWindow(opts)
@@ -80,8 +85,8 @@ func (s *Shell) Open(d *Dialog) {
 // HasDialog reports whether a dialog is open over the window.
 func (s *Shell) HasDialog() bool { return len(s.dialogs) > 0 }
 
-// Toast shows a message near the bottom of the window; kind is "error",
-// "warning", "success" or "".
+// Toast shows a message as a notification in the top right corner of the
+// window; kind is "error", "warning", "success" or "".
 func (s *Shell) Toast(kind, message string) {
 	title, description, _ := strings.Cut(message, "\n")
 	t := ui.Toast{Title: title, Description: strings.TrimSpace(description), Type: kind}
@@ -134,6 +139,7 @@ func (s *Shell) view(c *ui.Context) {
 		c.AddToast(toast)
 	}
 	s.toasts = nil
+	s.notifications(c)
 }
 
 // applyTheme sets the theme the settings ask for on the window.

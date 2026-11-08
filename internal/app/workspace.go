@@ -136,6 +136,12 @@ func (ws *Workspace) statusBar(c *ui.Context) {
 		FontSize(t.FontSize - 1).TextColor(t.TextMuted).Children(func() {
 		ui.Text(c, m.Repo.Root()).SingleLine().Shrink(1)
 		ui.Spacer(c)
+		if m.Busy != "" && busyButton(m.Busy) == "" {
+			ui.Row(c).Gap(4).Children(func() {
+				ui.Spinner(c).Size(12, 12)
+				ui.Text(c, m.Busy+"…").SingleLine()
+			})
+		}
 		if a, ok := m.Activity(); ok {
 			ui.Row(c).Gap(4).Tooltip(a.Detail()).Children(func() {
 				ui.Spinner(c).Size(12, 12)
@@ -171,20 +177,18 @@ func (ws *Workspace) header(c *ui.Context) {
 		ui.Spacer(c)
 		ws.views(c)
 		ui.Spacer(c)
-		if m.Busy != "" {
-			ui.Row(c).Gap(4).Shrink(1).MinWidth(0).FontSize(t.FontSize - 1).TextColor(t.TextMuted).Children(func() {
-				ui.Spinner(c).Size(12, 12)
-				ui.Text(c, m.Busy+"…").SingleLine().Shrink(1)
-			})
-		}
+		// The operation running shows on its own button, its icon turned
+		// to a spinner, so that nothing comes and goes beside the group
+		// and the views keep their room; others show in the status bar.
+		busy := busyButton(m.Busy)
 		glassGroup(c.Key("vcs"), func() {
-			if capsuleButton(c.Key("fetch"), "refresh-ccw", i18n.T("Fetch"), compact, false).Clicked() {
+			if operationButton(c.Key("fetch"), "refresh-ccw", i18n.T("Fetch"), "", compact, busy == "fetch", m.Busy) {
 				ws.Command("fetch")
 			}
-			if capsuleButton(c.Key("update"), "arrow-down-to-line", i18n.T("Update"), compact, false).Tooltip(i18n.T("Update Project (⌘T)")).Clicked() {
+			if operationButton(c.Key("update"), "arrow-down-to-line", i18n.T("Update"), i18n.T("Update Project (⌘T)"), compact, busy == "update", m.Busy) {
 				openUpdate(ws)
 			}
-			if capsuleButton(c.Key("push"), "arrow-up-from-line", i18n.T("Push"), compact, false).Clicked() {
+			if operationButton(c.Key("push"), "arrow-up-from-line", i18n.T("Push"), "", compact, busy == "push", m.Busy) {
 				openPush(ws)
 			}
 			capsuleButton(c.Key("stashes"), "archive", i18n.Tf("Stashes ({})", len(m.Stashes)), compact, true).Menu(ws.stashMenu)
@@ -472,4 +476,21 @@ func revealLabel() string {
 		return i18n.T("Show in Explorer")
 	}
 	return i18n.T("Open Containing Folder")
+}
+
+// busyButton is the toolbar button of the operation labelled busy, as
+// Run labels them: "fetch", "update" or "push", or "" for one of none.
+func busyButton(busy string) string {
+	fetchPrefix, _, _ := strings.Cut(i18n.Tf("Fetch {}", "\x00"), "\x00")
+	switch {
+	case busy == "":
+		return ""
+	case busy == i18n.T("Fetch") || fetchPrefix != "" && strings.HasPrefix(busy, fetchPrefix):
+		return "fetch"
+	case busy == i18n.T("Update Project"):
+		return "update"
+	case busy == i18n.T("Push") || busy == i18n.T("Force Push") || busy == i18n.T("Push all tags"):
+		return "push"
+	}
+	return ""
 }

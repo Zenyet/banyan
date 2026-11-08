@@ -257,6 +257,10 @@ func (rw *repoWindow) view(c *ui.Context) {
 	}
 	ws := rw.tabs[rw.active]
 	ws.header(c)
+	rw.shell.toastTop = titleBarHeight + 10
+	if len(rw.tabs) > 1 {
+		rw.shell.toastTop += 36
+	}
 	if len(rw.tabs) > 1 {
 		ui.Row(c.Key("repo-tabs")).Height(36).PaddingX(12).Gap(4).Background(chromeBG(t)).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).
 			ClipX().Children(func() {

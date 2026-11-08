@@ -346,13 +346,40 @@ func glassGroup(c *ui.Context, fn func()) ui.Element {
 // label unless compact, which then shows as its tooltip; menu adds a
 // chevron, for a button opening a menu.
 func capsuleButton(c *ui.Context, iconName, label string, compact, menu bool) ui.Element {
+	return capsule(c, iconName, label, compact, menu, false)
+}
+
+// operationButton is a capsuleButton running an operation of the
+// toolbar: while running, its icon turns to a spinner in the same room,
+// so the toolbar keeps its layout, and its tooltip tells what runs. While
+// another operation runs (busy), it is disabled, as Run would refuse it;
+// the running one keeps its full color, and clicks on it do nothing.
+func operationButton(c *ui.Context, iconName, label, tip string, compact, running bool, busy string) bool {
+	b := capsule(c, iconName, label, compact, false, running)
+	switch {
+	case running:
+		b.Tooltip(busy + "…").Cursor(ui.CursorDefault)
+	case busy != "":
+		b.Disabled(true)
+	case tip != "":
+		b.Tooltip(tip)
+	}
+	return b.Clicked() && busy == ""
+}
+
+func capsule(c *ui.Context, iconName, label string, compact, menu, spinning bool) ui.Element {
 	t := c.Theme()
 	b := button(c, "").Label(label).Height(30).PaddingX(10).Radius(15).Gap(6).Background(ui.Color{}).Border(0, ui.Color{})
 	if compact {
 		b.PaddingX(8).Tooltip(label)
 	}
 	b.Children(func() {
-		ui.Icon(c, icon(iconName)).FontSize(t.FontSize + 2)
+		if spinning {
+			size := t.FontSize + 2
+			ui.Spinner(c).Size(size, size).TextColor(t.Accent)
+		} else {
+			ui.Icon(c, icon(iconName)).FontSize(t.FontSize + 2)
+		}
 		if !compact {
 			ui.Text(c, label).SingleLine().FontWeight(500)
 		}
