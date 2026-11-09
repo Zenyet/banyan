@@ -78,7 +78,7 @@ func openWorktrees(ws *Workspace, branch string) {
 		trees.sync(m, func() []git.Worktree { w, _ := m.Repo.Worktrees(); return w })
 		muted(c, i18n.T("Each worktree is a folder with its own branch checked out, sharing this repository's history."))
 		prunable := false
-		ui.Scroll(c.Key("trees")).MaxHeight(300).Border(1, t.Border).Radius(t.Radius).Padding(4).Children(func() {
+		ui.Scroll(c.Key("trees")).MaxHeight(300).Shrink(1).MinHeight(0).Border(1, t.Border).Radius(t.Radius).Padding(4).Children(func() {
 			for _, tree := range trees.value {
 				prunable = prunable || tree.Prunable
 				ui.Row(c.Key(tree.Path)).PaddingX(8).PaddingY(6).Gap(8).Children(func() {
@@ -183,7 +183,7 @@ func openSubmodules(ws *Workspace) {
 		case len(subs.value) == 0:
 			muted(c, i18n.T("This repository has no submodules."))
 		default:
-			ui.Scroll(c.Key("subs")).MaxHeight(360).Border(1, t.Border).Radius(t.Radius).Padding(4).Children(func() {
+			ui.Scroll(c.Key("subs")).MaxHeight(360).Shrink(1).MinHeight(0).Border(1, t.Border).Radius(t.Radius).Padding(4).Children(func() {
 				for _, sub := range subs.value {
 					state, color := i18n.T("up to date"), t.Success
 					switch sub.State {
@@ -231,7 +231,7 @@ func openRemotes(ws *Workspace) {
 	ws.Shell.Open(&Dialog{Title: i18n.T("Git Remotes"), Width: 720, Body: func(c *ui.Context, d *Dialog) {
 		t := c.Theme()
 		remotes.sync(m, func() []git.Remote { r, _ := m.Repo.Remotes(); return r })
-		ui.Scroll(c.Key("remotes")).MaxHeight(280).Border(1, t.Border).Radius(t.Radius).Children(func() {
+		ui.Scroll(c.Key("remotes")).MaxHeight(280).Shrink(1).MinHeight(0).Border(1, t.Border).Radius(t.Radius).Children(func() {
 			if len(remotes.value) == 0 {
 				muted(c, i18n.T("No remotes")).Padding(12)
 			}

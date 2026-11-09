@@ -239,7 +239,7 @@ func (mt *mergeTool) view(c *ui.Context, d *Dialog) {
 		ui.Box(c).Width(mergeGutter)
 		title(i18n.T("Theirs"), mt.theirs)
 	})
-	ui.Scroll(c.Key("rows")).MaxHeight(580).Border(1, t.Border).Radius(t.Radius).Font(monoFont).Children(func() {
+	ui.Scroll(c.Key("rows")).MaxHeight(580).Shrink(1).MinHeight(0).Border(1, t.Border).Radius(t.Radius).Font(monoFont).Children(func() {
 		line, ix := 1, 0
 		for si, seg := range mt.segments {
 			if seg.Conflict == nil {
@@ -283,7 +283,7 @@ func (mt *mergeTool) view(c *ui.Context, d *Dialog) {
 		if done {
 			color = t.Success
 		}
-		ui.Text(c, status).TextColor(color).Grow(1)
+		ui.Text(c, status).TextColor(color).Grow(1).Shrink(1).MinWidth(0)
 		if button(c.Key("cancel"), i18n.T("Cancel")).Clicked() {
 			d.Close()
 		}
@@ -387,7 +387,7 @@ func (mt *mergeTool) conflictRows(c *ui.Context, ix int, cf *conflict.Conflict, 
 			if resolved {
 				label, color = i18n.T("Resolved"), t.Success
 			}
-			ui.Text(c, label).TextColor(color).Grow(1).PaddingStart(4)
+			ui.Text(c, label).TextColor(color).SingleLine().Grow(1).Shrink(1).MinWidth(0).PaddingStart(4)
 			if !resolved && toggleButton(c.Key("both"), i18n.T("Accept Both"), false).Tooltip(i18n.T("Yours, then theirs")).Clicked() {
 				mt.set(ix, &conflict.Resolution{Kind: conflict.OursThenTheirs})
 			}

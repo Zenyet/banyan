@@ -134,7 +134,7 @@ func (ws *Workspace) statusBar(c *ui.Context) {
 	m := ws.Model
 	ui.Row(c.Key("status")).Height(26).PaddingX(14).Gap(12).Background(chromeBG(t)).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).
 		FontSize(t.FontSize - 1).TextColor(t.TextMuted).Children(func() {
-		ui.Text(c, m.Repo.Root()).SingleLine().Shrink(1)
+		ui.Text(c, m.Repo.Root()).SingleLine().Shrink(1).MinWidth(0)
 		ui.Spacer(c)
 		if m.Busy != "" && busyButton(m.Busy) == "" {
 			ui.Row(c).Gap(4).Children(func() {
@@ -152,7 +152,8 @@ func (ws *Workspace) statusBar(c *ui.Context) {
 		if branch == "" {
 			branch = i18n.T("Detached HEAD")
 		}
-		ui.Text(c, branch).SingleLine()
+		// The branch keeps its room; the path gives way.
+		ui.Text(c, branch).SingleLine().Shrink(0).MaxWidth(240)
 	})
 }
 
@@ -160,22 +161,34 @@ func (ws *Workspace) statusBar(c *ui.Context) {
 // toolbar.
 const titleBarHeight = 52
 
+// Below these window widths the toolbar gives up room, a step at a time:
+// the operations show their icons alone, then the views, then the
+// repository.
+const (
+	compactOperationsWidth = 1180
+	compactViewsWidth      = 1000
+	compactRepoWidth       = 860
+)
+
 // header is the window's title bar, on Liquid Glass: the repository and its
 // branch, the views, and the VCS operations, clear of the window controls.
-// Narrow windows show the operations' icons alone.
+// Narrow windows show the operations' icons alone, then the views', then
+// the repository's; what room is left goes to the branch, cut short.
 func (ws *Workspace) header(c *ui.Context) {
 	t := c.Theme()
 	m := ws.Model
 	bar := c.TitleBar()
-	compact := c.Root().Bounds().W < 1180
+	width := c.Root().Bounds().W
+	compact := width < compactOperationsWidth
 	ui.Row(c.Key("toolbar")).Height(titleBarHeight).Shrink(0).Padding(0, bar.Right+12, 0, bar.Left+12).Gap(8).
 		Background(chromeBG(t)).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).ClipX().DragWindow().Children(func() {
 		glassGroup(c.Key("where"), func() {
-			capsuleButton(c.Key("repo"), "folder-git-2", m.Repo.Name(), false, true).Menu(ws.repoMenu)
-			capsuleButton(c.Key("branch"), "git-branch", ws.branchLabel(), false, true).Menu(ws.branchPopup)
-		}).Shrink(1).MinWidth(0)
+			capsuleButton(c.Key("repo"), "folder-git-2", m.Repo.Name(), width < compactRepoWidth, true).Shrink(0).Menu(ws.repoMenu)
+			capsuleButton(c.Key("branch"), "git-branch", ws.branchLabel(), false, true).Shrink(1).MinWidth(0).
+				Tooltip(ws.branchLabel()).Menu(ws.branchPopup)
+		}).Shrink(1).MinWidth(0).ClipX()
 		ui.Spacer(c)
-		ws.views(c)
+		ws.views(c, width < compactViewsWidth)
 		ui.Spacer(c)
 		// The operation running shows on its own button, its icon turned
 		// to a spinner, so that nothing comes and goes beside the group
@@ -215,8 +228,9 @@ func (ws *Workspace) header(c *ui.Context) {
 
 // views switches among Log, Commit, Shelf and Console: a segmented
 // control of glass, the chosen view lifted on a pill, with the count of
-// changes and of shelves as badges.
-func (ws *Workspace) views(c *ui.Context) {
+// changes and of shelves as badges. Compact, the views show their icons
+// alone, their names as tooltips.
+func (ws *Workspace) views(c *ui.Context, compact bool) {
 	t := c.Theme()
 	tabs := []struct {
 		icon, label string
@@ -230,6 +244,9 @@ func (ws *Workspace) views(c *ui.Context) {
 	glassGroup(c.Key("views"), func() {
 		for ix, tab := range tabs {
 			b := ui.Row(c.Key(ix)).Height(30).PaddingX(12).Gap(6).Radius(15).Cursor(ui.CursorPointer).Label(tab.label)
+			if compact {
+				b.PaddingX(9).Tooltip(tab.label)
+			}
 			if ix == ws.tab {
 				selectedPill(b, t)
 			} else {
@@ -243,7 +260,9 @@ func (ws *Workspace) views(c *ui.Context) {
 			}
 			b.Children(func() {
 				ui.Icon(c, icon(tab.icon)).FontSize(t.FontSize + 1)
-				ui.Text(c, tab.label).SingleLine().FontWeight(500)
+				if !compact {
+					ui.Text(c, tab.label).SingleLine().FontWeight(500)
+				}
 				if tab.count > 0 {
 					ui.Text(c, itoa(tab.count)).FontSize(t.FontSize - 2).FontWeight(600).SingleLine().
 						PaddingX(6).Height(16).Radius(8).Background(t.Text.Alpha(0.1)).TextColor(t.TextMuted)
@@ -431,7 +450,7 @@ func offerSmartCheckout(s *Shell, m *model.Model, target string, remote bool, me
 	s.Open(&Dialog{Title: i18n.T("Git Checkout Problem"), Width: 520, Body: func(c *ui.Context, d *Dialog) {
 		t := c.Theme()
 		ui.Text(c, i18n.Tf("Your local changes to these files would be overwritten by checking out {}:", short(target)))
-		ui.Scroll(c).MaxHeight(160).Padding(0, 8).Children(func() {
+		ui.Scroll(c).MaxHeight(160).Shrink(1).MinHeight(0).Padding(0, 8).Children(func() {
 			for _, f := range files {
 				ui.Text(c, f).Font(monoFont).FontSize(t.FontSize - 1)
 			}

@@ -833,22 +833,28 @@ func (cv *ChangesView) conflictCard(c *ui.Context, e *git.StatusEntry) {
 	if op := m.Operation; op != nil {
 		oursName, theirsName = op.Ours, op.Theirs
 	}
-	ui.Row(c.Key("conflict-card")).Padding(12).Gap(12).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Background(t.Warning.Alpha(0.08)).Children(func() {
-		ui.Icon(c, icon("triangle-alert")).TextColor(t.Warning)
-		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(2).Children(func() {
-			ui.Text(c, i18n.Tf("{} has merge conflicts", path)).FontWeight(600)
-			muted(c, i18n.Tf("Yours ({}): {}  ·  Theirs ({}): {}", oursName, ours.Label(), theirsName, theirs.Label())).SingleLine()
+	// In a narrow pane the buttons go below the text, and below one
+	// another, rather than squeeze it.
+	ui.Row(c.Key("conflict-card")).Wrap().Padding(12).Gap(12).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Background(t.Warning.Alpha(0.08)).Children(func() {
+		ui.Row(c).Grow(1).Basis(240).MinWidth(0).Gap(12).Children(func() {
+			ui.Icon(c, icon("triangle-alert")).TextColor(t.Warning)
+			ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(2).Children(func() {
+				ui.Text(c, i18n.Tf("{} has merge conflicts", path)).FontWeight(600)
+				muted(c, i18n.Tf("Yours ({}): {}  ·  Theirs ({}): {}", oursName, ours.Label(), theirsName, theirs.Label())).SingleLine()
+			})
 		})
-		yes, no := true, false
-		if button(c.Key("yours"), i18n.T("Accept Yours")).Clicked() {
-			ws.run(i18n.Tf("Accept yours for {}", path), func(r *git.Repo) (string, error) { return r.ResolveConflict(path, &yes) })
-		}
-		if button(c.Key("theirs"), i18n.T("Accept Theirs")).Clicked() {
-			ws.run(i18n.Tf("Accept theirs for {}", path), func(r *git.Repo) (string, error) { return r.ResolveConflict(path, &no) })
-		}
-		if e.CanMergeText() && primaryButton(c.Key("merge"), i18n.T("Merge…")).Clicked() {
-			openMergeTool(ws, path)
-		}
+		ui.Row(c).Wrap().Gap(8).Shrink(1).MinWidth(0).Children(func() {
+			yes, no := true, false
+			if button(c.Key("yours"), i18n.T("Accept Yours")).Clicked() {
+				ws.run(i18n.Tf("Accept yours for {}", path), func(r *git.Repo) (string, error) { return r.ResolveConflict(path, &yes) })
+			}
+			if button(c.Key("theirs"), i18n.T("Accept Theirs")).Clicked() {
+				ws.run(i18n.Tf("Accept theirs for {}", path), func(r *git.Repo) (string, error) { return r.ResolveConflict(path, &no) })
+			}
+			if e.CanMergeText() && primaryButton(c.Key("merge"), i18n.T("Merge…")).Clicked() {
+				openMergeTool(ws, path)
+			}
+		})
 	})
 }
 

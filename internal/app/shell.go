@@ -26,6 +26,11 @@ type Shell struct {
 	content func(c *ui.Context)
 	// onClosed runs once the window is gone.
 	onClosed func()
+	// size is the window's size at the last frame.
+	size [2]float32
+	// controlsInset is how far from the top of a window whose title bar
+	// hides its controls are, inset over the view.
+	controlsInset float32
 }
 
 // Dialog is a dialog over a window, as GPUI Kit's open_dialog made them:
@@ -47,6 +52,9 @@ var shells = map[*mygo.Window]*Shell{}
 // newWindow opens a window of native UI around content.
 func newWindow(opts mygo.WindowOptions, content func(s *Shell, c *ui.Context)) *Shell {
 	s := &Shell{toastTop: float32(opts.TitleBarHeight) + 10}
+	if opts.TitleBarStyle == mygo.TitleBarHiddenInset {
+		s.controlsInset = 40
+	}
 	s.content = func(c *ui.Context) { content(s, c) }
 	opts.Content = ui.View(s.view)
 	s.Win = mygo.NewWindow(opts)
@@ -99,6 +107,12 @@ func (s *Shell) Toast(kind, message string) {
 
 func (s *Shell) view(c *ui.Context) {
 	applyTheme(c)
+	// A resized window builds one frame more, for the parts that fit
+	// themselves to the width they had at the last one (measuredWidth).
+	if w, h := c.Size(); [2]float32{w, h} != s.size {
+		s.size = [2]float32{w, h}
+		c.AnimationFrame()
+	}
 	t := c.Theme()
 	root := ui.Column(c).Fill().TextColor(t.Text)
 	if c.Vibrancy() {
@@ -124,6 +138,12 @@ func (s *Shell) view(c *ui.Context) {
 			edge, shade = ui.RGBA(255, 255, 255, 0.14), ui.RGBA(0, 0, 0, 0.55)
 		}
 		panel.Width(d.Width).Radius(16).Border(1, edge).Shadow(0, 18, 50, 0, shade)
+		if s.controlsInset > 0 {
+			// Centered, a dialog keeps clear of the window's controls
+			// above it, however short the window.
+			_, h := c.Size()
+			panel.MaxHeight(h - 2*s.controlsInset)
+		}
 		if was && !d.open && panel.Dismissed() && d.OnDismiss != nil {
 			d.OnDismiss()
 		}

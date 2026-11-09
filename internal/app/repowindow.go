@@ -267,7 +267,7 @@ func (rw *repoWindow) view(c *ui.Context) {
 			for ix := range rw.tabs {
 				rw.tab(c, ix)
 			}
-			if iconButton(c.Key("open-tab"), "plus", i18n.T("Open Repository…")).Radius(14).Clicked() {
+			if iconButton(c.Key("open-tab"), "plus", i18n.T("Open Repository…")).Radius(14).Shrink(0).Clicked() {
 				promptOpenRepo(rw.shell)
 			}
 		})
@@ -282,10 +282,12 @@ func (rw *repoWindow) tab(c *ui.Context, ix int) {
 	t := c.Theme()
 	m := rw.tabs[ix].Model
 	active := ix == rw.active
-	tab := ui.Row(c.Key(m)).Height(28).Radius(14).PaddingStart(12).PaddingEnd(3).Gap(6).Shrink(0).
+	// Short of room, the tabs cut their names short.
+	tab := ui.Row(c.Key(m)).Height(28).Radius(14).PaddingStart(12).PaddingEnd(3).Gap(6).Shrink(1).MinWidth(96).MaxWidth(220).
 		Drag(draggedTab{ix}).Tooltip(tilde(m.Repo.Root())).Cursor(ui.CursorPointer)
 	if active {
-		tab.Material(glass.Glass{})
+		// The tab shown keeps its room; the others give way.
+		tab.Shrink(0).MaxWidth(280).Material(glass.Glass{})
 	} else {
 		tab.TextColor(t.TextMuted)
 		if tab.Hovered() {
@@ -318,17 +320,19 @@ func (rw *repoWindow) tab(c *ui.Context, ix int) {
 	})
 	tab.Children(func() {
 		ui.Icon(c, icon("folder-git-2")).FontSize(t.FontSize - 1)
-		ui.Text(c, m.Repo.Name()).SingleLine()
-		if m.CurrentBranch != "" {
-			muted(c, m.CurrentBranch).SingleLine()
+		ui.Text(c, m.Repo.Name()).SingleLine().Shrink(1).MinWidth(0)
+		// A crowded tab bar leaves the branch to the tab shown.
+		roomy := c.Root().Bounds().W/float32(len(rw.tabs)) >= 260
+		if m.CurrentBranch != "" && (roomy || active) {
+			muted(c, m.CurrentBranch).SingleLine().Shrink(2).MinWidth(0)
 		}
 		if n := len(m.Status); n > 0 {
-			muted(c, "· "+itoa(n))
+			muted(c, "· "+itoa(n)).SingleLine().Shrink(0)
 		}
 		if m.Busy != "" {
 			ui.Text(c, "●").FontSize(t.FontSize - 2).TextColor(t.Accent)
 		}
-		if iconButton(c.Key("close"), "x", i18n.T("Close Repository")).Radius(11).Padding(3).Clicked() {
+		if iconButton(c.Key("close"), "x", i18n.T("Close Repository")).Radius(11).Padding(3).Shrink(0).Clicked() {
 			rw.close(ix)
 		}
 	})

@@ -342,6 +342,20 @@ func glassGroup(c *ui.Context, fn func()) ui.Element {
 	return ui.Row(c).Height(36).Padding(3).Gap(2).Radius(18).Shrink(0).Material(glass.Glass{}).Children(fn)
 }
 
+// measuredWidth keeps in *width the width e had at the last frame, which
+// is all a frame knows of its layout before it is done, and builds one
+// frame more when that changed, or when e is new, so that what fits itself
+// to it catches up. A new element leaves *width as it was.
+func measuredWidth(c *ui.Context, e ui.Element, width *float32) {
+	switch w := e.Bounds().W; {
+	case w == 0:
+		c.AnimationFrame()
+	case w != *width:
+		*width = w
+		c.AnimationFrame()
+	}
+}
+
 // capsuleButton is a borderless button of a glassGroup: an icon, and a
 // label unless compact, which then shows as its tooltip; menu adds a
 // chevron, for a button opening a menu.
@@ -381,7 +395,8 @@ func capsule(c *ui.Context, iconName, label string, compact, menu, spinning bool
 			ui.Icon(c, icon(iconName)).FontSize(t.FontSize + 2)
 		}
 		if !compact {
-			ui.Text(c, label).SingleLine().FontWeight(500)
+			// In a group short of room, the label gives way first.
+			ui.Text(c, label).SingleLine().FontWeight(500).Shrink(1).MinWidth(0)
 		}
 		if menu {
 			ui.Icon(c, icon("chevron-down")).FontSize(t.FontSize - 3).TextColor(t.TextMuted)

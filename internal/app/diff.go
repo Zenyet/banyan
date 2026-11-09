@@ -24,6 +24,9 @@ type DiffPane struct {
 	generation int
 	// line is a line of the new file to scroll to once shown, from 1.
 	line int
+	// toolbarWidth is the toolbar's width at the last frame, for whether
+	// its options fit.
+	toolbarWidth float32
 	// loading is set while the loader runs, since loadingFrom.
 	loading     bool
 	loadingFrom time.Time
@@ -43,6 +46,10 @@ type DiffPane struct {
 // loadingDelay is how long a diff takes before it says it's loading, so
 // quick ones don't flicker.
 const diffLoadingDelay = 250 * time.Millisecond
+
+// diffOptionsWidth is the width of a diff's toolbar below which its
+// options go into a menu.
+const diffOptionsWidth = 560
 
 func newDiffPane() *DiffPane {
 	return &DiffPane{message: i18n.T("Select a file to see its changes")}
@@ -216,12 +223,17 @@ func (p *DiffPane) View(c *ui.Context) {
 		p.run()
 	}
 	ui.Column(c).Grow(1).MinHeight(0).Background(t.Background).Children(func() {
-		ui.Row(c.Key("diff-toolbar")).Height(32).PaddingX(8).Gap(4).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
+		bar := ui.Row(c.Key("diff-toolbar")).Height(32).PaddingX(8).Gap(4).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).ClipX()
+		// A narrow pane gathers the options into a menu, to leave the
+		// title room.
+		measuredWidth(c, bar, &p.toolbarWidth)
+		narrow := p.toolbarWidth > 0 && p.toolbarWidth < diffOptionsWidth
+		bar.Children(func() {
 			title := p.title
 			if title == "" {
 				title = i18n.T("Diff")
 			}
-			ui.Text(c, title).SingleLine().Grow(1).Shrink(1)
+			ui.Text(c, title).SingleLine().Grow(1).Shrink(1).MinWidth(0).Tooltip(title)
 			if iconButton(c.Key("prev"), "arrow-up", i18n.T("Previous Change")).Clicked() && p.state != nil {
 				i, _ := p.state.CurrentHunk()
 				p.state.GoToHunk(max(i-1, 0))
@@ -230,18 +242,33 @@ func (p *DiffPane) View(c *ui.Context) {
 				i, _ := p.state.CurrentHunk()
 				p.state.GoToHunk(min(i+1, len(p.state.Hunks())-1))
 			}
-			ws := toggleButton(c.Key("whitespace"), i18n.T("Ignore Whitespace"), whitespace).Tooltip(i18n.T("Leave out changes that only touch whitespace"))
-			if ws.Clicked() {
-				changeSettings(func(s *settings.Settings) { s.IgnoreWhitespace = !s.IgnoreWhitespace })
+			if narrow {
+				iconButton(c.Key("options"), "settings", i18n.T("View Options")).Menu(func(menu *ui.Menu) {
+					if menu.Item(i18n.T("Ignore Whitespace")).Checked(whitespace).Chosen() {
+						changeSettings(func(s *settings.Settings) { s.IgnoreWhitespace = !s.IgnoreWhitespace })
+					}
+					menu.Separator()
+					if menu.Item(i18n.T("Side-by-side")).Checked(!unified).Chosen() {
+						changeSettings(func(s *settings.Settings) { s.UnifiedDiff = false })
+					}
+					if menu.Item(i18n.T("Unified")).Checked(unified).Chosen() {
+						changeSettings(func(s *settings.Settings) { s.UnifiedDiff = true })
+					}
+				})
+			} else {
+				ws := toggleButton(c.Key("whitespace"), i18n.T("Ignore Whitespace"), whitespace).Tooltip(i18n.T("Leave out changes that only touch whitespace"))
+				if ws.Clicked() {
+					changeSettings(func(s *settings.Settings) { s.IgnoreWhitespace = !s.IgnoreWhitespace })
+				}
+				segments(c.Key("layout"), func() {
+					if segment(c.Key("split"), i18n.T("Side-by-side"), !unified).Clicked() {
+						changeSettings(func(s *settings.Settings) { s.UnifiedDiff = false })
+					}
+					if segment(c.Key("unified"), i18n.T("Unified"), unified).Clicked() {
+						changeSettings(func(s *settings.Settings) { s.UnifiedDiff = true })
+					}
+				})
 			}
-			segments(c.Key("layout"), func() {
-				if segment(c.Key("split"), i18n.T("Side-by-side"), !unified).Clicked() {
-					changeSettings(func(s *settings.Settings) { s.UnifiedDiff = false })
-				}
-				if segment(c.Key("unified"), i18n.T("Unified"), unified).Clicked() {
-					changeSettings(func(s *settings.Settings) { s.UnifiedDiff = true })
-				}
-			})
 			if p.WindowTitle != nil {
 				if p.inWindow {
 					if iconButton(c.Key("dock"), "dock", i18n.T("Back to the Main Window")).Clicked() {

@@ -282,7 +282,7 @@ func openPalette(ws *Workspace) {
 		if input.Submitted() {
 			run(selected)
 		}
-		ui.Scroll(c.Key("matches")).MaxHeight(360).Children(func() {
+		ui.Scroll(c.Key("matches")).MaxHeight(360).Shrink(1).MinHeight(0).Children(func() {
 			if len(matches) == 0 {
 				muted(c, i18n.T("No matching commands")).Padding(8)
 			}

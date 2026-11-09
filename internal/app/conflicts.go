@@ -138,7 +138,7 @@ func openConflicts(s *Shell, m *model.Model) {
 					ui.Text(c, i18n.Tf("Yours ({})", ours)).Width(130).SingleLine()
 					ui.Text(c, i18n.Tf("Theirs ({})", theirs)).Width(130).SingleLine()
 				})
-				ui.Scroll(c.Key("files")).Height(220).PaddingY(4).Children(func() {
+				ui.Scroll(c.Key("files")).Height(220).Shrink(1).MinHeight(0).PaddingY(4).Children(func() {
 					for _, e := range conflicts {
 						o, th, _ := e.ConflictSides()
 						row := ui.Row(c.Key(e.Path)).Height(26).PaddingX(8).Gap(8).Cursor(ui.CursorPointer)

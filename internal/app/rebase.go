@@ -84,7 +84,7 @@ func showRebase(ws *Workspace, from string, commits []git.Commit) {
 	ws.Shell.Open(&Dialog{Title: i18n.T("Interactive Rebase"), Width: 860, Body: func(c *ui.Context, d *Dialog) {
 		t := c.Theme()
 		muted(c, i18n.Tf("{} commits, oldest first. Rebasing onto {}.", len(entries), onto))
-		ui.Scroll(c.Key("entries")).Height(360).Border(1, t.Border).Radius(t.Radius).Children(func() {
+		ui.Scroll(c.Key("entries")).Height(360).Shrink(1).MinHeight(0).Border(1, t.Border).Radius(t.Radius).Children(func() {
 			for ix := range entries {
 				e := &entries[ix]
 				row := ui.Row(c.Key(e.commit.ID)).Height(30).PaddingX(8).Gap(8)

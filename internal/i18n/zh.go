@@ -259,6 +259,8 @@ var zh = map[string]string{
 	"Remote":                                 "远程",
 	"Tags":                                   "标签",
 	"Filter":                                 "筛选",
+	"Filter ({})":                            "筛选（{}）",
+	"View Options":                           "显示选项",
 	"{} is not inside the repository":        "{} 不在仓库中",
 	"Branches":                               "分支",
 	"Branch: {}":                             "分支：{}",

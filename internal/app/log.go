@@ -30,6 +30,15 @@ const (
 	loadingDelay = 400 * time.Millisecond
 	authorWidth  = 140
 	timeWidth    = 130
+	// The author shows while it leaves a commit's subject
+	// minSubjectWithAuthor, and the time while it leaves it
+	// minSubjectWidth.
+	minSubjectWithAuthor = 200
+	minSubjectWidth      = 140
+	// Below logFiltersWidth the commits' column gathers its filters into
+	// one menu, and below logCountWidth leaves out the count of commits.
+	logFiltersWidth = 760
+	logCountWidth   = 460
 )
 
 // dateFilters are git log --since values of the Date filter.
@@ -130,8 +139,11 @@ type LogView struct {
 
 	branchesWidth  float32
 	commitsPercent float32
-	topPercent     float32
-	filesPercent   float32
+	// listWidth is the width of the commits' column at the last frame,
+	// for what of its toolbar and rows fits.
+	listWidth    float32
+	topPercent   float32
+	filesPercent float32
 }
 
 func newLogView(ws *Workspace) *LogView {
@@ -650,11 +662,17 @@ func (lv *LogView) loadMore() {
 
 func (lv *LogView) View(c *ui.Context) {
 	top := func() {
-		ui.Split(c.Key("log-columns"), &lv.branchesWidth, func() {
+		// A narrow window narrows the branches, to leave the commits
+		// room; the width chosen comes back with the room.
+		branches := min(lv.branchesWidth, max(c.Root().Bounds().W*0.22, 150))
+		shown := branches
+		ui.Split(c.Key("log-columns"), &shown, func() {
 			lv.branchesPanel(c)
 		}, func() {
 			ui.SplitPercent(c.Key("log-right"), &lv.commitsPercent, func() {
-				ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+				commits := ui.Column(c).Grow(1).MinWidth(0)
+				measuredWidth(c, commits, &lv.listWidth)
+				commits.Children(func() {
 					lv.toolbar(c)
 					lv.commitList(c)
 				})
@@ -662,6 +680,9 @@ func (lv *LogView) View(c *ui.Context) {
 				lv.detailsPanel(c)
 			}).Fill()
 		}).Fill()
+		if shown != branches {
+			lv.branchesWidth = shown
+		}
 	}
 	// The diff hidden, or in a window of its own, leaves the log the whole
 	// height.
@@ -823,9 +844,10 @@ func (lv *LogView) branchNames() []string {
 
 func (lv *LogView) toolbar(c *ui.Context) {
 	t := c.Theme()
-	ui.Row(c.Key("log-toolbar")).Height(36).PaddingX(8).Gap(6).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
+	ui.Row(c.Key("log-toolbar")).Height(36).PaddingX(8).Gap(6).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).ClipX().Children(func() {
 		before := lv.query
-		search := ui.SearchField(c.Key("search"), &lv.query).Placeholder(i18n.T("Text or hash")).Width(240).Radius(14).Bind(&lv.search)
+		search := ui.SearchField(c.Key("search"), &lv.query).Placeholder(i18n.T("Text or hash")).Width(240).Shrink(1).MinWidth(110).
+			Radius(14).Bind(&lv.search)
 		if lv.focusSearchNext {
 			lv.focusSearchNext = false
 			lv.search.Focus()
@@ -844,11 +866,20 @@ func (lv *LogView) toolbar(c *ui.Context) {
 			lv.list.Handle.Focus()
 		}
 
+		// Each filter is a button of its own, or, in a narrow column, a
+		// submenu of one Filter button.
+		type filter struct {
+			key, label string
+			on         bool
+			menu       func(*ui.Menu)
+		}
+		var filters []filter
+
 		label := i18n.T("Branch: All")
 		if lv.branchFilter != "" {
 			label = i18n.Tf("Branch: {}", lv.branchFilter)
 		}
-		filterButton(c.Key("branch-filter"), label).Menu(func(menu *ui.Menu) {
+		filters = append(filters, filter{"branch-filter", label, lv.branchFilter != "", func(menu *ui.Menu) {
 			if menu.Item(i18n.T("All")).Checked(lv.branchFilter == "").Chosen() {
 				lv.branchFilter = ""
 				lv.reload()
@@ -860,7 +891,7 @@ func (lv *LogView) toolbar(c *ui.Context) {
 					lv.reload()
 				}
 			}
-		})
+		}})
 
 		label = i18n.T("User: All")
 		switch {
@@ -871,7 +902,7 @@ func (lv *LogView) toolbar(c *ui.Context) {
 		case len(lv.authorFilter) > 1:
 			label = i18n.Tf("User: {} +{}", lv.authorFilter[0], len(lv.authorFilter)-1)
 		}
-		filterButton(c.Key("author-filter"), label).Menu(func(menu *ui.Menu) {
+		filters = append(filters, filter{"author-filter", label, len(lv.authorFilter) > 0, func(menu *ui.Menu) {
 			if menu.Item(i18n.T("All")).Checked(len(lv.authorFilter) == 0).Chosen() {
 				lv.authorFilter = nil
 				lv.reload()
@@ -885,13 +916,13 @@ func (lv *LogView) toolbar(c *ui.Context) {
 					lv.toggleAuthorFilter(a)
 				}
 			}
-		})
+		}})
 
 		label = i18n.T("Date: All")
 		if lv.dateFilter >= 0 {
 			label = i18n.Tf("Date: {}", dateFilterLabel(lv.dateFilter))
 		}
-		filterButton(c.Key("date-filter"), label).Menu(func(menu *ui.Menu) {
+		filters = append(filters, filter{"date-filter", label, lv.dateFilter >= 0, func(menu *ui.Menu) {
 			if menu.Item(i18n.T("All")).Checked(lv.dateFilter < 0).Chosen() {
 				lv.dateFilter = -1
 				lv.reload()
@@ -903,7 +934,7 @@ func (lv *LogView) toolbar(c *ui.Context) {
 					lv.reload()
 				}
 			}
-		})
+		}})
 
 		label = i18n.T("Paths: All")
 		switch {
@@ -912,7 +943,7 @@ func (lv *LogView) toolbar(c *ui.Context) {
 		case len(lv.pathFilter) > 1:
 			label = i18n.Tf("Paths: {} +{}", lv.pathFilter[0], len(lv.pathFilter)-1)
 		}
-		filterButton(c.Key("path-filter"), label).Menu(func(menu *ui.Menu) {
+		filters = append(filters, filter{"path-filter", label, len(lv.pathFilter) > 0, func(menu *ui.Menu) {
 			if menu.Item(i18n.T("All")).Checked(len(lv.pathFilter) == 0).Chosen() {
 				lv.pathFilter = nil
 				lv.reload()
@@ -935,7 +966,30 @@ func (lv *LogView) toolbar(c *ui.Context) {
 			if menu.Item(i18n.T("Select File or Folder…")).Chosen() {
 				lv.choosePathFilter()
 			}
-		})
+		}})
+
+		narrow := lv.listWidth > 0 && lv.listWidth < logFiltersWidth
+		if narrow {
+			on := 0
+			for _, f := range filters {
+				if f.on {
+					on++
+				}
+			}
+			label := i18n.T("Filter")
+			if on > 0 {
+				label = i18n.Tf("Filter ({})", on)
+			}
+			filterButton(c.Key("filters"), label).Shrink(0).Menu(func(menu *ui.Menu) {
+				for _, f := range filters {
+					menu.Submenu(f.label, f.menu)
+				}
+			})
+		} else {
+			for _, f := range filters {
+				filterButton(c.Key(f.key), f.label).Menu(f.menu)
+			}
+		}
 
 		ui.Spacer(c)
 		if lv.slowLoading() {
@@ -944,7 +998,9 @@ func (lv *LogView) toolbar(c *ui.Context) {
 				muted(c, i18n.T("Loading commits…"))
 			})
 		}
-		muted(c, i18n.Tf("{} commits", len(lv.rows))).SingleLine()
+		if lv.listWidth == 0 || lv.listWidth >= logCountWidth {
+			muted(c, i18n.Tf("{} commits", len(lv.rows))).SingleLine()
+		}
 		if iconButton(c.Key("refresh"), "refresh-cw", i18n.T("Refresh")).Clicked() {
 			lv.ws.Model.Refresh()
 			lv.reload()
@@ -974,12 +1030,17 @@ func (lv *LogView) commitList(c *ui.Context) {
 	if showGraph {
 		graphWidth = graphPadding*2 + laneWidth*float32(lanes)
 	}
+	// The list's padding, and the graph, leave the rest of its width to
+	// the subject, the author and the time.
+	room := lv.listWidth - 12 - graphWidth
+	showAuthor := lv.listWidth == 0 || room-authorWidth-timeWidth >= minSubjectWithAuthor
+	showTime := lv.listWidth == 0 || room-timeWidth >= minSubjectWidth
 	list := ui.List(c.Key("commits"), &lv.list, len(lv.rows)+extra, func(row int) {
 		if row >= len(lv.rows) {
 			lv.moreRow(c, offerGrep)
 			return
 		}
-		lv.commitRow(c, row, showGraph, graphWidth)
+		lv.commitRow(c, row, showGraph, graphWidth, showAuthor, showTime)
 	}).Grow(1).PaddingX(6).MinHeight(0).Children(func() {
 		if len(lv.rows) == 0 && lv.slowLoading() {
 			ui.Row(c).Grow(1).Center().Gap(8).Children(func() {
@@ -1045,7 +1106,7 @@ func (lv *LogView) moreRow(c *ui.Context, offerGrep bool) {
 	}
 }
 
-func (lv *LogView) commitRow(c *ui.Context, row int, showGraph bool, graphWidth float32) {
+func (lv *LogView) commitRow(c *ui.Context, row int, showGraph bool, graphWidth float32, showAuthor, showTime bool) {
 	t := c.Theme()
 	ix := lv.rows[row]
 	commit := &lv.commits[ix]
@@ -1078,8 +1139,12 @@ func (lv *LogView) commitRow(c *ui.Context, row int, showGraph bool, graphWidth 
 				subject.FontWeight(600)
 			}
 		})
-		ui.Text(c, commit.Author).SingleLine().Width(authorWidth).PaddingX(8).TextColor(secondary)
-		ui.Text(c, formatTime(commit.Time)).SingleLine().Width(timeWidth).PaddingX(8).TextColor(secondary)
+		if showAuthor {
+			ui.Text(c, commit.Author).SingleLine().Width(authorWidth).PaddingX(8).TextColor(secondary)
+		}
+		if showTime {
+			ui.Text(c, formatTime(commit.Time)).SingleLine().Width(timeWidth).PaddingX(8).TextColor(secondary)
+		}
 	})
 }
 

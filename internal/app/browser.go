@@ -141,10 +141,10 @@ func (b *commitBrowser) View(c *ui.Context) {
 	}).Fill()
 }
 
-// framed is a bordered box of a fixed height in a dialog.
+// framed is a bordered box of a height in a dialog, less in a short window.
 func framed(c *ui.Context, height float32, fn func()) {
 	t := c.Theme()
-	ui.Column(c.Key("frame")).Height(height).FillWidth().Border(1, t.Border).Radius(t.Radius).Clip().Children(fn)
+	ui.Column(c.Key("frame")).Height(height).Shrink(1).MinHeight(0).FillWidth().Border(1, t.Border).Radius(t.Radius).Clip().Children(fn)
 }
 
 // openPush is the JetBrains-style Push dialog: review outgoing commits and
