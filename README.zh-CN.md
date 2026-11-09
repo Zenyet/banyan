@@ -8,9 +8,9 @@
 
 使用 Go 和 [MyGo](https://github.com/egoist/mygo) 的原生界面构建。
 
-![macOS 11+](https://img.shields.io/badge/macOS-11%2B-black?logo=apple)
-![Linux](https://img.shields.io/badge/Linux-preview-black?logo=linux)
-![Windows](https://img.shields.io/badge/Windows-preview-black?logo=windows)
+![macOS 12+](https://img.shields.io/badge/macOS-12%2B-black?logo=apple)
+![Linux x86_64](https://img.shields.io/badge/Linux-x86__64%20preview-black?logo=linux)
+![Windows 10+](https://img.shields.io/badge/Windows-10%2B%20preview-black?logo=windows)
 ![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go)
 ![MyGo](https://img.shields.io/badge/UI-MyGo-blue)
 
@@ -145,11 +145,18 @@ Banyan 的所有操作都通过 `git` 完成。Windows 安装包自带 Git for W
 
 | 系统 | 安装包 |
 | --- | --- |
-| macOS 11+，Apple 芯片（M1 及更新） | `Banyan-<version>-macos-arm64.dmg`：打开后把 Banyan 拖到“应用程序” |
-| macOS 11+，Intel | `Banyan-<version>-macos-x86_64.dmg` |
-| Debian、Ubuntu | `banyan_<version>_amd64.deb`：`sudo apt install ./banyan_<version>_amd64.deb` |
-| 其他 Linux | `Banyan-<version>-linux-x86_64.tar.gz`：解压后运行 `banyan` |
-| Windows 10+ | `Banyan-<version>-windows-x64-setup.exe`（安装版）或 `…-windows-x64.zip`（便携版） |
+| macOS 12+，Apple 芯片（M1 及更新） | `Banyan-<version>-macos-arm64.dmg`：打开后把 Banyan 拖到“应用程序” |
+| macOS 12+，Intel | `Banyan-<version>-macos-x86_64.dmg` |
+| Debian、Ubuntu（x86_64） | `banyan_<version>_amd64.deb`：`sudo apt install ./banyan_<version>_amd64.deb` |
+| 其他 Linux（x86_64） | `Banyan-<version>-linux-x86_64.tar.gz`：解压后运行 `banyan` |
+| Windows 10+（x64） | `Banyan-<version>-windows-x64-setup.exe`（安装版）或 `…-windows-x64.zip`（便携版） |
+
+支持的系统：
+
+- **macOS 12 Monterey 或更高版本**，Apple 芯片和 Intel 均可。（Banyan 所用的 Go 已不再支持 macOS 11。）
+- **Windows 10 或更高版本**，64 位 x86（x64）。没有 32 位或 Arm 版本。
+- **x86_64 的 Linux**，需要 OpenGL（Debian 和 Ubuntu 上为 `libgl1`）以及 3.2 或更高版本的 Linux 内核。
+  `.deb` 在 Ubuntu 22.04 上构建。没有 Arm 版本。
 
 目前的构建尚未经过 Apple 或 Microsoft 签名：
 

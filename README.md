@@ -8,9 +8,9 @@
 
 Built in Go with [MyGo](https://github.com/egoist/mygo)'s native UI.
 
-![macOS 11+](https://img.shields.io/badge/macOS-11%2B-black?logo=apple)
-![Linux](https://img.shields.io/badge/Linux-preview-black?logo=linux)
-![Windows](https://img.shields.io/badge/Windows-preview-black?logo=windows)
+![macOS 12+](https://img.shields.io/badge/macOS-12%2B-black?logo=apple)
+![Linux x86_64](https://img.shields.io/badge/Linux-x86__64%20preview-black?logo=linux)
+![Windows 10+](https://img.shields.io/badge/Windows-10%2B%20preview-black?logo=windows)
 ![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go)
 ![MyGo](https://img.shields.io/badge/UI-MyGo-blue)
 
@@ -164,11 +164,18 @@ Banyan says how to get it.
 
 | System | Package |
 | --- | --- |
-| macOS 11+, Apple silicon (M1 and later) | `Banyan-<version>-macos-arm64.dmg`: open it and drag Banyan to Applications |
-| macOS 11+, Intel | `Banyan-<version>-macos-x86_64.dmg` |
-| Debian, Ubuntu | `banyan_<version>_amd64.deb`: `sudo apt install ./banyan_<version>_amd64.deb` |
-| Other Linux | `Banyan-<version>-linux-x86_64.tar.gz`: unpack and run `banyan` |
-| Windows 10+ | `Banyan-<version>-windows-x64-setup.exe` (installer) or `…-windows-x64.zip` (portable) |
+| macOS 12+, Apple silicon (M1 and later) | `Banyan-<version>-macos-arm64.dmg`: open it and drag Banyan to Applications |
+| macOS 12+, Intel | `Banyan-<version>-macos-x86_64.dmg` |
+| Debian, Ubuntu (x86_64) | `banyan_<version>_amd64.deb`: `sudo apt install ./banyan_<version>_amd64.deb` |
+| Other Linux (x86_64) | `Banyan-<version>-linux-x86_64.tar.gz`: unpack and run `banyan` |
+| Windows 10+ (x64) | `Banyan-<version>-windows-x64-setup.exe` (installer) or `…-windows-x64.zip` (portable) |
+
+Supported systems:
+
+- **macOS 12 Monterey or later**, on Apple silicon or Intel. (Go, which Banyan is built with, no longer runs on macOS 11.)
+- **Windows 10 or later**, 64-bit x86 (x64). There is no 32-bit or Arm build.
+- **Linux on x86_64**, with OpenGL (`libgl1` on Debian and Ubuntu) and a Linux kernel 3.2 or later. The `.deb`
+  is built on Ubuntu 22.04. There is no Arm build.
 
 The builds are not signed by Apple or Microsoft yet:
 
