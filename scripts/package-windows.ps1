@@ -28,7 +28,19 @@ $minGitSha256 = "e3bf78351fe777fba47ddee5950082f8a98bb0f02604fdc7ba3ee2cb68ffa87
 $ProgressPreference = "SilentlyContinue"
 $download = "build\$minGitZip"
 if (-not (Test-Path $download)) {
-    Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/download/v$minGitVersion/$minGitZip" -OutFile $download
+    # GitHub's downloads now and then time out (504); try a few times.
+    $url = "https://github.com/git-for-windows/git/releases/download/v$minGitVersion/$minGitZip"
+    for ($attempt = 1; ; $attempt++) {
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $download
+            break
+        } catch {
+            Remove-Item -ErrorAction SilentlyContinue $download
+            if ($attempt -ge 5) { throw }
+            Write-Host "Downloading $minGitZip failed ($($_.Exception.Message)); retrying in $($attempt * 15) s"
+            Start-Sleep -Seconds ($attempt * 15)
+        }
+    }
 }
 $hash = (Get-FileHash -Algorithm SHA256 $download).Hash.ToLower()
 if ($hash -ne $minGitSha256) {
