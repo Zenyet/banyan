@@ -13,6 +13,7 @@ Built in Go with [MyGo](https://github.com/egoist/mygo)'s native UI.
 ![Windows 10+](https://img.shields.io/badge/Windows-10%2B%20preview-black?logo=windows)
 ![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go)
 ![MyGo](https://img.shields.io/badge/UI-MyGo-blue)
+![License: MIT](https://img.shields.io/badge/License-MIT-green)
 
 **English** · [简体中文](README.zh-CN.md)
 
@@ -276,3 +277,8 @@ go test ./...      # graph layout, ref parsing, and git operations against throw
 - [MyGo](https://github.com/egoist/mygo), the Go desktop framework whose native UI draws Banyan on the GPU
 - [MingCute](https://www.mingcute.com) (Apache License 2.0) and [Phosphor](https://phosphoricons.com) (MIT) icons, and [Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme)'s (MIT) for file types
 - The Git integration in JetBrains IDEs, which inspired the workflow
+
+## License
+
+Banyan is released under the [MIT License](LICENSE). The Windows packages also include Git for Windows' MinGit,
+which keeps its own license (GPLv2).

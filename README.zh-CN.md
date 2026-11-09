@@ -13,6 +13,7 @@
 ![Windows 10+](https://img.shields.io/badge/Windows-10%2B%20preview-black?logo=windows)
 ![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go)
 ![MyGo](https://img.shields.io/badge/UI-MyGo-blue)
+![License: MIT](https://img.shields.io/badge/License-MIT-green)
 
 [English](README.md) · **简体中文**
 
@@ -255,3 +256,7 @@ go test ./...      # 提交图布局、引用解析，以及在临时仓库上�
 - [MyGo](https://github.com/egoist/mygo)，用 GPU 绘制 Banyan 原生界面的 Go 桌面框架
 - [MingCute](https://www.mingcute.com)（Apache License 2.0）和 [Phosphor](https://phosphoricons.com)（MIT）图标，以及 [Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme)（MIT）的文件类型图标
 - JetBrains IDE 中的 Git 集成，启发了本应用的工作流
+
+## 许可证
+
+Banyan 以 [MIT 许可证](LICENSE) 发布。Windows 安装包附带的 Git for Windows MinGit 沿用其自身的许可证（GPLv2）。
