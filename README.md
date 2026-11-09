@@ -14,6 +14,8 @@ Built in Go with [MyGo](https://github.com/egoist/mygo)'s native UI.
 ![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go)
 ![MyGo](https://img.shields.io/badge/UI-MyGo-blue)
 
+**English** · [简体中文](README.zh-CN.md)
+
 </div>
 
 <picture>
@@ -41,8 +43,10 @@ where it builds with `cargo` as before.
 - Branches tree (HEAD / Local / Remote / Tags) next to a commit graph with colored lanes and ref labels;
   commits of the current branch are in bold. **Go to Hash, Branch or Tag** (<kbd>⌘</kbd> <kbd>G</kbd>) jumps to any commit.
 - Filter by text or hash, branch, date, any number of authors (with a "Me" shortcut), and files or folders; git does the filtering, so results reach past the commits loaded.
-- Commit details ("in N branches"), a changed-files tree, and a side-by-side or unified diff
-  with syntax highlighting. **Ignore Whitespace** above any diff leaves out whitespace-only changes.
+- Commit details ("in N branches"), a changed-files tree with an icon for each file's type, and a side-by-side
+  or unified diff with syntax highlighting. **Ignore Whitespace** above any diff leaves out whitespace-only changes.
+- The diff under the Log, the Commit tab and the Shelf can move to a window of its own, which follows the
+  selection, or hide to give its view the room; double-clicking a file brings it back.
 - A merge commit's changes can be seen against either parent.
 - **Cherry-Pick Selected Changes** and **Revert Selected Changes** on a file or folder of a commit apply or undo
   just that part in the work tree.
@@ -56,7 +60,9 @@ where it builds with `cargo` as before.
   commit, **Undo Commit**, which keeps its changes and puts its message back in the Commit tab. Local changes are
   stashed around the rebase, and rewriting commits that are already pushed asks first.
 - **Open on GitHub** (or GitLab, Bitbucket, Gitea) and **Copy Link** for commits and files.
-- Loads 5000 commits at a time (configurable), and more when you scroll to the end.
+- Loads 5000 commits at a time (configurable), and more when you scroll to the end. Stays quick on big
+  repositories such as the Linux kernel: git's commit-graph is kept current in the background, and long edges of
+  the graph are drawn as arrows until their commit is selected.
 
 ### Commit
 
@@ -81,10 +87,11 @@ where it builds with `cargo` as before.
 
 ### Merge conflicts
 
-![The Conflicts dialog listing app.js and notes.md under a "Merging feature/greeting into main" banner](docs/screenshots/conflicts.png)
+![The Conflicts dialog listing README.md and src/server.rs under a "Merging feature/greeting into main" banner](docs/screenshots/conflicts.png)
 
 - When a merge, rebase, cherry-pick, revert or pull stops on conflicts, the **Conflicts** dialog opens with each
   conflicted file and what each side did to it, offering Accept Yours / Accept Theirs / Merge…
+  (double-click a file to merge it).
 - A banner above the tabs stays until the operation is finished: **Resolve Conflicts…** while files conflict,
   then **Commit Merge** / **Continue Rebase**, and **Abort** at any time. It also picks up operations started
   outside Banyan, such as a `git merge` in the terminal.
@@ -140,6 +147,9 @@ where it builds with `cargo` as before.
 
 ### And more
 
+- A native macOS look: a Liquid Glass toolbar of capsules over the hidden title bar, with the repository and
+  branch, the views and their counts, and Fetch / Update / Push, whose icon turns into a spinner while it runs.
+  Notifications show as glass banners in the top right corner, and errors can be copied.
 - A **Git console** tab showing every git command your actions run, with output and timing.
 - Refreshes automatically when files, the index or refs change. Git-ignored files are skipped.
 - Light and dark themes, or follow macOS.
@@ -221,8 +231,8 @@ Settings › Keyboard Shortcuts lists them all.
 
 ### Settings
 
-Under <kbd>⌘</kbd> <kbd>,</kbd> you can set the theme (light, dark, or follow macOS), font size,
-relative or absolute dates, the git executable, the default Update Project method, background fetch,
+Under <kbd>⌘</kbd> <kbd>,</kbd> you can set the theme (light, dark, or follow macOS), the language, font size,
+relative or absolute dates, the name and email commits are made by (git's global config), the git executable, the default Update Project method, background fetch,
 side-by-side or unified diffs, and how many commits the log loads at a time.
 
 Settings, recent repositories and recent commit messages are stored in `Banyan/settings` under
