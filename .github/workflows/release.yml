@@ -58,7 +58,7 @@ jobs:
             git config user.email "ci@example.com"
             git add -f test.log
             git commit -qm "diag: test log"
-            git push -q origin HEAD:refs/heads/diag-log
+            git push -q origin "HEAD:refs/heads/diag-log-${GITHUB_RUN_ID}"
           fi
           exit $code
 
