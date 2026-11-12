@@ -48,19 +48,7 @@ jobs:
 
       - name: Test
         if: matrix.name != 'Windows'
-        run: |
-          set +e
-          go test ./... > test.log 2>&1
-          code=$?
-          cat test.log
-          if [ $code -ne 0 ] && [ "${{ matrix.name }}" = "Linux" ]; then
-            git config user.name "CI"
-            git config user.email "ci@example.com"
-            git add -f test.log
-            git commit -qm "diag: test log"
-            git push -q origin "HEAD:refs/heads/diag-log-${GITHUB_RUN_ID}"
-          fi
-          exit $code
+        run: go test ./...
 
       - name: Package (macOS)
         if: matrix.name == 'macOS'
