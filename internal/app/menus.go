@@ -33,6 +33,8 @@ func setMenu() {
 			item("open"),
 			{Label: i18n.T("Clone Repository…"), Click: func(_ *mygo.MenuItem, w *mygo.Window) { openClone(targetShell(w)) }},
 			mygo.Separator(),
+			item("save"),
+			mygo.Separator(),
 			item("close_window"),
 		}},
 		{Role: mygo.RoleEditMenu},
@@ -81,6 +83,27 @@ func targetShell(w *mygo.Window) *Shell {
 // runCommand runs the command id in window w, or the one in front.
 func runCommand(id string, w *mygo.Window) {
 	s := targetShell(w)
+	// The editor's window acts on its files, and on the repository behind
+	// them for the rest of the commands.
+	if ev := editorWindowOf(s); ev != nil {
+		switch id {
+		case "save":
+			ev.SaveCurrent()
+			ev.redraw()
+			return
+		case "close_window":
+			if ev.CloseCurrent() {
+				ev.redraw()
+			}
+			return
+		case "search_log":
+			ev.find()
+			return
+		}
+		if ev.ws != nil && ev.ws.Shell != nil {
+			s = ev.ws.Shell
+		}
+	}
 	switch id {
 	case "open":
 		promptOpenRepo(s)
@@ -95,9 +118,18 @@ func runCommand(id string, w *mygo.Window) {
 		if s == nil {
 			return
 		}
-		if rw := repoWindowOf(s); rw != nil && len(rw.tabs) > 1 {
-			rw.close(rw.active)
-			return
+		if rw := repoWindowOf(s); rw != nil && len(rw.tabs) > 0 {
+			ws := rw.tabs[rw.active]
+			// The editor's tab closes before the repository does, when the
+			// editor has the keyboard there.
+			if ws.editor != nil && ws.editor.focused && ws.editor.CloseCurrent() {
+				ws.editor.redraw()
+				return
+			}
+			if len(rw.tabs) > 1 {
+				rw.close(rw.active)
+				return
+			}
 		}
 		s.Win.Close()
 		return

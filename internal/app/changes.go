@@ -110,7 +110,7 @@ func newChangesView(ws *Workspace) *ChangesView {
 		collapsed:  map[group]bool{},
 		excluded:   map[string]map[patch.ChangedLine]bool{},
 		expanded:   map[string]bool{},
-		diff:       newDiffPane(),
+		diff:       newDiffPane(ws),
 		listWidth:  420,
 	}
 	cv.diff.WindowTitle = func() string { return i18n.Tf("Local Changes – {}", ws.Model.Repo.Name()) }
@@ -212,10 +212,20 @@ func (cv *ChangesView) loadDiff() {
 		return
 	}
 	repo := cv.ws.Model.Repo
+	oldPath := e.OrigPath
+	if oldPath == "" {
+		oldPath = e.Path
+	}
 	// The diff shown follows the whitespace option; the hunks to commit
 	// always come from the full patch, as the commit applies it.
-	cv.diff.Load(e.Path, func() (string, error) {
-		return repo.WorktreeDiff(&e, settings.Read(func(s *settings.Settings) bool { return s.IgnoreWhitespace }))
+	cv.diff.Show(DiffSource{
+		Title: e.Path,
+		Path:  e.Path,
+		Patch: func() (string, error) {
+			return repo.WorktreeDiff(&e, settings.Read(func(s *settings.Settings) bool { return s.IgnoreWhitespace }))
+		},
+		Old: blob(repo, "HEAD", oldPath),
+		New: func() ([]byte, error) { return worktreeFile(repo.Root(), e.Path) },
 	})
 	cv.hunkGen++
 	gen := cv.hunkGen

@@ -45,7 +45,7 @@ type commitBrowser struct {
 }
 
 func newCommitBrowser(ws *Workspace) *commitBrowser {
-	b := &commitBrowser{ws: ws, diff: newDiffPane(), emptyMessage: i18n.T("No commits"), selected: -1, width: 380, filesHeight: 150}
+	b := &commitBrowser{ws: ws, diff: newDiffPane(ws), emptyMessage: i18n.T("No commits"), selected: -1, width: 380, filesHeight: 150}
 	b.diff.Clear()
 	b.diff.Remote = ws.Model.Repo.IsPartialClone()
 	return b
@@ -95,7 +95,17 @@ func (b *commitBrowser) selectFile(ix int) {
 	}
 	b.file = ix
 	f, repo := d.Files[ix], b.ws.Model.Repo
-	b.diff.Load(f.Path, func() (string, error) { return repo.CommitFileDiff(d, &f) })
+	oldPath := f.OrigPath
+	if oldPath == "" {
+		oldPath = f.Path
+	}
+	b.diff.Show(DiffSource{
+		Title: f.Path,
+		Path:  f.Path,
+		Patch: func() (string, error) { return repo.CommitFileDiff(d, &f) },
+		Old:   blob(repo, d.BaseParent(), oldPath),
+		New:   blob(repo, d.ID, f.Path),
+	})
 }
 
 func (b *commitBrowser) View(c *ui.Context) {
@@ -406,14 +416,28 @@ func openWorktreeDiff(ws *Workspace, from, to, path string) {
 	}
 	var files []git.FileChange
 	loading, selected := true, -1
-	diff := newDiffPane()
+	diff := newDiffPane(ws)
 	diff.ShowMessage("", i18n.T("Loading…"))
 	width := float32(320)
 	repo := ws.Model.Repo
 	choose := func(ix int) {
 		selected = ix
 		f := files[ix]
-		diff.Load(f.Path, func() (string, error) { return repo.DiffBetween(from, to, &f) })
+		oldPath := f.OrigPath
+		if oldPath == "" {
+			oldPath = f.Path
+		}
+		nw := blob(repo, to, f.Path)
+		if to == "" {
+			nw = func() ([]byte, error) { return worktreeFile(repo.Root(), f.Path) }
+		}
+		diff.Show(DiffSource{
+			Title: f.Path,
+			Path:  f.Path,
+			Patch: func() (string, error) { return repo.DiffBetween(from, to, &f) },
+			Old:   blob(repo, from, oldPath),
+			New:   nw,
+		})
 	}
 	go func() {
 		all, err := repo.ChangesBetween(from, to)

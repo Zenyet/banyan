@@ -1350,3 +1350,42 @@ func TestGlobalIdentity(t *testing.T) {
 	}
 	equal(t, GlobalIdentity(), Identity{Name: "Ada Lovelace"})
 }
+
+// Blob reads a file's bytes at a revision, whatever they are, and a file
+// that revision does not have is nil.
+func TestBlobReadsVersions(t *testing.T) {
+	r := newTempRepo(t)
+	first := r.commit("data.bin", "\x00\x01\x02\x03", "binary")
+	second := r.commit("data.bin", "\x00\x01\x02\x04", "changed")
+	r.commit("text.md", "hello\n", "text")
+
+	got, err := r.repo.Blob(first, "data.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "\x00\x01\x02\x03" {
+		t.Fatalf("first version: %q", got)
+	}
+	got, err = r.repo.Blob(second, "data.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "\x00\x01\x02\x04" {
+		t.Fatalf("second version: %q", got)
+	}
+	if got, err := r.repo.Blob("HEAD", "text.md"); err != nil || string(got) != "hello\n" {
+		t.Fatalf("text: %q, %v", got, err)
+	}
+	// A file added after the revision, and one deleted before it.
+	if got, err := r.repo.Blob(first, "text.md"); err != nil || got != nil {
+		t.Fatalf("a file not in the revision reads %q, %v", got, err)
+	}
+	if err := os.Remove(r.path("text.md")); err != nil {
+		t.Fatal(err)
+	}
+	r.git("add", "-A")
+	r.git("commit", "-q", "-m", "removed")
+	if got, err := r.repo.Blob("HEAD", "text.md"); err != nil || got != nil {
+		t.Fatalf("a deleted file reads %q, %v", got, err)
+	}
+}

@@ -64,13 +64,17 @@ func (sv *ShelfView) sync() {
 		return
 	}
 	repo, id, file := sv.ws.Model.Repo, sv.selected, sv.file
-	sv.diff.Load(file, func() (string, error) { return repo.ShelfFilePatch(id, file) })
+	sv.diff.Show(DiffSource{
+		Title: file,
+		Path:  file,
+		Patch: func() (string, error) { return repo.ShelfFilePatch(id, file) },
+	})
 }
 
 func (sv *ShelfView) View(c *ui.Context) {
 	t := c.Theme()
 	if sv.diff == nil {
-		sv.diff = newDiffPane()
+		sv.diff = newDiffPane(sv.ws)
 		sv.diff.WindowTitle = func() string { return i18n.Tf("Shelf – {}", sv.ws.Model.Repo.Name()) }
 		sv.width = 420
 	}

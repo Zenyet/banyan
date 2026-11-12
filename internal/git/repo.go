@@ -444,6 +444,20 @@ func (r *Repo) RevisionDiff(id, path string) (string, error) {
 	return r.Git(append(args, id, "--", path)...)
 }
 
+// Blob reads the contents of path at rev as the file's bytes, text or not.
+// A path rev does not have, as one added since or deleted before it, is nil
+// without an error.
+func (r *Repo) Blob(rev, path string) ([]byte, error) {
+	if rev == "" || path == "" || !r.ok("cat-file", "-e", rev+":"+path) {
+		return nil, nil
+	}
+	out, err := r.Git("cat-file", "blob", rev+":"+path)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(out), nil
+}
+
 // Blame returns the line-by-line blame of path at rev.
 func (r *Repo) Blame(rev, path string) ([]BlameLine, error) {
 	out, err := r.Git("blame", "--porcelain", rev, "--", path)

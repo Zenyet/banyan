@@ -140,6 +140,10 @@ func (rw *repoWindow) activate(ix int) {
 		return
 	}
 	if ix != rw.active {
+		// Leaving a repository saves what its editor has open.
+		if rw.active >= 0 && rw.active < len(rw.tabs) {
+			rw.tabs[rw.active].editorSave()
+		}
 		rw.tabs[ix].Model.RefreshIfStale()
 	}
 	rw.active = ix

@@ -24,6 +24,7 @@ type Workspace struct {
 	log     *LogView
 	changes *ChangesView
 	shelf   *ShelfView
+	editor  *EditorView
 	console *ConsoleView
 	tab     int
 	off     func()
@@ -41,17 +42,47 @@ func newWorkspace(s *Shell, m *model.Model) *Workspace {
 	ws.log = newLogView(ws)
 	ws.changes = newChangesView(ws)
 	ws.shelf = &ShelfView{ws: ws}
+	ws.editor = newEditorView(ws)
 	ws.console = &ConsoleView{ws: ws}
 	ws.off = m.Subscribe(func(e model.Event) {
 		s.Report(m, e)
 		ws.log.modelChanged(e)
 		ws.changes.modelChanged(e)
+		ws.editor.modelChanged(e)
 	})
 	return ws
 }
 
+// setTab shows the view tab, saving what the editor has open as the view
+// it opened beside goes.
+func (ws *Workspace) setTab(tab int) {
+	if tab == ws.tab {
+		return
+	}
+	ws.editorSave()
+	ws.tab = tab
+}
+
+// editorSave saves what the editor has open, as leaving the repository
+// does.
+func (ws *Workspace) editorSave() {
+	if ws.editor != nil {
+		ws.editor.SaveAll()
+	}
+}
+
+// toast reports a problem in the window, when it has one to show it in.
+func (ws *Workspace) toast(kind, message string) {
+	if ws.Shell != nil && ws.Shell.Win != nil {
+		ws.Shell.Toast(kind, message)
+	}
+}
+
 // Close stops the tab's background work.
 func (ws *Workspace) Close() {
+	if ws.editor != nil {
+		ws.editor.Close()
+	}
 	ws.off()
 	ws.Model.Close()
 	// Its diffs in windows of their own go with it.
@@ -73,8 +104,12 @@ func (ws *Workspace) Command(id string) {
 	case "find_action":
 		openPalette(ws)
 	case "commit":
-		ws.tab = tabCommit
+		ws.setTab(tabCommit)
 		ws.changes.focusMessage()
+	case "save":
+		if ws.editor != nil {
+			ws.editor.SaveCurrent()
+		}
 	case "push":
 		openPush(ws)
 	case "update":
@@ -88,16 +123,21 @@ func (ws *Workspace) Command(id string) {
 	case "submodules":
 		openSubmodules(ws)
 	case "show_log":
-		ws.tab = tabLog
+		ws.setTab(tabLog)
 	case "show_commit":
-		ws.tab = tabCommit
+		ws.setTab(tabCommit)
 	case "show_console":
-		ws.tab = tabConsole
+		ws.setTab(tabConsole)
 	case "search_log":
-		ws.tab = tabLog
+		// The editor with the keyboard finds in its file before the log
+		// searches.
+		if ws.editor != nil && ws.editor.focused && ws.editor.find() {
+			break
+		}
+		ws.setTab(tabLog)
 		ws.log.focusSearch()
 	case "go_to":
-		ws.tab = tabLog
+		ws.setTab(tabLog)
 		ws.Shell.PromptText(i18n.T("Go to Hash, Branch or Tag"), i18n.T("Go"), "", ws.log.goTo)
 	case "refresh":
 		ws.Model.Refresh()
@@ -115,16 +155,42 @@ func (ws *Workspace) View(c *ui.Context) {
 	}
 	operationBanner(c, ws)
 	ui.Column(c.Key("content")).Grow(1).MinHeight(0).Children(func() {
-		switch ws.tab {
-		case tabLog:
-			ws.log.View(c)
-		case tabCommit:
-			ws.changes.View(c)
-		case tabShelf:
-			ws.shelf.View(c)
-		default:
-			ws.console.View(c)
+		view := func() {
+			switch ws.tab {
+			case tabLog:
+				ws.log.View(c)
+			case tabCommit:
+				ws.changes.View(c)
+			case tabShelf:
+				ws.shelf.View(c)
+			default:
+				ws.console.View(c)
+			}
 		}
+		ev := ws.editor
+		if ev == nil || !ev.Docked() {
+			if ev != nil {
+				// The shortcuts reach the editor only while it shows.
+				ev.focused = false
+			}
+			view()
+			return
+		}
+		// The view keeps the room the editor leaves it, which the divider
+		// moves; the editor opens at the width it opens at, and keeps
+		// editorMinWidth however far the divider is dragged.
+		total := c.Root().Bounds().W
+		split := ev.split
+		switch {
+		case split <= 0:
+			split = max(total-editorDefaultWidth, editorMinWidth)
+		case split < editorMinWidth:
+			split = editorMinWidth
+		case split > total-editorMinWidth:
+			split = max(total-editorMinWidth, editorMinWidth)
+		}
+		ui.Split(c.Key("editor-panel"), &split, view, func() { ev.View(c) }).Fill()
+		ev.split = split
 	})
 	ws.statusBar(c)
 }
@@ -189,6 +255,22 @@ func (ws *Workspace) header(c *ui.Context) {
 		}).Shrink(1).MinWidth(0).ClipX()
 		ui.Spacer(c)
 		ws.views(c, width < compactViewsWidth)
+		// The editor shows beside the views once it has files, and the
+		// button hides it, keeping them open.
+		if ev := ws.editor; ev != nil && len(ev.tabs) > 0 {
+			glassGroup(c.Key("editor-toggle"), func() {
+				b := capsule(c, "file-code", i18n.Tf("Editor ({})", len(ev.tabs)), width < compactViewsWidth, false, false)
+				b.Tooltip(i18n.T("Show or Hide the Editor"))
+				if ev.shown {
+					b.Background(t.Text.Alpha(0.06))
+				} else {
+					b.TextColor(t.TextMuted)
+				}
+				if b.Clicked() {
+					ev.Toggle()
+				}
+			})
+		}
 		ui.Spacer(c)
 		// The operation running shows on its own button, its icon turned
 		// to a spinner, so that nothing comes and goes beside the group
@@ -232,22 +314,24 @@ func (ws *Workspace) header(c *ui.Context) {
 // alone, their names as tooltips.
 func (ws *Workspace) views(c *ui.Context, compact bool) {
 	t := c.Theme()
-	tabs := []struct {
+	type view struct {
+		tab         int
 		icon, label string
 		count       int
-	}{
-		{"git-graph", i18n.T("Log"), 0},
-		{"git-commit-horizontal", i18n.T("Commit"), ws.changes.changeCount()},
-		{"inbox", i18n.T("Shelf"), len(ws.Model.Shelves)},
-		{"square-terminal", i18n.T("Console"), 0},
+	}
+	tabs := []view{
+		{tabLog, "git-graph", i18n.T("Log"), 0},
+		{tabCommit, "git-commit-horizontal", i18n.T("Commit"), ws.changes.changeCount()},
+		{tabShelf, "inbox", i18n.T("Shelf"), len(ws.Model.Shelves)},
+		{tabConsole, "square-terminal", i18n.T("Console"), 0},
 	}
 	glassGroup(c.Key("views"), func() {
-		for ix, tab := range tabs {
-			b := ui.Row(c.Key(ix)).Height(30).PaddingX(12).Gap(6).Radius(15).Cursor(ui.CursorPointer).Label(tab.label)
+		for _, tab := range tabs {
+			b := ui.Row(c.Key(tab.tab)).Height(30).PaddingX(12).Gap(6).Radius(15).Cursor(ui.CursorPointer).Label(tab.label)
 			if compact {
 				b.PaddingX(9).Tooltip(tab.label)
 			}
-			if ix == ws.tab {
+			if tab.tab == ws.tab {
 				selectedPill(b, t)
 			} else {
 				b.TextColor(t.TextMuted)
@@ -256,7 +340,7 @@ func (ws *Workspace) views(c *ui.Context, compact bool) {
 				}
 			}
 			if b.Clicked() {
-				ws.tab = ix
+				ws.setTab(tab.tab)
 			}
 			b.Children(func() {
 				ui.Icon(c, icon(tab.icon)).FontSize(t.FontSize + 1)

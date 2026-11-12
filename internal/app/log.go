@@ -153,7 +153,7 @@ func newLogView(ws *Workspace) *LogView {
 		dateFilter:     -1,
 		branchClosed:   map[string]bool{"group:" + i18n.T("Tags"): true},
 		fileClosed:     map[string]bool{},
-		diff:           newDiffPane(),
+		diff:           newDiffPane(ws),
 		limit:          settings.Read(func(s *settings.Settings) int { return s.LogPageSize }),
 		selectedRow:    -1,
 		shownRow:       -1,
@@ -650,7 +650,17 @@ func (lv *LogView) showFile(path string) {
 	if file.OrigPath != "" {
 		title = file.OrigPath + " → " + title
 	}
-	lv.diff.Load(title, func() (string, error) { return repo.CommitFileDiff(d, &file) })
+	oldPath := file.OrigPath
+	if oldPath == "" {
+		oldPath = file.Path
+	}
+	lv.diff.Show(DiffSource{
+		Title: title,
+		Path:  file.Path,
+		Patch: func() (string, error) { return repo.CommitFileDiff(d, &file) },
+		Old:   blob(repo, d.BaseParent(), oldPath),
+		New:   blob(repo, d.ID, file.Path),
+	})
 }
 
 func (lv *LogView) loadMore() {

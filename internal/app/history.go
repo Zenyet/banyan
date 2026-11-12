@@ -17,7 +17,7 @@ import (
 func showHistory(ws *Workspace, path string) {
 	var revisions []git.FileRevision
 	loading, selected := true, -1
-	diff := newDiffPane()
+	diff := newDiffPane(ws)
 	diff.ShowMessage("", i18n.T("Loading history…"))
 	width := float32(460)
 	var list ui.ListState
@@ -29,7 +29,17 @@ func showHistory(ws *Workspace, path string) {
 		}
 		selected = ix
 		r := revisions[ix]
-		diff.Load(r.Path+"  ("+r.Commit.ShortID()+")", func() (string, error) { return repo.RevisionDiff(r.Commit.ID, r.Path) })
+		parent := ""
+		if len(r.Commit.Parents) > 0 {
+			parent = r.Commit.Parents[0]
+		}
+		diff.Show(DiffSource{
+			Title: r.Path + "  (" + r.Commit.ShortID() + ")",
+			Path:  r.Path,
+			Patch: func() (string, error) { return repo.RevisionDiff(r.Commit.ID, r.Path) },
+			Old:   blob(repo, parent, r.Path),
+			New:   blob(repo, r.Commit.ID, r.Path),
+		})
 	}
 	go func() {
 		revs, err := repo.FileHistory(path)

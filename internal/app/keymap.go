@@ -59,6 +59,7 @@ func commands() []Command {
 		{"fetch_all", i18n.T("Fetch All Repositories"), "", true},
 		{"update_all", i18n.T("Update All Repositories"), "", true},
 		{"open", i18n.T("Open Repository…"), "secondary-o", false},
+		{"save", i18n.T("Save"), "secondary-s", true},
 		{"settings", i18n.T("Settings…"), "secondary-,", false},
 		{"close_window", i18n.T("Close Window"), "secondary-w", false},
 		{"quit", i18n.T("Quit Banyan"), "secondary-q", false},

@@ -328,6 +328,10 @@ func (m *Model) RefreshIfStale() {
 	}
 }
 
+// RefreshStatus reads the work tree again, and only it, as the editor does
+// after a save so that the Commit tab shows the new diff at once.
+func (m *Model) RefreshStatus() { m.refreshStatus() }
+
 type snapshot struct {
 	head           string
 	branches       []git.Branch

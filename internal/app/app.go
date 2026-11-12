@@ -85,6 +85,14 @@ func Run(requested string) error {
 			rw.tabs[rw.active].Model.RefreshIfStale()
 		}
 	})
+	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
+		// The editor's files are saved as the app goes, as JetBrains does.
+		for _, rw := range repoWindows {
+			for _, ws := range rw.tabs {
+				ws.editorSave()
+			}
+		}
+	})
 	return mygo.App.Run()
 }
 
