@@ -102,7 +102,11 @@ func (s *Shell) Toast(kind, message string) {
 		t.Timeout = 10e9
 	}
 	s.toasts = append(s.toasts, t)
-	s.Win.Invalidate()
+	// A shell of the tests has no window, and a window closed under a
+	// repository still working has nothing to show.
+	if s.Win != nil {
+		s.Win.Invalidate()
+	}
 }
 
 func (s *Shell) view(c *ui.Context) {

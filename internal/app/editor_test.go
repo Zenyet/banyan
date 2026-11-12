@@ -54,9 +54,23 @@ func editorWorkspace(t *testing.T, files map[string]string) (*Workspace, *git.Re
 	}
 	m := model.New(repo)
 	t.Cleanup(m.Close)
+	// The repository reads in the background, as a git running while the
+	// temporary folder goes leaves it not empty.
+	t.Cleanup(func() { settle(m) })
 	ws := newWorkspace(&Shell{}, m)
 	t.Cleanup(ws.editor.Close)
+	settle(m)
 	return ws, repo
+}
+
+// settle waits for the repository's background work to end.
+func settle(m *model.Model) {
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
+		if _, busy := m.Activity(); !busy {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // waitDiff waits for a diff pane to finish loading.
