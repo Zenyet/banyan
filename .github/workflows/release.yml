@@ -47,8 +47,18 @@ jobs:
           "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: Test
+        id: test
         if: matrix.name != 'Windows'
-        run: go test ./...
+        run: |
+          set -o pipefail
+          go test ./... 2>&1 | tee test.log
+
+      - name: Report test failures
+        if: failure() && matrix.name != 'Windows'
+        run: |
+          grep -E '^(--- FAIL|FAIL|panic:|ok |.*\.go:[0-9]+:)' test.log | head -20 | while IFS= read -r line; do
+            echo "::error::$line"
+          done
 
       - name: Package (macOS)
         if: matrix.name == 'macOS'
