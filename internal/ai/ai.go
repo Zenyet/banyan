@@ -6,6 +6,7 @@ package ai
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -44,9 +45,13 @@ const (
 	StyleGitmoji Style = "gitmoji"
 	// StylePlain writes the subject without a prefix or emoji.
 	StylePlain Style = "plain"
+	// StyleCodeBuddy follows CodeBuddy's commit message style: the
+	// repository's conventions, a short subject, and a body for a change
+	// that spans several parts.
+	StyleCodeBuddy Style = "codebuddy"
 )
 
-var AllStyles = []Style{StyleRepository, StyleConventional, StyleGitmoji, StylePlain}
+var AllStyles = []Style{StyleRepository, StyleCodeBuddy, StyleConventional, StyleGitmoji, StylePlain}
 
 // Label is the style's name in the interface language.
 func (s Style) Label() string {
@@ -57,6 +62,8 @@ func (s Style) Label() string {
 		return i18n.T("Gitmoji")
 	case StylePlain:
 		return i18n.T("Plain")
+	case StyleCodeBuddy:
+		return "CodeBuddy"
 	}
 	return i18n.T("Match the repository")
 }
@@ -115,6 +122,9 @@ type Config struct {
 	SubjectOnly bool
 	// Style is the shape of the subject, or the repository's for none.
 	Style Style
+	// MessageLanguage is "repository" to match recent commits' language,
+	// "en" or "zh" to choose one, or empty for the interface language.
+	MessageLanguage string
 	// ClientVersion is Banyan's version, which ACP agents are told.
 	ClientVersion string
 }
@@ -262,24 +272,53 @@ func prompt(cfg Config, req Request) string {
 		b.WriteByte('\n')
 	}
 	b.WriteString("</diff>\n\n")
+	subjectLimit := 72
+	if cfg.Style == StyleCodeBuddy {
+		subjectLimit = 50
+	}
 	b.WriteString("Rules:\n")
 	b.WriteString("- Reply with only the commit message: no preamble, quotes or code fences.\n")
-	b.WriteString("- Write one short line: a subject of at most 72 characters, in the imperative mood, saying what the key change is.\n")
+	b.WriteString(fmt.Sprintf("- Write one short line: a subject of at most %d characters, in the imperative mood, saying what the key change is.\n", subjectLimit))
 	b.WriteString("- Be specific, with concrete details; do not list file names. Do not end the subject with a period.\n")
 	if cfg.SubjectOnly {
 		b.WriteString("- Do not add a body, description, explanation or bullet points.\n")
+	} else if cfg.Style == StyleCodeBuddy {
+		b.WriteString("- If the change spans several parts or is complex, add a body after a blank line, with one \"- \" line per part, each at most 72 characters.\n")
+		b.WriteString("- A simple change needs only the subject.\n")
 	} else {
 		b.WriteString("- Leave a blank line before the body. Add a short body only when it explains why the change was made, with lines of at most 72 characters.\n")
 	}
 	b.WriteString("- Describe what changed and why, only from the diff; do not invent changes.\n")
-	if cfg.Style == StyleRepository {
-		b.WriteString("- Match the language and style of the recent commit messages, including a type prefix such as fix: or feat: if they use one. If there are none, write in ")
-	} else {
-		b.WriteString("- Match the language of the recent commit messages. If there are none, write in ")
+	// The message's language: the interface's unless chosen otherwise, the
+	// repository's when asked for.
+	language := languageName(req.Language)
+	matchLanguage := false
+	switch cfg.MessageLanguage {
+	case "repository":
+		matchLanguage = true
+	case "en":
+		language = "English"
+	case "zh":
+		language = "Simplified Chinese"
 	}
-	b.WriteString(languageName(req.Language))
-	b.WriteString(".\n")
+	if matchLanguage {
+		b.WriteString("- Match the language of the recent commit messages. If there are none, write in ")
+		b.WriteString(language)
+		b.WriteString(".\n")
+	} else {
+		b.WriteString("- Write in ")
+		b.WriteString(language)
+		if cfg.MessageLanguage == "" {
+			b.WriteString(", the language of Banyan's interface")
+		}
+		b.WriteString("; if the additional instructions ask for another language, follow them.\n")
+	}
+	if cfg.Style == StyleRepository || cfg.Style == StyleCodeBuddy {
+		b.WriteString("- Match the style of the recent commit messages, including a type prefix such as fix: or feat: if they use one.\n")
+	}
 	switch cfg.Style {
+	case StyleCodeBuddy:
+		b.WriteString("- Prefer the repository's own conventions over a fixed format; do not add a type prefix or emoji unless recent commits use one.\n")
 	case StyleConventional:
 		b.WriteString("- Use Conventional Commits: start the subject with a lowercase type and optional scope, as in fix(api): ... or feat: ... The types are fix, feat, build, chore, ci, docs, style, refactor, perf and test.\n")
 	case StyleGitmoji:

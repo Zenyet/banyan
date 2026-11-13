@@ -77,11 +77,11 @@ where it builds with `cargo` as before.
   concise one-line message from the checked changes; Settings › AI can have it add a body instead. It picks an
   ACP agent you already use (Claude Code, Codex, Gemini CLI, or any command that speaks the Agent Client
   Protocol), or an OpenAI, Anthropic or OpenAI-compatible model. Settings › AI also chooses the message style
-  (match the repository, Conventional Commits, Gitmoji or plain), custom instructions, and tests the provider's
+  (match the repository, CodeBuddy, Conventional Commits, Gitmoji or plain), custom instructions, and tests the provider's
   connection; what you type while it writes is kept.
 - **Stash Changes** can stash only the checked files, leave out unversioned files, or keep the index; a stash can
   be popped, applied, dropped, or unstashed onto a new branch.
-- Add to `.gitignore`, Copy Path, and Reveal in Finder for local changes.
+- Add to `.gitignore`, Copy Path, Reveal in Finder, and **Delete File** (its local changes are discarded) for local changes.
 - **Commit Options** (the gear next to the message): commit as another author, add a `Signed-off-by` line, sign
   the commit with GPG or SSH, or skip Git hooks; and set whether this repository signs every commit, with which
   key. The log shows whether each commit's signature checks out.

@@ -71,6 +71,20 @@ func TestSubjectOnly(t *testing.T) {
 	}
 }
 
+func TestMessageLanguage(t *testing.T) {
+	req := Request{Language: "zh"}
+	if got := prompt(Config{}, req); !strings.Contains(got, "Write in Simplified Chinese, the language of Banyan's interface") {
+		t.Errorf("app language not used:\n%s", got)
+	}
+	if got := prompt(Config{MessageLanguage: "en"}, req); !strings.Contains(got, "Write in English;") {
+		t.Errorf("chosen language not used:\n%s", got)
+	}
+	got := prompt(Config{MessageLanguage: "repository"}, req)
+	if !strings.Contains(got, "Match the language of the recent commit messages. If there are none, write in Simplified Chinese.") {
+		t.Errorf("repository language not used:\n%s", got)
+	}
+}
+
 func TestValidate(t *testing.T) {
 	cases := []struct {
 		cfg  Config
@@ -280,6 +294,7 @@ func TestStylePrompts(t *testing.T) {
 		StyleConventional: "Conventional Commits",
 		StyleGitmoji:      "Gitmoji",
 		StylePlain:        "without a type prefix or emoji",
+		StyleCodeBuddy:    "Prefer the repository's own conventions",
 	}
 	for style, want := range cases {
 		if got := prompt(Config{Style: style}, Request{Root: "/tmp/repo"}); !strings.Contains(got, want) {
@@ -288,6 +303,19 @@ func TestStylePrompts(t *testing.T) {
 	}
 	if got := prompt(Config{Style: StyleRepository}, Request{Root: "/tmp/repo"}); strings.Contains(got, "Use Conventional Commits") {
 		t.Errorf("repository style forces a convention:\n%s", got)
+	}
+}
+
+func TestCodeBuddyStyle(t *testing.T) {
+	withBody := prompt(Config{Style: StyleCodeBuddy}, Request{Root: "/tmp/banyan", Language: "zh"})
+	for _, want := range []string{"at most 50 characters", "spans several parts", "one \"- \" line per part"} {
+		if !strings.Contains(withBody, want) {
+			t.Errorf("CodeBuddy prompt lacks %q:\n%s", want, withBody)
+		}
+	}
+	oneLine := prompt(Config{Style: StyleCodeBuddy, SubjectOnly: true}, Request{Root: "/tmp/banyan"})
+	if strings.Contains(oneLine, "spans several parts") {
+		t.Errorf("one-line CodeBuddy prompt asks for a body:\n%s", oneLine)
 	}
 }
 

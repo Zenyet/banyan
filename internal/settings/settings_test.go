@@ -65,6 +65,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 		AIAllowTools:      true,
 		AISubjectOnly:     true,
 		AIStyle:           "conventional",
+		AILanguage:        "zh",
 		Recent:            []string{"/tmp/repo"},
 		Session:           []string{"/tmp/a", "/tmp/b"},
 		Messages:          []string{"Fix\n\nDetails"},

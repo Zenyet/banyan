@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -438,6 +439,33 @@ func (cv *ChangesView) commit(push bool) {
 	cv.amend = false
 }
 
+// deleteFile removes a local change from the working tree, untracked or
+// tracked, as JetBrains' Delete does: a tracked file's deletion is staged,
+// and its local changes are lost.
+func (cv *ChangesView) deleteFile(e git.StatusEntry) {
+	path := e.Path
+	cv.ws.Shell.Confirm(i18n.T("Delete File"),
+		i18n.Tf("Delete {} from the working tree? Local changes to it are lost and cannot be undone.", path),
+		i18n.T("Delete"), func() {
+			model.Run(cv.ws.Model, i18n.Tf("Delete {}", path), func(r *git.Repo) (string, error) {
+				return "", deleteLocalFile(r, e)
+			})
+		})
+}
+
+// deleteLocalFile is deleteFile's work, without the question.
+func deleteLocalFile(repo *git.Repo, e git.StatusEntry) error {
+	if e.IsUntracked() {
+		err := os.Remove(filepath.Join(repo.Root(), filepath.FromSlash(e.Path)))
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	_, err := repo.Git("rm", "-f", "--", e.Path)
+	return err
+}
+
 func (cv *ChangesView) rollback(paths []string) {
 	var entries []git.StatusEntry
 	for _, e := range cv.ws.Model.Status {
@@ -731,6 +759,12 @@ func (cv *ChangesView) entryMenu(menu *ui.Menu, e git.StatusEntry) {
 	}
 	if menu.Item(revealLabel()).Chosen() {
 		mygo.Shell.ShowItemInFolder(full)
+	}
+	if e.DisplayStatus() != 'D' {
+		menu.Separator()
+		if menu.Item(i18n.T("Delete File...")).Chosen() {
+			cv.deleteFile(e)
+		}
 	}
 }
 

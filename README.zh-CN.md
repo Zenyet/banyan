@@ -73,10 +73,10 @@ Banyan 最初用 Rust 和 [GPUI](https://gpui.rs) 编写，直到 0.1.6；现在
 - **AI 提交信息**：提交信息上方的 ✨ 按钮（或 <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>G</kbd>）会根据勾选的更改生成简洁的单行信息；
   可在 设置 › AI 中改为同时生成正文。可选择你已在使用的 ACP 智能体（Claude Code、Codex、Gemini CLI，或任何支持
   Agent Client Protocol 的命令），也可选择 OpenAI、Anthropic 或 OpenAI 兼容模型。设置 › AI 还可选择信息风格
-  （跟随仓库、Conventional Commits、Gitmoji 或纯文本）、自定义指令，并测试提供方连接；生成期间你输入的内容会保留。
+  （跟随仓库、CodeBuddy、Conventional Commits、Gitmoji 或纯文本）、自定义指令，并测试提供方连接；生成期间你输入的内容会保留。
 - **储藏更改**（Stash Changes）可以只储藏勾选的文件、排除未版本控制的文件或保留暂存区；
   储藏可以弹出、应用、删除，或取出到新分支。
-- 对本地更改可添加到 `.gitignore`、复制路径、在访达中显示。
+- 对本地更改可添加到 `.gitignore`、复制路径、在访达中显示，以及 **删除文件**（丢弃其中的本地更改）。
 - **提交选项**（Commit Options，提交信息旁的齿轮）：以其他作者身份提交、添加 `Signed-off-by` 行、
   用 GPG 或 SSH 签名提交、跳过 Git 钩子；也可设置本仓库是否对每个提交签名及所用密钥。日志会显示每个提交的签名是否有效。
 - **更改列表**（Changelists）：通过文件菜单的 **移到另一个更改列表** 把本地更改分到不同的命名列表；

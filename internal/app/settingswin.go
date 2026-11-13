@@ -546,13 +546,28 @@ func (sw *settingsWindow) ai(c *ui.Context, s *settings.Settings) {
 				{"body", i18n.T("Subject and body")},
 			}, current, func(s *settings.Settings, v string) { s.AISubjectOnly = v == "one" })
 		})
-		settingRow(c, "ai-style", i18n.T("Style"), i18n.T("The shape of the subject line."), false, func() {
-			var options []option
-			for _, style := range ai.AllStyles {
-				options = append(options, option{string(style), style.Label()})
-			}
-			choice(c, options, s.AIStyle, func(s *settings.Settings, v string) { s.AIStyle = v })
+		settingRow(c, "ai-language", i18n.T("Language"), i18n.T("App language follows Settings › Appearance; or write in the repository's language."), false, func() {
+			choice(c, []option{
+				{"", i18n.T("App language")},
+				{"repository", i18n.T("Match the repository")},
+				{"en", "English"},
+				{"zh", "简体中文"},
+			}, s.AILanguage, func(s *settings.Settings, v string) { s.AILanguage = v })
 		})
+		settingRow(c, "ai-style", i18n.T("Style"),
+			i18n.T("The shape of the subject line. CodeBuddy follows the repository's conventions and explains a complex change in the body."), false, func() {
+				var options []option
+				for _, style := range ai.AllStyles {
+					options = append(options, option{string(style), style.Label()})
+				}
+				choice(c, options, s.AIStyle, func(s *settings.Settings, v string) {
+					s.AIStyle = v
+					// CodeBuddy's style is a subject and a body.
+					if v == string(ai.StyleCodeBuddy) {
+						s.AISubjectOnly = false
+					}
+				})
+			})
 	})
 	settingsGroup(c, i18n.T("Custom Prompt"), i18n.T("Optional words added to every request: a commit style, a tone, a language, or what to emphasize."), func() {
 		settingRow(c, "ai-instructions", i18n.T("Custom instructions"), "", true, func() {

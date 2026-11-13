@@ -114,7 +114,10 @@ type Settings struct {
 	// AIStyle is the shape of the subject: empty for the repository's own,
 	// else "conventional", "gitmoji" or "plain"; see package ai.
 	AIStyle string
-	Recent  []string
+	// AILanguage is the commit message's language: empty for the
+	// interface's, "repository", "en" or "zh".
+	AILanguage string
+	Recent     []string
 	// Session is the repositories open in the last window used, the one
 	// shown first.
 	Session []string
@@ -456,6 +459,8 @@ func parse(text string) Settings {
 			s.AISubjectOnly = value != "off"
 		case "ai_style":
 			s.AIStyle = value
+		case "ai_language":
+			s.AILanguage = value
 		case "message":
 			s.Messages = append(s.Messages, unescape(value))
 		case "shortcut":
@@ -501,6 +506,7 @@ func (s *Settings) text() string {
 	line("ai_tools", choose(s.AIAllowTools, "on", "off"))
 	line("ai_subject_only", choose(s.AISubjectOnly, "on", "off"))
 	line("ai_style", s.AIStyle)
+	line("ai_language", s.AILanguage)
 	for _, repo := range s.Recent {
 		line("recent", repo)
 	}

@@ -39,6 +39,7 @@ func TestAIRequestShowsTheCheckedChanges(t *testing.T) {
 	run("commit", "-q", "-m", "Base commit")
 	write("a.txt", "one\ntwo\n")
 	write("new.txt", "brand new\n")
+	write("package-lock.json", "{\"secret\": \"lock-secret\"}\n")
 	repo, err := git.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +56,11 @@ func TestAIRequestShowsTheCheckedChanges(t *testing.T) {
 	if !strings.Contains(req.Diff, "+two") || !strings.Contains(req.Diff, "+brand new") {
 		t.Errorf("diff misses the changes:\n%s", req.Diff)
 	}
-	if len(req.Files) != 2 || !strings.Contains(strings.Join(req.Files, "\n"), "new.txt") {
+	if strings.Contains(req.Diff, "lock-secret") {
+		t.Errorf("lock file's diff was sent:\n%s", req.Diff)
+	}
+	files := strings.Join(req.Files, "\n")
+	if len(req.Files) != 3 || !strings.Contains(files, "new.txt") || !strings.Contains(files, "package-lock.json") {
 		t.Errorf("files = %v", req.Files)
 	}
 	if len(req.Recent) == 0 || req.Recent[0] != "Base commit" {
@@ -63,6 +68,19 @@ func TestAIRequestShowsTheCheckedChanges(t *testing.T) {
 	}
 	if req.Language != "en" {
 		t.Errorf("language = %q", req.Language)
+	}
+}
+
+func TestNoisyDiff(t *testing.T) {
+	for _, file := range []string{"package-lock.json", "web/yarn.lock", "dist/app.min.js", "a/b.map", "Cargo.lock"} {
+		if !noisyDiff(file) {
+			t.Errorf("%q should be left out", file)
+		}
+	}
+	for _, file := range []string{"main.go", "README.md", "lock.txt", "src/map.go"} {
+		if noisyDiff(file) {
+			t.Errorf("%q should be sent", file)
+		}
 	}
 }
 
@@ -108,7 +126,7 @@ func TestAISettingsPageRenders(t *testing.T) {
 			}
 		}
 		if provider != "" {
-			for _, label := range []string{"Length", "Style", "Test Connection"} {
+			for _, label := range []string{"Length", "Language", "Style", "Test Connection"} {
 				if _, ok := tt.Find(label); !ok {
 					t.Fatalf("%q: no %q\n%s", provider, label, strings.Join(tt.Texts(), "\n"))
 				}

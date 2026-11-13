@@ -758,4 +758,11 @@ var zh = map[string]string{
 	"Testing the connection…":                "正在测试连接…",
 	"Connected: {}":                          "已连接：{}",
 	"The agent returned no message":          "智能体没有返回信息",
+	"Delete File...":                         "删除文件…",
+	"Delete File":                            "删除文件",
+	"Delete {} from the working tree? Local changes to it are lost and cannot be undone.": "从工作区删除 {}？其中的本地更改会丢失，且无法撤销。",
+	"App language": "应用语言",
+	"App language follows Settings › Appearance; or write in the repository's language.": "应用语言跟随设置 › 外观；也可使用仓库的语言。",
+	"CodeBuddy": "CodeBuddy",
+	"The shape of the subject line. CodeBuddy follows the repository's conventions and explains a complex change in the body.": "标题行的形式。CodeBuddy 会跟随仓库约定，并在复杂改动时用正文说明。",
 }

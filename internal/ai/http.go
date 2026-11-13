@@ -97,7 +97,7 @@ func anthropic(ctx context.Context, cfg Config, system, prompt string) (string, 
 		Messages  []chatMessage `json:"messages"`
 	}{
 		Model:     cfg.Model,
-		MaxTokens: 1024,
+		MaxTokens: 512,
 		System:    system,
 		Messages:  []chatMessage{{Role: "user", Content: prompt}},
 	}

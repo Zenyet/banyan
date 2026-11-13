@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"path"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -18,8 +19,10 @@ import (
 // How much of the changes a model is shown: a commit message needs the
 // shape of a change, not every line of a generated file.
 const (
-	aiMaxDiff     = 100_000
-	aiMaxFileDiff = 32_000
+	// About 8k tokens of diff at the worst, enough for a commit message
+	// and cheaper than sending a generated file whole.
+	aiMaxDiff     = 32_000
+	aiMaxFileDiff = 8_000
 )
 
 // aiSnapshot is what the commit will contain, copied from the view for the
@@ -61,6 +64,11 @@ func (s aiSnapshot) request(repo *git.Repo, language string) (ai.Request, error)
 			name += " (from " + e.OrigPath + ")"
 		}
 		req.Files = append(req.Files, name)
+		// Lock files and minified output say what kind of change happened
+		// by their names; their diffs are noise.
+		if noisyDiff(e.Path) {
+			continue
+		}
 		text, err := repo.WorktreeDiff(&e, false)
 		if err != nil {
 			return req, err
@@ -94,8 +102,8 @@ func (s aiSnapshot) request(repo *git.Repo, language string) (ai.Request, error)
 		}
 	}
 	req.Diff = diff.String()
-	if len(req.Files) > 200 {
-		req.Files = append(req.Files[:200], "…")
+	if len(req.Files) > 100 {
+		req.Files = append(req.Files[:100], "…")
 	}
 	// The messages of the branch's own commits, for style and language.
 	if commits, err := repo.Log(&git.LogFilter{Refs: "HEAD"}, 8); err == nil {
@@ -104,6 +112,22 @@ func (s aiSnapshot) request(repo *git.Repo, language string) (ai.Request, error)
 		}
 	}
 	return req, nil
+}
+
+// noisyDiff reports whether a file's diff is not worth the tokens: package
+// manager lock files and minified build output.
+func noisyDiff(file string) bool {
+	base := strings.ToLower(path.Base(file))
+	switch base {
+	case "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
+		"bun.lock", "bun.lockb", "cargo.lock", "go.sum", "composer.lock",
+		"gemfile.lock", "poetry.lock", "uv.lock", "pipfile.lock", "mix.lock",
+		"pubspec.lock", "packages.lock.json":
+		return true
+	}
+	lower := strings.ToLower(file)
+	return strings.HasSuffix(lower, ".min.js") || strings.HasSuffix(lower, ".min.css") ||
+		strings.HasSuffix(lower, ".map")
 }
 
 // truncateUTF8 keeps at most n bytes without splitting a character.
@@ -119,16 +143,17 @@ func truncateUTF8(text string, n int) string {
 
 func aiConfigFromSettings(s *settings.Settings) ai.Config {
 	return ai.Config{
-		Provider:      ai.ProviderFromKey(s.AIProvider),
-		Command:       strings.TrimSpace(s.AICommand),
-		BaseURL:       strings.TrimSpace(s.AIBaseURL),
-		Model:         strings.TrimSpace(s.AIModel),
-		APIKey:        strings.TrimSpace(s.AIAPIKey),
-		Instructions:  strings.TrimSpace(s.AIInstructions),
-		AllowTools:    s.AIAllowTools,
-		SubjectOnly:   s.AISubjectOnly,
-		Style:         ai.StyleFromKey(s.AIStyle),
-		ClientVersion: Version,
+		Provider:        ai.ProviderFromKey(s.AIProvider),
+		Command:         strings.TrimSpace(s.AICommand),
+		BaseURL:         strings.TrimSpace(s.AIBaseURL),
+		Model:           strings.TrimSpace(s.AIModel),
+		APIKey:          strings.TrimSpace(s.AIAPIKey),
+		Instructions:    strings.TrimSpace(s.AIInstructions),
+		AllowTools:      s.AIAllowTools,
+		SubjectOnly:     s.AISubjectOnly,
+		Style:           ai.StyleFromKey(s.AIStyle),
+		MessageLanguage: s.AILanguage,
+		ClientVersion:   Version,
 	}
 }
 
