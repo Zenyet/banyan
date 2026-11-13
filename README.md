@@ -73,6 +73,12 @@ where it builds with `cargo` as before.
 - Commit whole files, single hunks, or individual lines.
 - Commit, amend, commit and push, rollback, and stash. Recent commit messages are remembered, and a subject over
   72 characters or a missing blank line before the body is pointed out.
+- **AI commit messages**: the ✨ button above the message (or <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>G</kbd>) writes a
+  concise one-line message from the checked changes; Settings › AI can have it add a body instead. It picks an
+  ACP agent you already use (Claude Code, Codex, Gemini CLI, or any command that speaks the Agent Client
+  Protocol), or an OpenAI, Anthropic or OpenAI-compatible model. Settings › AI also chooses the message style
+  (match the repository, Conventional Commits, Gitmoji or plain), custom instructions, and tests the provider's
+  connection; what you type while it writes is kept.
 - **Stash Changes** can stash only the checked files, leave out unversioned files, or keep the index; a stash can
   be popped, applied, dropped, or unstashed onto a new branch.
 - Add to `.gitignore`, Copy Path, and Reveal in Finder for local changes.
@@ -241,11 +247,12 @@ Settings › Keyboard Shortcuts lists them all.
 
 Under <kbd>⌘</kbd> <kbd>,</kbd> you can set the theme (light, dark, or follow macOS), the language, font size,
 relative or absolute dates, the name and email commits are made by (git's global config), the git executable, the default Update Project method, background fetch,
-side-by-side or unified diffs, and how many commits the log loads at a time.
+side-by-side or unified diffs, how many commits the log loads at a time, and where AI commit messages come from.
 
 Settings, recent repositories and recent commit messages are stored in `Banyan/settings` under
-`~/Library/Application Support` on macOS, `%APPDATA%` on Windows and `~/.config` on Linux. Settings from GitBrains, Banyan's earlier name,
-are carried over on first launch.
+`~/Library/Application Support` on macOS, `%APPDATA%` on Windows and `~/.config` on Linux; the file is readable
+only by you, as an AI provider's API key may be in it. Settings from GitBrains, Banyan's earlier name, are carried
+over on first launch.
 
 ## Development
 
@@ -263,6 +270,7 @@ go test ./...      # graph layout, ref parsing, and git operations against throw
 | `internal/graph` | Commit graph lane layout |
 | `internal/model` | Shared repo state; runs ops in the background, watches the repository and broadcasts refreshes |
 | `internal/patch`, `internal/conflict`, `internal/changelists` | Partial commits, merge conflicts and changelists |
+| `internal/ai` | Commit messages, from an OpenAI-compatible API or an ACP agent |
 | `internal/settings` | Persisted settings, recent repositories and commit messages |
 | `internal/i18n` | English and Simplified Chinese strings |
 | `internal/askpass` | Credential prompts for git and ssh |

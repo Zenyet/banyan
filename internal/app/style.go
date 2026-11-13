@@ -310,6 +310,18 @@ func iconButton(c *ui.Context, name, tip string) ui.Element {
 	return b
 }
 
+// spinnerButton is an icon button while work is going on: the same box,
+// with a spinner where the icon was. It cancels the work when clicked.
+func spinnerButton(c *ui.Context, tip string) ui.Element {
+	t := c.Theme()
+	b := button(c, "").Label(tip).Tooltip(tip).Padding(4).Background(ui.Color{}).Border(0, ui.Color{})
+	b.Children(func() { ui.Spinner(c).Size(16, 16) })
+	if b.Hovered() {
+		b.Background(hoverBG(t))
+	}
+	return b
+}
+
 // ghostButton is a borderless button with an optional icon before its
 // label.
 func ghostButton(c *ui.Context, iconName, label string) ui.Element {

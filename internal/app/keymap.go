@@ -42,6 +42,8 @@ func commands() []Command {
 	return []Command{
 		{"find_action", i18n.T("Find Action…"), "secondary-shift-a", true},
 		{"commit", i18n.T("Commit…"), "secondary-k", true},
+		{"generate_message", i18n.T("Generate Commit Message"), "secondary-shift-g", true},
+		{"ai_settings", i18n.T("AI Settings…"), "", false},
 		{"push", i18n.T("Push…"), "secondary-shift-k", true},
 		{"update", i18n.T("Update Project"), "secondary-t", true},
 		{"fetch", i18n.T("Fetch"), "", true},

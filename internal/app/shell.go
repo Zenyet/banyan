@@ -96,10 +96,19 @@ func (s *Shell) HasDialog() bool { return len(s.dialogs) > 0 }
 // Toast shows a message as a notification in the top right corner of the
 // window; kind is "error", "warning", "success" or "".
 func (s *Shell) Toast(kind, message string) {
+	s.ToastAction(kind, message, "", nil)
+}
+
+// ToastAction shows a notification with a button that runs onAction, as
+// Undo after a change.
+func (s *Shell) ToastAction(kind, message, action string, onAction func()) {
 	title, description, _ := strings.Cut(message, "\n")
-	t := ui.Toast{Title: title, Description: strings.TrimSpace(description), Type: kind}
+	t := ui.Toast{Title: title, Description: strings.TrimSpace(description), Type: kind, Action: action, OnAction: onAction}
 	if kind == "error" {
 		t.Timeout = 10e9
+	} else if action != "" {
+		// Time to notice the button after reading the message.
+		t.Timeout = 15e9
 	}
 	s.toasts = append(s.toasts, t)
 	// A shell of the tests has no window, and a window closed under a

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"runtime"
 	"slices"
 	"strconv"
@@ -9,15 +10,27 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"github.com/Zenyet/banyan/internal/ai"
 	"github.com/Zenyet/banyan/internal/git"
 	"github.com/Zenyet/banyan/internal/i18n"
 	"github.com/Zenyet/banyan/internal/settings"
 )
 
 // settingsShell is the Settings window (⌘,), while it is open: appearance,
-// git and diff/log preferences. Changes apply at once and are saved, as in
-// macOS settings windows.
+// git, diff/log, AI and shortcut preferences. Changes apply at once and are
+// saved, as in macOS settings windows.
 var settingsShell *Shell
+
+// The pages of the Settings window.
+const (
+	settingsPageAppearance = iota
+	settingsPageVersionControl
+	settingsPageDiff
+	settingsPageAI
+)
+
+// settingsWin is the content of settingsShell, to open it on a page.
+var settingsWin *settingsWindow
 
 type settingsWindow struct {
 	page int
@@ -33,16 +46,42 @@ type settingsWindow struct {
 	name, email         string
 	fallback, saveError string
 	saving              bool
+	// ai fields are the AI settings being edited; aiTools is whether an
+	// ACP agent may use its tools.
+	aiCommand, aiBaseURL, aiModel, aiKey, aiInstructions string
+	aiTools                                              bool
+	// The connection test and what it said.
+	aiTesting               bool
+	aiTestSeq               int
+	aiTestCfg               ai.Config
+	aiTestDetail, aiTestErr string
+	aiTestCancel            context.CancelFunc
 }
 
-func openSettings() {
+func openSettings() { openSettingsAt(settingsPageAppearance) }
+
+// openSettingsAt shows the Settings window on a page, opening it if needed.
+func openSettingsAt(page int) {
 	if settingsShell != nil {
+		settingsWin.page = page
 		settingsShell.Win.Show()
 		settingsShell.Win.Focus()
+		settingsShell.Win.Invalidate()
 		return
 	}
 	s := settings.Get()
-	sw := &settingsWindow{gitPath: s.GitPath, protected: s.ProtectedBranches, shortcuts: map[string]string{}}
+	sw := &settingsWindow{
+		page:           page,
+		gitPath:        s.GitPath,
+		protected:      s.ProtectedBranches,
+		shortcuts:      map[string]string{},
+		aiCommand:      s.AICommand,
+		aiBaseURL:      s.AIBaseURL,
+		aiModel:        s.AIModel,
+		aiKey:          s.AIAPIKey,
+		aiInstructions: s.AIInstructions,
+		aiTools:        s.AIAllowTools,
+	}
 	primary := "ctrl-"
 	if runtime.GOOS == "darwin" {
 		primary = "cmd-"
@@ -51,9 +90,15 @@ func openSettings() {
 		// In the field, ⌘ or Ctrl by name rather than secondary.
 		sw.shortcuts[cmd.ID] = strings.ReplaceAll(cmd.Keys(), "secondary-", primary)
 	}
+	settingsWin = sw
 	settingsShell = newWindow(withSidebar(mygo.WindowOptions{Title: i18n.T("Settings"), Width: 820, Height: 600}),
 		func(_ *Shell, c *ui.Context) { sw.view(c) })
-	settingsShell.onClosed = func() { settingsShell = nil }
+	settingsShell.onClosed = func() {
+		if settingsWin != nil {
+			settingsWin.cancelAITest()
+		}
+		settingsShell, settingsWin = nil, nil
+	}
 }
 
 type option struct{ key, label string }
@@ -91,9 +136,11 @@ var firstSetting bool
 // control on the right, or below them when vertical.
 func settingRow(c *ui.Context, key, title, description string, vertical bool, control func()) {
 	t := c.Theme()
-	row := ui.Row(c.Key(key)).Gap(16).PaddingY(10)
+	var row ui.Element
 	if vertical {
 		row = ui.Column(c.Key(key)).Gap(6).PaddingY(10)
+	} else {
+		row = ui.Row(c.Key(key)).Gap(16).PaddingY(10)
 	}
 	if !firstSetting {
 		row.BorderWidth(1, 0, 0, 0).BorderColor(t.Border)
@@ -129,6 +176,7 @@ func (sw *settingsWindow) view(c *ui.Context) {
 		{"settings", i18n.T("Appearance")},
 		{"git-branch", i18n.T("Version Control")},
 		{"git-compare", i18n.T("Diff and Log")},
+		{"sparkles", i18n.T("AI")},
 		{"keyboard", i18n.T("Keyboard Shortcuts")},
 	}
 	ui.Row(c).Fill().Children(func() {
@@ -156,12 +204,14 @@ func (sw *settingsWindow) view(c *ui.Context) {
 			paneTitle(c, pages[sw.page].title)
 			ui.Scroll(c.Key(sw.page)).Grow(1).Padding(0, 24, 24, 24).Children(func() {
 				switch sw.page {
-				case 0:
+				case settingsPageAppearance:
 					sw.appearance(c, &s)
-				case 1:
+				case settingsPageVersionControl:
 					sw.versionControl(c, &s)
-				case 2:
+				case settingsPageDiff:
 					sw.diffAndLog(c, &s)
+				case settingsPageAI:
+					sw.ai(c, &s)
 				default:
 					sw.keymap(c)
 				}
@@ -382,6 +432,219 @@ func (sw *settingsWindow) diffAndLog(c *ui.Context, s *settings.Settings) {
 			choice(c, options, strconv.Itoa(s.LogPageSize), func(s *settings.Settings, v string) { s.LogPageSize, _ = strconv.Atoi(v) })
 		})
 	})
+}
+
+// aiConfig is the AI settings as the generator takes them.
+func (sw *settingsWindow) aiConfig(s *settings.Settings) ai.Config {
+	return ai.Config{
+		Provider:      ai.ProviderFromKey(s.AIProvider),
+		Command:       strings.TrimSpace(sw.aiCommand),
+		BaseURL:       strings.TrimSpace(sw.aiBaseURL),
+		Model:         strings.TrimSpace(sw.aiModel),
+		APIKey:        strings.TrimSpace(sw.aiKey),
+		Instructions:  strings.TrimSpace(sw.aiInstructions),
+		AllowTools:    sw.aiTools,
+		ClientVersion: Version,
+	}
+}
+
+// ai is Settings › AI: where commit messages come from, and how.
+func (sw *settingsWindow) ai(c *ui.Context, s *settings.Settings) {
+	t := c.Theme()
+	provider := ai.ProviderFromKey(s.AIProvider)
+	muted(c, i18n.Tf("The ✨ button above the commit message writes one from the checked changes; {} does too.", displayKeys("secondary-shift-g"))).
+		Margin(18, 4, 8, 4)
+
+	settingsGroup(c, i18n.T("Provider"), i18n.T("Commit messages can come from an agent you already use, or from a model's API."), func() {
+		settingRow(c, "ai-provider", i18n.T("Generate with"), "", false, func() {
+			var options []option
+			for _, p := range ai.AllProviders {
+				options = append(options, option{string(p), p.Label()})
+			}
+			choice(c, options, string(provider), func(s *settings.Settings, v string) { s.AIProvider = v })
+		})
+	})
+	if provider == ai.ProviderOff {
+		muted(c, i18n.T("Choose a provider to turn AI commit messages on.")).Margin(18, 10, 6, 6)
+		return
+	}
+	if provider == ai.ProviderACP {
+		settingsGroup(c, i18n.T("ACP agent"),
+			i18n.T("Banyan runs this command in the repository and asks it over the Agent Client Protocol. The agent uses its own login and model, and never leaves the repository."),
+			func() {
+				settingRow(c, "ai-command", i18n.T("Agent command"), i18n.T("For example an ACP adapter for the agent you use. Use its full path if Banyan cannot find it."), true, func() {
+					ui.Row(c).Gap(8).Children(func() {
+						if ui.TextInput(c.Key("ai-command-input"), &sw.aiCommand).
+							Placeholder("npx -y @agentclientprotocol/claude-agent-acp").Grow(1).Changed() {
+							command := strings.TrimSpace(sw.aiCommand)
+							changeSettings(func(s *settings.Settings) { s.AICommand = command })
+						}
+						button(c.Key("examples"), i18n.T("Examples")).Menu(func(m *ui.Menu) {
+							for _, example := range []struct{ name, command string }{
+								{"Claude Code", "npx -y @agentclientprotocol/claude-agent-acp"},
+								{"Codex", "npx -y @zed-industries/codex-acp"},
+								{"Gemini CLI", "gemini --experimental-acp"},
+							} {
+								if m.Item(example.name).Chosen() {
+									sw.aiCommand = example.command
+									changeSettings(func(s *settings.Settings) { s.AICommand = example.command })
+								}
+							}
+						})
+					})
+				})
+				settingRow(c, "ai-tools", i18n.T("Let the agent use its tools"),
+					i18n.T("The agent may read files and run commands in the repository. Turn off to answer from the diff alone."), false, func() {
+						tools := sw.aiTools
+						if ui.Checkbox(c.Key("ai-tools-check"), &tools, i18n.T("Allow")).Changed() {
+							sw.aiTools = tools
+							changeSettings(func(s *settings.Settings) { s.AIAllowTools = tools })
+						}
+					})
+			})
+	} else {
+		base, model := "https://api.openai.com/v1", "gpt-4.1-mini"
+		switch provider {
+		case ai.ProviderAnthropic:
+			base, model = "https://api.anthropic.com", "claude-sonnet-4-5"
+		case ai.ProviderCompatible:
+			base, model = "http://localhost:11434/v1", "llama3.2"
+		}
+		settingsGroup(c, i18n.T("Model"), i18n.T("Banyan sends the diff of the checked changes and asks for a commit message."), func() {
+			settingRow(c, "ai-base-url", i18n.T("Base URL"), i18n.Tf("Leave empty for {}.", base), true, func() {
+				if ui.TextInput(c.Key("ai-base-url-input"), &sw.aiBaseURL).Placeholder(base).FillWidth().Changed() {
+					value := strings.TrimSpace(sw.aiBaseURL)
+					changeSettings(func(s *settings.Settings) { s.AIBaseURL = value })
+				}
+			})
+			settingRow(c, "ai-model", i18n.T("Model"), "", true, func() {
+				if ui.TextInput(c.Key("ai-model-input"), &sw.aiModel).Placeholder(model).FillWidth().Changed() {
+					value := strings.TrimSpace(sw.aiModel)
+					changeSettings(func(s *settings.Settings) { s.AIModel = value })
+				}
+			})
+			description := i18n.T("Stored in Banyan's settings file, which only you can read.")
+			if provider == ai.ProviderCompatible {
+				description = i18n.T("Stored in Banyan's settings file. Leave empty for a server that needs no key.")
+			}
+			settingRow(c, "ai-key", i18n.T("API key"), description, true, func() {
+				if ui.TextInput(c.Key("ai-key-input"), &sw.aiKey).Password().Placeholder("sk-…").FillWidth().Changed() {
+					value := strings.TrimSpace(sw.aiKey)
+					changeSettings(func(s *settings.Settings) { s.AIAPIKey = value })
+				}
+			})
+		})
+	}
+	settingsGroup(c, i18n.T("Commit Message"), i18n.T("Most logs show only the first line; a body can explain why a change was made."), func() {
+		settingRow(c, "ai-message", i18n.T("Length"), "", false, func() {
+			current := "body"
+			if s.AISubjectOnly {
+				current = "one"
+			}
+			choice(c, []option{
+				{"one", i18n.T("One line")},
+				{"body", i18n.T("Subject and body")},
+			}, current, func(s *settings.Settings, v string) { s.AISubjectOnly = v == "one" })
+		})
+		settingRow(c, "ai-style", i18n.T("Style"), i18n.T("The shape of the subject line."), false, func() {
+			var options []option
+			for _, style := range ai.AllStyles {
+				options = append(options, option{string(style), style.Label()})
+			}
+			choice(c, options, s.AIStyle, func(s *settings.Settings, v string) { s.AIStyle = v })
+		})
+	})
+	settingsGroup(c, i18n.T("Custom Prompt"), i18n.T("Optional words added to every request: a commit style, a tone, a language, or what to emphasize."), func() {
+		settingRow(c, "ai-instructions", i18n.T("Custom instructions"), "", true, func() {
+			if ui.TextArea(c.Key("ai-instructions-input"), &sw.aiInstructions).Lines(2, 6).
+				Placeholder(i18n.T("e.g. Use Conventional Commits, mention the affected package")).FillWidth().Changed() {
+				value := strings.TrimSpace(sw.aiInstructions)
+				changeSettings(func(s *settings.Settings) { s.AIInstructions = value })
+			}
+		})
+	})
+
+	cfg := sw.aiConfig(s)
+	problem := cfg.Validate()
+	ui.Row(c.Key("ai-ready")).FillWidth().Padding(18, 6, 6, 6).Gap(8).Children(func() {
+		if problem != nil {
+			ui.Icon(c, icon("triangle-alert")).TextColor(t.Warning)
+			ui.Text(c, i18n.Tf("Not ready: {}", problem.Error())).TextColor(t.Warning).Grow(1).Shrink(1)
+		} else {
+			ui.Icon(c, icon("circle-check")).TextColor(t.Success)
+			ui.Text(c, i18n.T("Ready to write commit messages")).TextColor(t.Success).Grow(1).Shrink(1)
+		}
+		testing := sw.aiTesting && sw.aiTestCfg == cfg
+		if testing {
+			if button(c.Key("ai-test"), i18n.T("Cancel")).Clicked() {
+				sw.cancelAITest()
+			}
+		} else if button(c.Key("ai-test"), i18n.T("Test Connection")).
+			Tooltip(i18n.T("Sends a small request to the provider.")).
+			Disabled(problem != nil).Clicked() {
+			sw.testAI(cfg)
+		}
+	})
+	switch {
+	case sw.aiTesting && sw.aiTestCfg == cfg:
+		ui.Row(c.Key("ai-test-status")).FillWidth().Padding(0, 18, 6, 6).Gap(8).Children(func() {
+			ui.Spinner(c).Size(14, 14)
+			muted(c, i18n.T("Testing the connection…")).SingleLine()
+		})
+	case sw.aiTestCfg == cfg && sw.aiTestErr != "":
+		ui.Row(c.Key("ai-test-status")).FillWidth().Padding(0, 18, 6, 6).Gap(8).Children(func() {
+			ui.Icon(c, icon("triangle-alert")).TextColor(t.Danger)
+			ui.Text(c, sw.aiTestErr).TextColor(t.Danger).MaxLines(4).Grow(1).Shrink(1).Selectable()
+		})
+	case sw.aiTestCfg == cfg && sw.aiTestDetail != "":
+		ui.Row(c.Key("ai-test-status")).FillWidth().Padding(0, 18, 6, 6).Gap(8).Children(func() {
+			ui.Icon(c, icon("circle-check")).TextColor(t.Success)
+			ui.Text(c, i18n.Tf("Connected: {}", sw.aiTestDetail)).TextColor(t.Success).Grow(1).Shrink(1)
+		})
+	}
+}
+
+// testAI checks the configured provider with a small request; the answer
+// shows under the settings, next to the Test Connection button.
+func (sw *settingsWindow) testAI(cfg ai.Config) {
+	if sw.aiTestCancel != nil {
+		sw.aiTestCancel()
+	}
+	sw.aiTestSeq++
+	seq := sw.aiTestSeq
+	ctx, cancel := context.WithCancel(context.Background())
+	sw.aiTestCancel = cancel
+	sw.aiTesting = true
+	sw.aiTestCfg = cfg
+	sw.aiTestDetail, sw.aiTestErr = "", ""
+	go func() {
+		detail, err := ai.Check(ctx, cfg)
+		mygo.RunOnMain(func() {
+			if seq != sw.aiTestSeq {
+				return
+			}
+			sw.aiTesting = false
+			sw.aiTestCancel = nil
+			if err != nil {
+				sw.aiTestErr = err.Error()
+			} else {
+				sw.aiTestDetail = detail
+			}
+			if settingsShell != nil {
+				settingsShell.Win.Invalidate()
+			}
+		})
+	}()
+}
+
+// cancelAITest stops a connection test, as closing the window does.
+func (sw *settingsWindow) cancelAITest() {
+	if sw.aiTestCancel != nil {
+		sw.aiTestCancel()
+	}
+	sw.aiTestSeq++
+	sw.aiTestCancel = nil
+	sw.aiTesting = false
 }
 
 func (sw *settingsWindow) keymap(c *ui.Context) {

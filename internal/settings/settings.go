@@ -92,7 +92,29 @@ type Settings struct {
 	// OpenInNewWindow opens repositories in a window of their own, not as
 	// a tab.
 	OpenInNewWindow bool
-	Recent          []string
+	// AIProvider is how commit messages are generated: empty for off, else
+	// "acp", "openai", "anthropic" or "compatible"; see package ai.
+	AIProvider string
+	// AICommand is the command of the ACP agent, run in the repository.
+	AICommand string
+	// AIBaseURL is the HTTP provider's base URL; empty means the
+	// provider's own.
+	AIBaseURL string
+	AIModel   string
+	// AIAPIKey is stored in this file, which only the user can read.
+	AIAPIKey string
+	// AIInstructions are extra words for the model, such as a commit
+	// style.
+	AIInstructions string
+	// AIAllowTools lets an ACP agent use its tools, and perhaps run
+	// commands in the repository; off, it answers from the diff alone.
+	AIAllowTools bool
+	// AISubjectOnly writes only the subject line, without a body.
+	AISubjectOnly bool
+	// AIStyle is the shape of the subject: empty for the repository's own,
+	// else "conventional", "gitmoji" or "plain"; see package ai.
+	AIStyle string
+	Recent  []string
 	// Session is the repositories open in the last window used, the one
 	// shown first.
 	Session []string
@@ -108,6 +130,7 @@ func Default() Settings {
 		UpdateMethod:      git.UpdateMerge,
 		LogPageSize:       5000,
 		ProtectedBranches: "main master",
+		AISubjectOnly:     true,
 	}
 }
 
@@ -159,7 +182,8 @@ func Update(f func(*Settings)) {
 		return
 	}
 	os.MkdirAll(filepath.Dir(path), 0o755)
-	os.WriteFile(path, []byte(text), 0o644)
+	os.WriteFile(path, []byte(text), 0o600)
+	os.Chmod(path, 0o600)
 }
 
 // IsProtected reports whether branch (a local name, or a remote one such as
@@ -366,7 +390,7 @@ func readOrMigrate(path string) string {
 		return ""
 	}
 	os.MkdirAll(filepath.Dir(path), 0o755)
-	os.WriteFile(path, text, 0o644)
+	os.WriteFile(path, text, 0o600)
 	return string(text)
 }
 
@@ -414,6 +438,24 @@ func parse(text string) Settings {
 			s.Session = append(s.Session, value)
 		case "open_in":
 			s.OpenInNewWindow = value == "window"
+		case "ai_provider":
+			s.AIProvider = value
+		case "ai_command":
+			s.AICommand = value
+		case "ai_base_url":
+			s.AIBaseURL = value
+		case "ai_model":
+			s.AIModel = value
+		case "ai_key":
+			s.AIAPIKey = value
+		case "ai_instructions":
+			s.AIInstructions = unescape(value)
+		case "ai_tools":
+			s.AIAllowTools = value != "off"
+		case "ai_subject_only":
+			s.AISubjectOnly = value != "off"
+		case "ai_style":
+			s.AIStyle = value
 		case "message":
 			s.Messages = append(s.Messages, unescape(value))
 		case "shortcut":
@@ -450,6 +492,15 @@ func (s *Settings) text() string {
 	line("log_page", strconv.Itoa(s.LogPageSize))
 	line("protected", s.ProtectedBranches)
 	line("open_in", choose(s.OpenInNewWindow, "window", "tab"))
+	line("ai_provider", s.AIProvider)
+	line("ai_command", s.AICommand)
+	line("ai_base_url", s.AIBaseURL)
+	line("ai_model", s.AIModel)
+	line("ai_key", s.AIAPIKey)
+	line("ai_instructions", escape(s.AIInstructions))
+	line("ai_tools", choose(s.AIAllowTools, "on", "off"))
+	line("ai_subject_only", choose(s.AISubjectOnly, "on", "off"))
+	line("ai_style", s.AIStyle)
 	for _, repo := range s.Recent {
 		line("recent", repo)
 	}

@@ -99,6 +99,11 @@ type ChangesView struct {
 	list        ui.ListState
 	listWidth   float32
 	historyOpen bool
+	// generating is set while a provider writes a message; genCancel stops
+	// it and genSeq drops a result that comes too late.
+	generating bool
+	genCancel  func()
+	genSeq     int
 }
 
 func newChangesView(ws *Workspace) *ChangesView {
@@ -370,6 +375,9 @@ func (cv *ChangesView) setAmend(amend bool) {
 }
 
 func (cv *ChangesView) commit(push bool) {
+	if cv.generating {
+		cv.cancelGenerate()
+	}
 	m := cv.ws.Model
 	message := strings.TrimSpace(cv.message)
 	if message == "" {
@@ -915,6 +923,19 @@ func (cv *ChangesView) commitBox(c *ui.Context) {
 			amend := cv.amend
 			if ui.Checkbox(c.Key("amend"), &amend, i18n.T("Amend")).Changed() {
 				cv.setAmend(amend)
+			}
+			if cv.generating {
+				if spinnerButton(c.Key("generating"), i18n.T("Cancel generating")).Clicked() {
+					cv.cancelGenerate()
+				}
+			} else {
+				tip := i18n.T("Generate Commit Message")
+				if keys := commandByID("generate_message").Keys(); keys != "" {
+					tip += " (" + displayKeys(keys) + ")"
+				}
+				if iconButton(c.Key("generate"), "sparkles", tip).Clicked() {
+					cv.generateCommitMessage()
+				}
 			}
 			iconButton(c.Key("history"), "clock", i18n.T("Commit Message History")).Menu(func(menu *ui.Menu) {
 				messages := settings.Get().Messages

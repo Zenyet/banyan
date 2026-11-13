@@ -22,6 +22,7 @@ func setMenu() {
 			{Role: mygo.RoleAbout},
 			mygo.Separator(),
 			item("settings"),
+			item("ai_settings"),
 			mygo.Separator(),
 			{Role: mygo.RoleHide},
 			{Role: mygo.RoleHideOthers},
@@ -42,6 +43,8 @@ func setMenu() {
 			item("find_action"),
 			mygo.Separator(),
 			item("commit"),
+			item("generate_message"),
+			mygo.Separator(),
 			item("push"),
 			item("update"),
 			item("fetch"),
@@ -110,6 +113,9 @@ func runCommand(id string, w *mygo.Window) {
 		return
 	case "settings":
 		openSettings()
+		return
+	case "ai_settings":
+		openSettingsAt(settingsPageAI)
 		return
 	case "quit":
 		quit()

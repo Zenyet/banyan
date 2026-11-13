@@ -83,6 +83,7 @@ func (ws *Workspace) Close() {
 	if ws.editor != nil {
 		ws.editor.Close()
 	}
+	ws.changes.cancelGenerate()
 	ws.off()
 	ws.Model.Close()
 	// Its diffs in windows of their own go with it.
@@ -106,6 +107,11 @@ func (ws *Workspace) Command(id string) {
 	case "commit":
 		ws.setTab(tabCommit)
 		ws.changes.focusMessage()
+	case "generate_message":
+		ws.setTab(tabCommit)
+		ws.changes.generateCommitMessage()
+	case "ai_settings":
+		openSettingsAt(settingsPageAI)
 	case "save":
 		if ws.editor != nil {
 			ws.editor.SaveCurrent()

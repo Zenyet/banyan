@@ -70,6 +70,10 @@ Banyan 最初用 Rust 和 [GPUI](https://gpui.rs) 编写，直到 0.1.6；现在
 - 可提交整个文件、单个代码块（hunk）或单独的行。
 - 提交、修改上次提交（amend）、提交并推送、回滚和储藏。会记住最近的提交信息，
   并提示超过 72 个字符的标题或标题与正文之间缺少空行。
+- **AI 提交信息**：提交信息上方的 ✨ 按钮（或 <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>G</kbd>）会根据勾选的更改生成简洁的单行信息；
+  可在 设置 › AI 中改为同时生成正文。可选择你已在使用的 ACP 智能体（Claude Code、Codex、Gemini CLI，或任何支持
+  Agent Client Protocol 的命令），也可选择 OpenAI、Anthropic 或 OpenAI 兼容模型。设置 › AI 还可选择信息风格
+  （跟随仓库、Conventional Commits、Gitmoji 或纯文本）、自定义指令，并测试提供方连接；生成期间你输入的内容会保留。
 - **储藏更改**（Stash Changes）可以只储藏勾选的文件、排除未版本控制的文件或保留暂存区；
   储藏可以弹出、应用、删除，或取出到新分支。
 - 对本地更改可添加到 `.gitignore`、复制路径、在访达中显示。
@@ -221,10 +225,11 @@ go run .                 # 打开当前所在的仓库
 
 在 <kbd>⌘</kbd> <kbd>,</kbd> 中可以设置主题（浅色、深色或跟随 macOS）、语言、字号、相对或绝对日期、
 提交所用的姓名和邮箱（写入 git 全局配置）、git 可执行文件、更新项目的默认方式、后台获取、
-并排或统一差异，以及日志每次加载的提交数。
+并排或统一差异、日志每次加载的提交数，以及 AI 提交信息的来源。
 
 设置、最近的仓库和最近的提交信息保存在 `Banyan/settings` 中，位于 macOS 的 `~/Library/Application Support`、
-Windows 的 `%APPDATA%` 或 Linux 的 `~/.config` 下。首次启动时会迁移 Banyan 旧名 GitBrains 的设置。
+Windows 的 `%APPDATA%` 或 Linux 的 `~/.config` 下；文件仅你可读，因为其中可能保存 AI 提供方的 API 密钥。
+首次启动时会迁移 Banyan 旧名 GitBrains 的设置。
 
 ## 开发
 
@@ -242,6 +247,7 @@ go test ./...      # 提交图布局、引用解析，以及在临时仓库上�
 | `internal/graph` | 提交图泳道布局 |
 | `internal/model` | 共享的仓库状态；在后台运行操作、监视仓库并广播刷新 |
 | `internal/patch`、`internal/conflict`、`internal/changelists` | 部分提交、合并冲突和更改列表 |
+| `internal/ai` | 生成提交信息：OpenAI 兼容 API 或 ACP 智能体 |
 | `internal/settings` | 持久化的设置、最近的仓库和提交信息 |
 | `internal/i18n` | 英文和简体中文文案 |
 | `internal/askpass` | git 和 ssh 的凭据提示 |
