@@ -81,6 +81,14 @@ type LogView struct {
 	list        ui.ListState
 	query       string
 	search      ui.Handle
+	// searchText are the commits' subjects, authors and refs in lower
+	// case, to match a query against without lowercasing them again on
+	// every keystroke. searchGen is the logGen they were made for, and
+	// filteredQuery the query the rows were last filtered by, which a
+	// refined query narrows them from.
+	searchText    []string
+	searchGen     int
+	filteredQuery string
 	// focusSearchNext focuses the search box in the next frame.
 	focusSearchNext bool
 	branchFilter    string
@@ -167,10 +175,22 @@ func newLogView(ws *Workspace) *LogView {
 	}
 	lv.diff.Remote = ws.Model.Repo.IsPartialClone()
 	lv.diff.WindowTitle = func() string { return i18n.Tf("Log Diff – {}", ws.Model.Repo.Name()) }
-	lv.list.Key = func(i int) any { return lv.commits[lv.rows[i]].ID }
+	// The row past the commits offers to load or search more, and is no
+	// commit: it needs a key and a name of its own.
+	lv.list.Key = func(i int) any {
+		if i >= len(lv.rows) {
+			return "more"
+		}
+		return lv.commits[lv.rows[i]].ID
+	}
 	lv.list.Selected = &lv.selectedRow
 	lv.list.Selection = &lv.chosen
-	lv.list.Label = func(i int) string { return lv.commits[lv.rows[i]].Subject }
+	lv.list.Label = func(i int) string {
+		if i >= len(lv.rows) {
+			return ""
+		}
+		return lv.commits[lv.rows[i]].Subject
+	}
 	lv.branchList.Selected = &lv.branchSelected
 	lv.fileList.Selected = &lv.fileRow
 	lv.fileList.Key = func(i int) any { return "f:" + lv.fileRows[i].Node.Path }
@@ -342,28 +362,79 @@ func (lv *LogView) rebuildBranches() {
 
 func (lv *LogView) applyFilter() {
 	query := strings.ToLower(strings.TrimSpace(lv.query))
+	rebuilt := false
+	if lv.searchGen != lv.logGen || len(lv.searchText) != len(lv.commits) {
+		rebuilt = true
+		lv.searchGen = lv.logGen
+		lv.searchText = make([]string, len(lv.commits))
+		for ix := range lv.commits {
+			lv.searchText[ix] = commitSearchText(&lv.commits[ix])
+		}
+		lv.filteredQuery = ""
+	}
 	// Git has already matched every message, bodies included.
 	searchedByGit := lv.grep != "" && strings.ToLower(lv.grep) == query
-	lv.rows = lv.rows[:0]
-	for ix, c := range lv.commits {
-		if query == "" || searchedByGit || strings.HasPrefix(c.ID, query) ||
-			strings.Contains(strings.ToLower(c.Subject), query) || strings.Contains(strings.ToLower(c.Author), query) ||
-			slices.ContainsFunc(c.Refs, func(r git.RefLabel) bool { return strings.Contains(strings.ToLower(r.Name), query) }) {
-			lv.rows = append(lv.rows, ix)
+	// A query that begins with the last one only matches some of what it
+	// matched: look through those rows again, not through every commit.
+	narrow := !rebuilt && query != "" && strings.HasPrefix(query, lv.filteredQuery)
+	rows := lv.rows[:0]
+	switch {
+	case query == "" || searchedByGit:
+		for ix := range lv.commits {
+			rows = append(rows, ix)
+		}
+	case narrow:
+		// Dropping rows in place is safe: a kept row never moves forward
+		// over one not read yet.
+		for _, ix := range lv.rows {
+			if lv.matchCommit(ix, query) {
+				rows = append(rows, ix)
+			}
+		}
+	default:
+		for ix := range lv.commits {
+			if lv.matchCommit(ix, query) {
+				rows = append(rows, ix)
+			}
 		}
 	}
+	lv.rows = rows
+	lv.filteredQuery = query
 	// Commits no longer shown leave the choice.
-	shown := map[string]bool{}
-	for _, ix := range lv.rows {
-		shown[lv.commits[ix].ID] = true
-	}
-	for id := range lv.chosen.All() {
-		if !shown[id] {
-			lv.chosen.Remove(id)
+	if lv.chosen.Len() > 0 {
+		shown := map[string]bool{}
+		for _, ix := range lv.rows {
+			shown[lv.commits[ix].ID] = true
+		}
+		for id := range lv.chosen.All() {
+			if !shown[id] {
+				lv.chosen.Remove(id)
+			}
 		}
 	}
 	lv.selectedRow = lv.rowOf(lv.selected)
 	lv.shownRow = lv.selectedRow
+}
+
+// matchCommit reports whether commit ix matches query, in lower case: its
+// subject, its author or a ref contains it, or its hash begins with it.
+func (lv *LogView) matchCommit(ix int, query string) bool {
+	return strings.HasPrefix(lv.commits[ix].ID, query) || strings.Contains(lv.searchText[ix], query)
+}
+
+// commitSearchText is what the search matches a commit by: its subject,
+// its author and its refs, in lower case, apart.
+func commitSearchText(c *git.Commit) string {
+	var b strings.Builder
+	b.Grow(len(c.Subject) + len(c.Author) + 16)
+	b.WriteString(strings.ToLower(c.Subject))
+	b.WriteByte(0)
+	b.WriteString(strings.ToLower(c.Author))
+	for _, r := range c.Refs {
+		b.WriteByte(0)
+		b.WriteString(strings.ToLower(r.Name))
+	}
+	return b.String()
 }
 
 func (lv *LogView) isFiltered() bool { return strings.TrimSpace(lv.query) != "" }
