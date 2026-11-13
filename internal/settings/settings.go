@@ -117,7 +117,15 @@ type Settings struct {
 	// AILanguage is the commit message's language: empty for the
 	// interface's, "repository", "en" or "zh".
 	AILanguage string
-	Recent     []string
+	// AutoCheckUpdates checks GitHub releases after launch, at most once
+	// a day.
+	AutoCheckUpdates bool
+	// LastUpdateCheck is when that last happened, in Unix seconds.
+	LastUpdateCheck int64
+	// SkippedUpdate is a version the user asked not to be told about
+	// again.
+	SkippedUpdate string
+	Recent        []string
 	// Session is the repositories open in the last window used, the one
 	// shown first.
 	Session []string
@@ -134,6 +142,7 @@ func Default() Settings {
 		LogPageSize:       5000,
 		ProtectedBranches: "main master",
 		AISubjectOnly:     true,
+		AutoCheckUpdates:  true,
 	}
 }
 
@@ -219,11 +228,7 @@ func defaultGit() string {
 	gitFound.Lock()
 	defer gitFound.Unlock()
 	if gitFound.program == "" {
-		dir := ""
-		if exe, err := os.Executable(); err == nil {
-			dir = filepath.Dir(exe)
-		}
-		gitFound.program = findGit(exec.LookPath, dir, runtime.GOOS, os.Getenv)
+		gitFound.program = findGit(exec.LookPath, runtime.GOOS, os.Getenv)
 	}
 	return gitFound.program
 }
@@ -242,28 +247,22 @@ func FindGitAgain() {
 
 // findGit is "git" when lookPath finds it. On Windows, it is else the one
 // Git for Windows installs, which the PATH of an app started before it
-// lacks, or else the one Banyan's packages bring beside the app in dir,
-// MinGit in git\. Without any it is "git" still, which then fails to run,
-// saying so.
-func findGit(lookPath func(string) (string, error), dir, goos string, getenv func(string) string) string {
+// lacks. Without any it is "git" still, which then fails to run, saying
+// so, and the app shows how to install Git.
+func findGit(lookPath func(string) (string, error), goos string, getenv func(string) string) string {
 	if _, err := lookPath("git"); err == nil {
 		return "git"
 	}
 	if goos != "windows" {
 		return "git"
 	}
-	var candidates []string
 	for _, root := range []string{getenv("ProgramFiles"), filepath.Join(getenv("LOCALAPPDATA"), "Programs")} {
-		if root != "" && root != "Programs" {
-			candidates = append(candidates, filepath.Join(root, "Git", "cmd", "git.exe"))
+		if root == "" || root == "Programs" {
+			continue
 		}
-	}
-	if dir != "" {
-		candidates = append(candidates, filepath.Join(dir, "git", "cmd", "git.exe"))
-	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c
+		candidate := filepath.Join(root, "Git", "cmd", "git.exe")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
 		}
 	}
 	return "git"
@@ -461,6 +460,14 @@ func parse(text string) Settings {
 			s.AIStyle = value
 		case "ai_language":
 			s.AILanguage = value
+		case "check_updates":
+			s.AutoCheckUpdates = value != "off"
+		case "update_checked":
+			if n, err := strconv.ParseInt(value, 10, 64); err == nil {
+				s.LastUpdateCheck = n
+			}
+		case "skipped_update":
+			s.SkippedUpdate = value
 		case "message":
 			s.Messages = append(s.Messages, unescape(value))
 		case "shortcut":
@@ -507,6 +514,9 @@ func (s *Settings) text() string {
 	line("ai_subject_only", choose(s.AISubjectOnly, "on", "off"))
 	line("ai_style", s.AIStyle)
 	line("ai_language", s.AILanguage)
+	line("check_updates", choose(s.AutoCheckUpdates, "on", "off"))
+	line("update_checked", strconv.FormatInt(s.LastUpdateCheck, 10))
+	line("skipped_update", s.SkippedUpdate)
 	for _, repo := range s.Recent {
 		line("recent", repo)
 	}

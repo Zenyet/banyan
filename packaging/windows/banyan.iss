@@ -33,8 +33,6 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "{#Source}\banyan.exe"; DestDir: "{app}"; Flags: ignoreversion
-; MinGit, which Banyan runs when the computer has no Git.
-Source: "{#Source}\git\*"; DestDir: "{app}\git"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\Banyan"; Filename: "{app}\banyan.exe"

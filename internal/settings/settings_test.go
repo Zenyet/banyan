@@ -66,6 +66,9 @@ func TestSettingsRoundTrip(t *testing.T) {
 		AISubjectOnly:     true,
 		AIStyle:           "conventional",
 		AILanguage:        "zh",
+		AutoCheckUpdates:  false,
+		LastUpdateCheck:   1700000000,
+		SkippedUpdate:     "0.3.0",
 		Recent:            []string{"/tmp/repo"},
 		Session:           []string{"/tmp/a", "/tmp/b"},
 		Messages:          []string{"Fix\n\nDetails"},
@@ -86,11 +89,11 @@ func TestSettingsRoundTrip(t *testing.T) {
 }
 
 // Git comes from the PATH, else on Windows from where Git for Windows
-// installs, else from beside the app, where its packages bring one.
+// installs.
 func TestFindGit(t *testing.T) {
 	found := func(string) (string, error) { return "/usr/bin/git", nil }
 	missing := func(string) (string, error) { return "", exec.ErrNotFound }
-	dir, programs := t.TempDir(), t.TempDir()
+	programs := t.TempDir()
 	env := func(key string) string {
 		if key == "ProgramFiles" {
 			return programs
@@ -106,23 +109,18 @@ func TestFindGit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := findGit(found, dir, "windows", env); got != "git" {
+	if got := findGit(found, "windows", env); got != "git" {
 		t.Errorf("on the PATH: %s", got)
 	}
-	if got := findGit(missing, dir, "windows", env); got != "git" {
+	if got := findGit(missing, "windows", env); got != "git" {
 		t.Errorf("none anywhere: %s", got)
-	}
-	bundled := filepath.Join(dir, "git", "cmd", "git.exe")
-	touch(bundled)
-	if got := findGit(missing, dir, "windows", env); got != bundled {
-		t.Errorf("bundled: %s", got)
 	}
 	installed := filepath.Join(programs, "Git", "cmd", "git.exe")
 	touch(installed)
-	if got := findGit(missing, dir, "windows", env); got != installed {
-		t.Errorf("installed, before the bundled one: %s", got)
+	if got := findGit(missing, "windows", env); got != installed {
+		t.Errorf("installed: %s", got)
 	}
-	if got := findGit(missing, dir, "darwin", env); got != "git" {
+	if got := findGit(missing, "darwin", env); got != "git" {
 		t.Errorf("not on Windows: %s", got)
 	}
 }

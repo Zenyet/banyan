@@ -165,9 +165,9 @@ where it builds with `cargo` as before.
 ## Installation
 
 Download the package for your system from the [latest release](https://github.com/Zenyet/banyan/releases/latest).
-Banyan runs `git` for everything it does. The Windows packages bring their own, Git for Windows' MinGit
-(GPLv2, its licenses inside), used when the computer has no Git; elsewhere, install `git` first. Without one,
-Banyan says how to get it.
+Banyan runs `git` for everything it does, so install `git` first: Git for Windows on Windows, Apple's command
+line tools or Git on macOS, and your distribution's package on Linux. If Banyan cannot find it, it says how to
+install it and where to set its path.
 
 | System | Package |
 | --- | --- |
@@ -243,6 +243,14 @@ in **Settings › Keyboard Shortcuts**, and **Find Action** runs any of them by 
 
 Settings › Keyboard Shortcuts lists them all.
 
+### Updates
+
+Banyan checks GitHub releases once a day. **Settings › Updates** shows the current version and the last check, and
+can check at once. When a newer version is there, **Install and Restart** downloads it, checks its SHA-256, and
+replaces Banyan: the installer on Windows, the app bundle on macOS, and the binary from the tarball on Linux. A
+Banyan installed from a Linux package is pointed at the release page instead, so its package manager stays in
+charge. The **Check for Updates…** menu item checks without waiting for the day.
+
 ### Settings
 
 Under <kbd>⌘</kbd> <kbd>,</kbd> you can set the theme (light, dark, or follow macOS), the language, font size,
@@ -271,6 +279,7 @@ go test ./...      # graph layout, ref parsing, and git operations against throw
 | `internal/model` | Shared repo state; runs ops in the background, watches the repository and broadcasts refreshes |
 | `internal/patch`, `internal/conflict`, `internal/changelists` | Partial commits, merge conflicts and changelists |
 | `internal/ai` | Commit messages, from an OpenAI-compatible API or an ACP agent |
+| `internal/update` | Checks GitHub releases and installs a newer Banyan |
 | `internal/settings` | Persisted settings, recent repositories and commit messages |
 | `internal/i18n` | English and Simplified Chinese strings |
 | `internal/askpass` | Credential prompts for git and ssh |
@@ -288,5 +297,4 @@ go test ./...      # graph layout, ref parsing, and git operations against throw
 
 ## License
 
-Banyan is released under the [MIT License](LICENSE). The Windows packages also include Git for Windows' MinGit,
-which keeps its own license (GPLv2).
+Banyan is released under the [MIT License](LICENSE).

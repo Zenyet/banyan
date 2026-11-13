@@ -145,8 +145,8 @@ Banyan 最初用 Rust 和 [GPUI](https://gpui.rs) 编写，直到 0.1.6；现在
 ## 安装
 
 从 [最新发布](https://github.com/Zenyet/banyan/releases/latest) 下载适合你系统的安装包。
-Banyan 的所有操作都通过 `git` 完成。Windows 安装包自带 Git for Windows 的 MinGit（GPLv2，许可证随附），
-在电脑上没有 Git 时使用；其他系统请先安装 `git`。如果找不到 git，Banyan 会提示如何获取。
+Banyan 的所有操作都通过 `git` 完成，请先安装 `git`：Windows 上安装 Git for Windows，macOS 上安装
+Apple 命令行工具或 Git，Linux 上使用发行版的包管理器。如果 Banyan 找不到 git，会提示如何安装以及在哪里设置路径。
 
 | 系统 | 安装包 |
 | --- | --- |
@@ -221,6 +221,13 @@ go run .                 # 打开当前所在的仓库
 
 完整列表见 设置 › 快捷键。
 
+### 更新
+
+Banyan 每天检查一次 GitHub 发布页。**设置 › 更新** 会显示当前版本、上次检查时间，并可以立即检查。发现新版本后，
+**安装并重启** 会下载更新、校验 SHA-256 并替换 Banyan：Windows 使用安装器，macOS 替换应用程序包，Linux 替换
+tar.gz 中的可执行文件。通过 Linux 包管理器安装的 Banyan 会改为打开发布页面，由包管理器负责更新。
+**检查更新…** 菜单项可立即检查。
+
 ### 设置
 
 在 <kbd>⌘</kbd> <kbd>,</kbd> 中可以设置主题（浅色、深色或跟随 macOS）、语言、字号、相对或绝对日期、
@@ -248,6 +255,7 @@ go test ./...      # 提交图布局、引用解析，以及在临时仓库上�
 | `internal/model` | 共享的仓库状态；在后台运行操作、监视仓库并广播刷新 |
 | `internal/patch`、`internal/conflict`、`internal/changelists` | 部分提交、合并冲突和更改列表 |
 | `internal/ai` | 生成提交信息：OpenAI 兼容 API 或 ACP 智能体 |
+| `internal/update` | 检查 GitHub 发布并安装新版本 |
 | `internal/settings` | 持久化的设置、最近的仓库和提交信息 |
 | `internal/i18n` | 英文和简体中文文案 |
 | `internal/askpass` | git 和 ssh 的凭据提示 |
@@ -265,4 +273,4 @@ go test ./...      # 提交图布局、引用解析，以及在临时仓库上�
 
 ## 许可证
 
-Banyan 以 [MIT 许可证](LICENSE) 发布。Windows 安装包附带的 Git for Windows MinGit 沿用其自身的许可证（GPLv2）。
+Banyan 以 [MIT 许可证](LICENSE) 发布。

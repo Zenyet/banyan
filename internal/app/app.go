@@ -61,6 +61,13 @@ func Run(requested string) error {
 			}
 		}
 		checkGit()
+		// A newer release is looked for once a day, after the window is up.
+		if Version != "dev" && os.Getenv("BANYAN_SMOKE_TEST") == "" {
+			go func() {
+				time.Sleep(8 * time.Second)
+				mygo.RunOnMain(maybeCheckUpdates)
+			}()
+		}
 		// CI launches the app this way to check that it starts: it quits by
 		// itself once its window has been up for a few seconds.
 		if os.Getenv("BANYAN_SMOKE_TEST") != "" {

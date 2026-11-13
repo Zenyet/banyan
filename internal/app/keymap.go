@@ -44,6 +44,7 @@ func commands() []Command {
 		{"commit", i18n.T("Commit…"), "secondary-k", true},
 		{"generate_message", i18n.T("Generate Commit Message"), "secondary-shift-g", true},
 		{"ai_settings", i18n.T("AI Settings…"), "", false},
+		{"check_updates", i18n.T("Check for Updates…"), "", false},
 		{"push", i18n.T("Push…"), "secondary-shift-k", true},
 		{"update", i18n.T("Update Project"), "secondary-t", true},
 		{"fetch", i18n.T("Fetch"), "", true},

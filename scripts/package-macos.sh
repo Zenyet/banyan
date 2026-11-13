@@ -13,5 +13,7 @@ for arch in arm64 x86_64; do
     cp -R "build/$goarch/Banyan.app" "$STAGE/"
     ln -s /Applications "$STAGE/Applications"
     hdiutil create -volname Banyan -srcfolder "$STAGE" -ov -format UDZO "dist/Banyan-$VERSION-macos-$arch.dmg"
+    # The zip is what the app updates from, replacing the bundle.
+    ditto -c -k --keepParent "$STAGE/Banyan.app" "dist/Banyan-$VERSION-macos-$arch.zip"
     rm -rf "$STAGE"
 done

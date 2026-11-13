@@ -23,6 +23,7 @@ func setMenu() {
 			mygo.Separator(),
 			item("settings"),
 			item("ai_settings"),
+			item("check_updates"),
 			mygo.Separator(),
 			{Role: mygo.RoleHide},
 			{Role: mygo.RoleHideOthers},
@@ -116,6 +117,9 @@ func runCommand(id string, w *mygo.Window) {
 		return
 	case "ai_settings":
 		openSettingsAt(settingsPageAI)
+		return
+	case "check_updates":
+		checkForUpdates(true)
 		return
 	case "quit":
 		quit()

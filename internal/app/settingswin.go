@@ -27,6 +27,7 @@ const (
 	settingsPageVersionControl
 	settingsPageDiff
 	settingsPageAI
+	settingsPageUpdates
 )
 
 // settingsWin is the content of settingsShell, to open it on a page.
@@ -177,6 +178,7 @@ func (sw *settingsWindow) view(c *ui.Context) {
 		{"git-branch", i18n.T("Version Control")},
 		{"git-compare", i18n.T("Diff and Log")},
 		{"sparkles", i18n.T("AI")},
+		{"refresh-ccw", i18n.T("Updates")},
 		{"keyboard", i18n.T("Keyboard Shortcuts")},
 	}
 	ui.Row(c).Fill().Children(func() {
@@ -212,6 +214,8 @@ func (sw *settingsWindow) view(c *ui.Context) {
 					sw.diffAndLog(c, &s)
 				case settingsPageAI:
 					sw.ai(c, &s)
+				case settingsPageUpdates:
+					sw.updates(c, &s)
 				default:
 					sw.keymap(c)
 				}
@@ -660,6 +664,60 @@ func (sw *settingsWindow) cancelAITest() {
 	sw.aiTestSeq++
 	sw.aiTestCancel = nil
 	sw.aiTesting = false
+}
+
+// updates is Settings › Updates: whether to look for a newer Banyan, and
+// what the last look found.
+func (sw *settingsWindow) updates(c *ui.Context, s *settings.Settings) {
+	t := c.Theme()
+	settingsGroup(c, i18n.T("Software Updates"),
+		i18n.T("Banyan looks at GitHub releases for a newer version, at most once a day, and asks before installing one."), func() {
+			settingRow(c, "auto-update", i18n.T("Automatically check for updates"),
+				i18n.T("When Banyan starts, at most once a day."), false, func() {
+					auto := s.AutoCheckUpdates
+					if ui.Checkbox(c.Key("auto-update-check"), &auto, i18n.T("Check")).Changed() {
+						changeSettings(func(s *settings.Settings) { s.AutoCheckUpdates = auto })
+					}
+				})
+			settingRow(c, "current-version", i18n.T("Current version"), "", false, func() {
+				ui.Text(c, Version).Font(monoFont)
+			})
+			settingRow(c, "last-update-check", i18n.T("Last checked"), "", false, func() {
+				if s.LastUpdateCheck == 0 {
+					muted(c, i18n.T("Never"))
+				} else {
+					ui.Text(c, formatFullTime(s.LastUpdateCheck))
+				}
+			})
+			ui.Row(c.Key("update-check-row")).Gap(10).PaddingY(10).Children(func() {
+				switch {
+				case updateChecking:
+					ui.Spinner(c).Size(14, 14)
+					muted(c, i18n.T("Checking for updates…")).SingleLine()
+				case availableUpdate != nil:
+					ui.Icon(c, icon("arrow-up-from-line")).TextColor(t.Success)
+					ui.Text(c, i18n.Tf("Banyan {} is available", availableUpdate.Version)).TextColor(t.Success).Grow(1).Shrink(1)
+				default:
+					muted(c, i18n.T("Check GitHub for a newer version.")).Grow(1).Shrink(1)
+				}
+				ui.Spacer(c)
+				if button(c.Key("check-now"), i18n.T("Check Now")).Disabled(updateChecking).Clicked() {
+					checkForUpdates(true)
+				}
+			})
+			if availableUpdate != nil {
+				ui.Row(c.Key("update-install-row")).Gap(8).PaddingY(10).Children(func() {
+					if primaryButton(c.Key("install-update"), i18n.T("Install…")).Clicked() {
+						if s := settingsShell; s != nil {
+							openUpdateDialog(s, &updateDialog{manifest: availableUpdate})
+						}
+					}
+				})
+			}
+		})
+	ui.Row(c.Key("update-version-note")).Padding(18, 8, 6, 6).Gap(8).Children(func() {
+		muted(c, i18n.Tf("Banyan {}", Version))
+	})
 }
 
 func (sw *settingsWindow) keymap(c *ui.Context) {

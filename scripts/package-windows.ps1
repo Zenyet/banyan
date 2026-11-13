@@ -1,5 +1,6 @@
-# Build Banyan for Windows and put a portable zip and an installer in dist\,
-# both with MinGit beside the app. Needs Inno Setup 6 (iscc) on the PATH.
+# Build Banyan for Windows and put a portable zip and an installer in dist\.
+# Banyan uses the Git the computer has; it does not bring one. Needs Inno
+# Setup 6 (iscc) on the PATH.
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path $PSScriptRoot)
 
@@ -19,39 +20,8 @@ try {
     Remove-Item -ErrorAction SilentlyContinue rsrc_windows_amd64.syso
 }
 
-# MinGit, Git for Windows' own minimal Git, goes beside banyan.exe in
-# git\, which Banyan runs when the computer has no Git. Its licenses come
-# along in it, unchanged.
-$minGitVersion = "2.56.0.windows.4"
-$minGitZip = "MinGit-2.56.0.4-64-bit.zip"
-$minGitSha256 = "e3bf78351fe777fba47ddee5950082f8a98bb0f02604fdc7ba3ee2cb68ffa877"
-$ProgressPreference = "SilentlyContinue"
-$download = "build\$minGitZip"
-if (-not (Test-Path $download)) {
-    # GitHub's downloads now and then time out (504); try a few times.
-    $url = "https://github.com/git-for-windows/git/releases/download/v$minGitVersion/$minGitZip"
-    for ($attempt = 1; ; $attempt++) {
-        try {
-            Invoke-WebRequest -Uri $url -OutFile $download
-            break
-        } catch {
-            Remove-Item -ErrorAction SilentlyContinue $download
-            if ($attempt -ge 5) { throw }
-            Write-Host "Downloading $minGitZip failed ($($_.Exception.Message)); retrying in $($attempt * 15) s"
-            Start-Sleep -Seconds ($attempt * 15)
-        }
-    }
-}
-$hash = (Get-FileHash -Algorithm SHA256 $download).Hash.ToLower()
-if ($hash -ne $minGitSha256) {
-    Remove-Item $download
-    throw "$minGitZip has the checksum $hash, not $minGitSha256"
-}
-if (Test-Path build\git) { Remove-Item -Recurse -Force build\git }
-Expand-Archive -Path $download -DestinationPath build\git
-
 New-Item -ItemType Directory -Force dist | Out-Null
-Compress-Archive -Force -Path build\banyan.exe, build\git, README.md -DestinationPath "dist\Banyan-$version-windows-x64.zip"
+Compress-Archive -Force -Path build\banyan.exe, README.md -DestinationPath "dist\Banyan-$version-windows-x64.zip"
 
 iscc /Q "/DVersion=$version" "/DSource=$PWD\build" packaging\windows\banyan.iss
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

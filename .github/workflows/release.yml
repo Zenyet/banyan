@@ -87,22 +87,6 @@ jobs:
           Get-Content smoke.log
           if ($app.ExitCode -ne 0 -or -not (Select-String -Quiet "smoke test passed" smoke.log)) { exit 1 }
 
-      # Again as on a computer without Git: the app opens this repository
-      # with the MinGit beside it.
-      - name: Smoke test without Git (Windows)
-        if: matrix.name == 'Windows'
-        timeout-minutes: 2
-        run: |
-          build\git\cmd\git.exe --version
-          $env:BANYAN_SMOKE_TEST = "1"
-          $env:PATH = "C:\Windows\System32;C:\Windows"
-          $env:ProgramFiles = "C:\NoProgramFiles"
-          $env:LOCALAPPDATA = "C:\NoLocalAppData"
-          $app = Start-Process build\banyan.exe -ArgumentList "." -Wait -PassThru -RedirectStandardOutput smoke-nogit.log
-          Get-Content smoke-nogit.log
-          $line = Select-String "smoke test passed: .* 1 repositories, git .*\\git\\cmd\\git.exe" smoke-nogit.log
-          if ($app.ExitCode -ne 0 -or -not $line) { exit 1 }
-
       - uses: actions/upload-artifact@v4
         with:
           name: banyan-${{ matrix.name }}
@@ -119,6 +103,45 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+
+      - name: Write the update manifest
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os
+
+          tag = os.environ["GITHUB_REF_NAME"]
+          version = tag.removeprefix("v")
+          repo = os.environ["GITHUB_REPOSITORY"]
+          names = {
+              "darwin/arm64": f"Banyan-{version}-macos-arm64.zip",
+              "darwin/amd64": f"Banyan-{version}-macos-x86_64.zip",
+              "windows/amd64": f"Banyan-{version}-windows-x64-setup.exe",
+              "linux/amd64": f"Banyan-{version}-linux-x86_64.tar.gz",
+          }
+          platforms = {}
+          for key, name in names.items():
+              path = os.path.join("dist", name)
+              if not os.path.exists(path):
+                  raise SystemExit(f"missing update asset: {path}")
+              digest = hashlib.sha256()
+              with open(path, "rb") as f:
+                  for chunk in iter(lambda: f.read(1 << 20), b""):
+                      digest.update(chunk)
+              platforms[key] = {
+                  "url": f"https://github.com/{repo}/releases/download/{tag}/{name}",
+                  "sha256": digest.hexdigest(),
+                  "size": os.path.getsize(path),
+              }
+          manifest = {
+              "version": version,
+              "notes_url": f"https://github.com/{repo}/releases/tag/{tag}",
+              "platforms": platforms,
+          }
+          with open("dist/latest.json", "w") as f:
+              json.dump(manifest, f, indent=2)
+              f.write("\n")
+          print(json.dumps(manifest, indent=2))
+          PY
 
       - uses: softprops/action-gh-release@v2
         with:
