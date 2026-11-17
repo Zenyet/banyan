@@ -2,6 +2,7 @@ package git
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/Zenyet/banyan/internal/i18n"
@@ -327,6 +328,30 @@ type Branch struct {
 	// Track is e.g. "ahead 1, behind 2".
 	Track  string
 	IsHead bool
+}
+
+// AheadBehind returns the commits ahead of and behind the upstream, from
+// Track; zeros when there is no upstream or it is gone.
+func (b *Branch) AheadBehind() (ahead, behind int) {
+	for _, part := range strings.Split(b.Track, ", ") {
+		if n, ok := strings.CutPrefix(part, "ahead "); ok {
+			ahead, _ = strconv.Atoi(n)
+		} else if n, ok := strings.CutPrefix(part, "behind "); ok {
+			behind, _ = strconv.Atoi(n)
+		}
+	}
+	return ahead, behind
+}
+
+// HeadInfo is the branch checked out in a repository and how far it is
+// from its upstream.
+type HeadInfo struct {
+	// Branch is the short branch name, empty when HEAD is detached.
+	Branch string
+	// Ahead counts the commits the branch has that its upstream lacks.
+	Ahead int
+	// Behind counts the commits the upstream has that the branch lacks.
+	Behind int
 }
 
 // FullName is e.g. refs/heads/main.

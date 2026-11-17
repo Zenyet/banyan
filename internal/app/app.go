@@ -91,6 +91,9 @@ func Run(requested string) error {
 		if rw := focusedRepoWindow(); rw != nil && len(rw.tabs) > 0 {
 			rw.tabs[rw.active].Model.RefreshIfStale()
 		}
+		if welcome != nil {
+			loadRecentHeads(settings.Get().Recent)
+		}
 	})
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
 		// The editor's files are saved as the app goes, as JetBrains does.

@@ -4,12 +4,15 @@ import (
 	_ "embed"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"github.com/Zenyet/banyan/internal/git"
 	"github.com/Zenyet/banyan/internal/i18n"
+	"github.com/Zenyet/banyan/internal/model"
 	"github.com/Zenyet/banyan/internal/settings"
 )
 
@@ -26,6 +29,35 @@ var welcome *Shell
 // welcomeClosedLast is set when the welcome window was the last window
 // closed, which quits.
 var welcomeClosedLast bool
+
+// recentHead is the branch of a recent repository and how far it is from
+// its upstream, read in the background after the list is drawn.
+type recentHead struct {
+	branch        string
+	ahead, behind int
+}
+
+// recentHeads holds each recent repository's branch by path; written on the
+// main thread only, through model.Post.
+var recentHeads = map[string]recentHead{}
+
+// loadRecentHeads reads each recent repository's branch in the background;
+// a folder that is not a repository is skipped.
+func loadRecentHeads(paths []string) {
+	for _, path := range paths {
+		if info, err := os.Stat(path); err != nil || !info.IsDir() {
+			continue
+		}
+		go func(path string) {
+			repo, err := git.Open(path)
+			if err != nil {
+				return
+			}
+			head := repo.HeadInfo()
+			model.Post(func() { recentHeads[path] = recentHead{branch: head.Branch, ahead: head.Ahead, behind: head.Behind} })
+		}(path)
+	}
+}
 
 // openWelcome shows the welcome window, or brings it forward if it is
 // open.
@@ -44,6 +76,7 @@ func openWelcome() {
 		welcomeClosedLast = len(shells) == 0
 	}
 	welcome = s
+	loadRecentHeads(settings.Get().Recent)
 }
 
 // closeWelcome closes the welcome window once a repository opens.
@@ -165,12 +198,55 @@ func recentRow(s *Shell, c *ui.Context, ix int, path string) {
 			}
 			muted(c, where).SingleLine()
 		})
+		if exists {
+			if head, ok := recentHeads[path]; ok {
+				recentHeadCell(c, head)
+			}
+		}
 		remove := iconButton(c.Key("remove"), "x", i18n.T("Remove from Recent"))
 		if !hovered {
 			remove.Invisible()
 		}
 		if remove.Clicked() {
 			settings.RemoveRecent(path)
+		}
+	})
+}
+
+// recentHeadCell shows how far a recent repository's branch is from its
+// upstream, then the branch name.
+func recentHeadCell(c *ui.Context, head recentHead) {
+	t := c.Theme()
+	ui.Row(c).Shrink(0).Gap(8).AlignItems(ui.Center).Children(func() {
+		if head.ahead > 0 || head.behind > 0 {
+			var tip []string
+			if head.ahead > 0 {
+				tip = append(tip, i18n.Tf("Ahead by {}", head.ahead))
+			}
+			if head.behind > 0 {
+				tip = append(tip, i18n.Tf("Behind by {}", head.behind))
+			}
+			count := func(n int, name string) {
+				ui.Row(c).Gap(2).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, strconv.Itoa(n)).FontSize(t.FontSize - 1).TextColor(t.TextMuted)
+					ui.Icon(c, icon(name)).FontSize(t.FontSize - 1).TextColor(t.TextMuted)
+				})
+			}
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Tooltip(strings.Join(tip, "\n")).Children(func() {
+				if head.ahead > 0 {
+					count(head.ahead, "arrow-up")
+				}
+				if head.behind > 0 {
+					count(head.behind, "arrow-down")
+				}
+			})
+		}
+		if head.branch != "" {
+			pill := ui.Row(c).Height(22).PaddingX(8).Radius(11).Border(1, t.Border).Gap(4).AlignItems(ui.Center).MaxWidth(200)
+			pill.Children(func() {
+				ui.Icon(c, icon("git-branch")).FontSize(t.FontSize - 1).TextColor(t.TextMuted)
+				ui.Text(c, head.branch).FontSize(t.FontSize - 1).SingleLine().Shrink(1)
+			})
 		}
 	})
 }

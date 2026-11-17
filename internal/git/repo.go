@@ -737,6 +737,22 @@ func (r *Repo) Branches() ([]Branch, error) {
 	return branches, nil
 }
 
+// HeadInfo is the branch checked out and its distance from the upstream,
+// from one for-each-ref run.
+func (r *Repo) HeadInfo() HeadInfo {
+	branches, err := r.Branches()
+	if err != nil {
+		return HeadInfo{}
+	}
+	for _, b := range branches {
+		if b.IsHead {
+			ahead, behind := b.AheadBehind()
+			return HeadInfo{Branch: b.Name, Ahead: ahead, Behind: behind}
+		}
+	}
+	return HeadInfo{}
+}
+
 func (r *Repo) Status() ([]StatusEntry, error) {
 	out, err := r.Git("status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {

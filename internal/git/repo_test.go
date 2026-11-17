@@ -1389,3 +1389,22 @@ func TestBlobReadsVersions(t *testing.T) {
 		t.Fatalf("a deleted file reads %q, %v", got, err)
 	}
 }
+
+func TestHeadInfoTracksUpstreamDistance(t *testing.T) {
+	r := newTempRepo(t)
+	r.commit("a.txt", "0\n", "Base")
+	equal(t, r.repo.HeadInfo(), HeadInfo{Branch: "main"})
+
+	r.git("branch", "up")
+	r.git("branch", "--set-upstream-to=up")
+	r.commit("a.txt", "0\n1\n", "One")
+	equal(t, r.repo.HeadInfo(), HeadInfo{Branch: "main", Ahead: 1})
+
+	r.git("checkout", "-q", "up")
+	r.commit("b.txt", "2\n", "Two")
+	r.git("checkout", "-q", "main")
+	equal(t, r.repo.HeadInfo(), HeadInfo{Branch: "main", Ahead: 1, Behind: 1})
+
+	r.git("checkout", "-q", "--detach")
+	equal(t, r.repo.HeadInfo(), HeadInfo{})
+}

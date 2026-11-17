@@ -812,4 +812,11 @@ var zh = map[string]string{
 	"expected":                                                                       "预期",
 	"The update's checksum does not match":                                           "更新文件校验和不匹配",
 	"The latest release has no update manifest; download it from the release page":   "最新发布中没有更新清单；请从发布页面下载",
+	"Ahead by {}":                      "领先 {} 个提交",
+	"Behind by {}":                     "落后 {} 个提交",
+	"Search Branch...":                 "搜索分支…",
+	"Search Branch":                    "搜索分支",
+	"Type a branch name":               "输入分支名称",
+	"No matching branches":             "没有匹配的分支",
+	"↑ ↓ to choose, Enter to checkout": "↑ ↓ 选择，回车签出",
 }
