@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -306,5 +307,126 @@ func openPalette(ws *Workspace) {
 			}
 		})
 		muted(c, i18n.T("↑ ↓ to choose, Enter to run"))
+	}})
+}
+
+// openBranchSearch lists the branches to switch to, filtered as you type,
+// for a repository with too many for a menu to be looked through.
+func openBranchSearch(ws *Workspace) {
+	m := ws.Model
+	// Recent branches first, then the local and the remote ones, favorites
+	// first, as the toolbar menu has them; a branch in more than one group
+	// shows once.
+	var all []git.Branch
+	seen := map[string]bool{}
+	add := func(branches []git.Branch) {
+		for _, b := range branches {
+			if seen[b.FullName()] {
+				continue
+			}
+			seen[b.FullName()] = true
+			all = append(all, b)
+		}
+	}
+	var recent []git.Branch
+	for _, name := range m.RecentBranches {
+		for _, b := range m.Branches {
+			if b.Kind == git.RefLocal && b.Name == name && !b.IsHead {
+				recent = append(recent, b)
+				break
+			}
+		}
+	}
+	add(recent)
+	for _, kind := range []git.RefKind{git.RefLocal, git.RefRemote} {
+		branches := m.BranchesOf(kind)
+		slices.SortStableFunc(branches, func(a, b git.Branch) int {
+			fa, fb := m.IsFavorite(&a), m.IsFavorite(&b)
+			switch {
+			case fa && !fb:
+				return -1
+			case fb && !fa:
+				return 1
+			}
+			return 0
+		})
+		add(branches)
+	}
+	query := ""
+	selected := 0
+	// reveal scrolls the chosen row into view after the keys moved it.
+	reveal := false
+	ws.Shell.Open(&Dialog{Title: i18n.T("Search Branch"), Width: 520, Body: func(c *ui.Context, d *Dialog) {
+		t := c.Theme()
+		var matches []git.Branch
+		words := strings.Fields(strings.ToLower(query))
+		for _, b := range all {
+			name := strings.ToLower(b.Name)
+			ok := true
+			for _, w := range words {
+				ok = ok && strings.Contains(name, w)
+			}
+			if ok {
+				matches = append(matches, b)
+			}
+		}
+		run := func(row int) {
+			if row < 0 || row >= len(matches) {
+				return
+			}
+			b := matches[row]
+			d.Close()
+			if b.Kind != git.RefLocal || !b.IsHead {
+				m.Checkout(b.Name, b.Kind == git.RefRemote)
+			}
+		}
+		input := ui.TextInput(c.Key("query"), &query).Placeholder(i18n.T("Type a branch name")).AutoFocus().FillWidth()
+		if input.Changed() {
+			selected, reveal = 0, true
+		}
+		if input.Shortcut(0, ui.KeyDown) {
+			selected, reveal = min(selected+1, len(matches)-1), true
+		}
+		if input.Shortcut(0, ui.KeyUp) {
+			selected, reveal = max(selected-1, 0), true
+		}
+		if input.Submitted() {
+			run(selected)
+		}
+		ui.Scroll(c.Key("branches")).MaxHeight(360).Shrink(1).MinHeight(0).Children(func() {
+			if len(matches) == 0 {
+				muted(c, i18n.T("No matching branches")).Padding(8)
+			}
+			for row, b := range matches {
+				item := ui.Row(c.Key(b.FullName())).Height(28).PaddingX(8).Radius(4).Cursor(ui.CursorPointer)
+				switch {
+				case row == selected:
+					item.Background(selectionBG)
+				case item.Hovered():
+					item.Background(hoverBG(t))
+				}
+				if reveal && row == selected {
+					item.ScrollIntoView()
+				}
+				item.ContextMenu(func(menu *ui.Menu) { branchMenu(menu, ws, b) })
+				if item.Clicked() {
+					run(row)
+				}
+				item.Children(func() {
+					mark := ""
+					if b.IsHead {
+						mark = "✓ "
+					} else if m.IsFavorite(&b) {
+						mark = "★ "
+					}
+					ui.Text(c, mark+b.Name).Grow(1).SingleLine()
+					if b.Track != "" {
+						muted(c, formatTrack(b.Track))
+					}
+				})
+			}
+		})
+		reveal = false
+		muted(c, i18n.T("↑ ↓ to choose, Enter to checkout"))
 	}})
 }

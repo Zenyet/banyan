@@ -121,3 +121,31 @@ func branchesWorkspace(t *testing.T) *Workspace {
 	ws.log.rebuildBranches()
 	return ws
 }
+
+// The branch search lists every branch, narrows the list as the query is
+// typed, and checks out the branch chosen.
+func TestBranchSearchFiltersAndChecksOut(t *testing.T) {
+	ws := branchesWorkspace(t)
+	ws.Shell.content = func(*ui.Context) {}
+	openBranchSearch(ws)
+	tt := ui.NewTester(func(c *ui.Context) { ws.Shell.view(c) }, 640, 480)
+	tt.Frame()
+	for _, name := range []string{"main", "topic", "feature/one", "origin/main"} {
+		if !tt.HasText(name) {
+			t.Fatalf("%s is not listed: %q", name, tt.Texts())
+		}
+	}
+	tt.Type("top")
+	tt.Frame()
+	if !tt.HasText("topic") || tt.HasText("origin/main") || tt.HasText("feature/one") {
+		t.Fatalf("the query did not narrow the list: %q", tt.Texts())
+	}
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	for deadline := time.Now().Add(5 * time.Second); ws.Model.CurrentBranch != "topic" && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if ws.Model.CurrentBranch != "topic" {
+		t.Fatalf("checked out %q, want topic", ws.Model.CurrentBranch)
+	}
+}

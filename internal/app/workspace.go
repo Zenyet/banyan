@@ -416,6 +416,10 @@ func (ws *Workspace) repoMenu(menu *ui.Menu) {
 // and favorites first.
 func (ws *Workspace) branchPopup(menu *ui.Menu) {
 	m := ws.Model
+	if menu.Item(i18n.T("Search Branch...")).Chosen() {
+		openBranchSearch(ws)
+	}
+	menu.Separator()
 	if menu.Item(i18n.T("New Branch...")).Chosen() {
 		newBranch(ws, "HEAD")
 	}
