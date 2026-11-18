@@ -609,17 +609,17 @@ func TestEditorSavesWhenTypingRests(t *testing.T) {
 	tt.Frame()
 	ev.tabs[0].state.Buffer.Set("one, edited\n")
 	tt.Frame()
-	// Typing rests: the editor saves it on its own.
+	// Typing rests: the editor saves it on its own. The file holds the new
+	// text a moment before the buffer is marked saved.
 	full := filepath.Join(repo.Root(), "main.go")
-	var data []byte
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
-		data, _ = os.ReadFile(full)
-		if string(data) == "one, edited\n" {
-			break
-		}
+	saved := func() bool {
+		data, _ := os.ReadFile(full)
+		return string(data) == "one, edited\n" && !ev.tabs[0].unsaved()
+	}
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline) && !saved(); {
 		time.Sleep(20 * time.Millisecond)
 	}
-	if string(data) != "one, edited\n" {
+	if data, _ := os.ReadFile(full); string(data) != "one, edited\n" {
 		t.Fatalf("not saved: %q", data)
 	}
 	if ev.tabs[0].unsaved() {
