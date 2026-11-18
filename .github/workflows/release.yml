@@ -97,11 +97,16 @@ jobs:
           Get-Content smoke.log
           if ($app.ExitCode -ne 0 -or -not (Select-String -Quiet "smoke test passed" smoke.log)) { exit 1 }
 
+      # Only a release takes the packages: a branch build checks that they
+      # build. The release job takes them within minutes of the tag, so a day
+      # of storage is all they need.
       - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v')
         with:
           name: banyan-${{ matrix.name }}
           path: dist/*
           if-no-files-found: error
+          retention-days: 1
 
   release:
     name: Publish release

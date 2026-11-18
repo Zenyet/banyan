@@ -1,0 +1,29 @@
+# Deletes the build artifacts of past runs, which the release job takes
+# within minutes of a tag push. Run it from the Actions tab when the
+# account's Actions storage runs short: GitHub stops artifact uploads once
+# it is full, and the release job needs them.
+name: Cleanup artifacts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  cleanup:
+    name: Delete the artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete the artifacts older than a day
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A release still publishing is minutes old; a day old is dead
+          # weight.
+          cutoff=$(date -u -d '1 day ago' +%Y-%m-%dT%H:%M:%SZ)
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
+            --jq ".artifacts[] | select(.created_at < \"$cutoff\") | .id" |
+          while read -r id; do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" && echo "deleted artifact $id"
+          done
