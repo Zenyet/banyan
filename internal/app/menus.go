@@ -1,6 +1,8 @@
 package app
 
 import (
+	"runtime"
+
 	"github.com/egoist/mygo"
 
 	"github.com/Zenyet/banyan/internal/i18n"
@@ -17,6 +19,19 @@ func setMenu() {
 			Click:       func(_ *mygo.MenuItem, w *mygo.Window) { runCommand(id, w) },
 		}
 	}
+	file := []*mygo.MenuItem{
+		item("open"),
+		{Label: i18n.T("Clone Repository…"), Click: func(_ *mygo.MenuItem, w *mygo.Window) { openClone(targetShell(w)) }},
+		mygo.Separator(),
+		item("save"),
+		mygo.Separator(),
+		item("close_window"),
+	}
+	if runtime.GOOS != "darwin" {
+		// macOS keeps Settings… in the app menu, which Windows and Linux
+		// lack, and its shortcut with it.
+		file = append(file, mygo.Separator(), item("settings"))
+	}
 	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
 		{Role: mygo.RoleAppMenu, Submenu: []*mygo.MenuItem{
 			{Role: mygo.RoleAbout},
@@ -31,14 +46,7 @@ func setMenu() {
 			mygo.Separator(),
 			item("quit"),
 		}},
-		{Label: i18n.T("File"), Submenu: []*mygo.MenuItem{
-			item("open"),
-			{Label: i18n.T("Clone Repository…"), Click: func(_ *mygo.MenuItem, w *mygo.Window) { openClone(targetShell(w)) }},
-			mygo.Separator(),
-			item("save"),
-			mygo.Separator(),
-			item("close_window"),
-		}},
+		{Label: i18n.T("File"), Submenu: file},
 		{Role: mygo.RoleEditMenu},
 		{Label: i18n.T("Git"), Submenu: []*mygo.MenuItem{
 			item("find_action"),

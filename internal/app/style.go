@@ -322,6 +322,16 @@ func spinnerButton(c *ui.Context, tip string) ui.Element {
 	return b
 }
 
+// toolbarButton is a round button of the window's toolbar, of glass,
+// showing an icon alone: the theme and the settings buttons.
+func toolbarButton(c *ui.Context, key, iconName, tip string) ui.Element {
+	t := c.Theme()
+	b := ui.ButtonBase(c.Key(key)).Size(36, 36).Radius(18).Center().Shrink(0).Material(glass.Glass{Interactive: true}).
+		Label(tip).Tooltip(tip)
+	b.Children(func() { ui.Icon(c, icon(iconName)).FontSize(t.FontSize + 2) })
+	return b
+}
+
 // ghostButton is a borderless button with an optional icon before its
 // label.
 func ghostButton(c *ui.Context, iconName, label string) ui.Element {

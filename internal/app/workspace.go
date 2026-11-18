@@ -7,7 +7,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 
 	"github.com/Zenyet/banyan/internal/git"
@@ -298,9 +297,7 @@ func (ws *Workspace) header(c *ui.Context) {
 		if t.Dark {
 			themeIcon = "sun"
 		}
-		toggle := ui.ButtonBase(c.Key("theme")).Size(36, 36).Radius(18).Center().Shrink(0).Material(glass.Glass{Interactive: true}).
-			Label(i18n.T("Toggle Theme")).Tooltip(i18n.T("Toggle Theme"))
-		toggle.Children(func() { ui.Icon(c, icon(themeIcon)).FontSize(t.FontSize + 2) })
+		toggle := toolbarButton(c, "theme", themeIcon, i18n.T("Toggle Theme"))
 		if toggle.Clicked() {
 			dark := t.Dark
 			changeSettings(func(s *settings.Settings) {
@@ -310,6 +307,16 @@ func (ws *Workspace) header(c *ui.Context) {
 					s.Theme = settings.ThemeDark
 				}
 			})
+		}
+		// Settings opens from the gear as well as from the menus: macOS
+		// keeps Settings… in the app menu, which Windows and Linux lack, and
+		// with it the shortcut. The tooltip tells the shortcut in effect.
+		tip := i18n.T("Settings")
+		if keys := commandByID("settings").Keys(); keys != "" {
+			tip += " (" + displayKeys(keys) + ")"
+		}
+		if toolbarButton(c, "settings", "settings", tip).Clicked() {
+			openSettings()
 		}
 	})
 }
