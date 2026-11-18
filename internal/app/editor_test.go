@@ -24,7 +24,21 @@ import (
 // whose editor is ready.
 func editorWorkspace(t *testing.T, files map[string]string) (*Workspace, *git.Repo) {
 	t.Helper()
-	dir := t.TempDir()
+	dir, err := os.MkdirTemp("", "banyan-editor-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A git of the model's background work can still be writing the index
+	// or the commit-graph as the test ends, which leaves the folder not
+	// empty; removing it again once that git has gone clears it.
+	t.Cleanup(func() {
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+			if os.RemoveAll(dir) == nil {
+				return
+			}
+		}
+		t.Errorf("could not remove %s", dir)
+	})
 	run := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", args...)
