@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -221,6 +222,43 @@ func TestStoppedMergeIsDescribedAndMergedFromTheIndex(t *testing.T) {
 		t.Fatal("finished")
 	}
 	equal(t, r.read("a.txt"), "start\ntheirs\nend\n")
+}
+
+// TestMergeConflictTextWithoutObjectID runs the merge tool against a git
+// that does not know merge-file --object-id, as older versions don't.
+func TestMergeConflictTextWithoutObjectID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake git is a shell script")
+	}
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is not installed")
+	}
+	script := filepath.Join(t.TempDir(), "git")
+	body := fmt.Sprintf(`#!/bin/sh
+for arg in "$@"; do
+	if [ "$arg" = "--object-id" ]; then
+		echo "error: unknown option 'object-id'" >&2
+		exit 129
+	fi
+done
+exec %q "$@"
+`, realGit)
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := Program
+	Program = func() string { return script }
+	t.Cleanup(func() { Program = old })
+
+	r := conflictingBranches(t)
+	if _, err := r.repo.Merge("feature"); err == nil {
+		t.Fatal("expected a conflict")
+	}
+	text := must[string](t)(r.repo.MergeConflictText("a.txt"))
+	if !strings.Contains(text, "ours") || !strings.Contains(text, "theirs") {
+		t.Fatalf("text:\n%s", text)
+	}
 }
 
 func TestAcceptingTheSideThatDeletedAFileDeletesIt(t *testing.T) {

@@ -419,8 +419,6 @@ func (r *Repo) conflictStages(path string) ([]int, error) {
 // base and theirs versions, with diff3-style markers of MarkerSize around
 // what still conflicts. Changes that merged cleanly are already applied.
 func (r *Repo) MergeConflictText(path string) (string, error) {
-	// git knows the empty blob in every repository.
-	const emptyBlob = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
 	stages, err := r.conflictStages(path)
 	if err != nil {
 		return "", err
@@ -428,13 +426,37 @@ func (r *Repo) MergeConflictText(path string) (string, error) {
 	if !slices.Contains(stages, 2) || !slices.Contains(stages, 3) {
 		return "", fmt.Errorf("%s was deleted on one side; choose Accept Yours or Accept Theirs", path)
 	}
-	base := emptyBlob
-	if slices.Contains(stages, 1) {
-		base = ":1:" + path
+	// git merge-file reads files, not blobs: --object-id only came in git
+	// 2.49, and it did not work in linked worktrees until 2.54. Write the
+	// stages to a temporary directory instead, a missing base being the
+	// empty file.
+	dir, err := os.MkdirTemp("", "banyan-merge-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(dir)
+	names := []string{"yours", "base", "theirs"}
+	files := make([]string, len(names))
+	for i, stage := range []int{2, 1, 3} {
+		file := filepath.Join(dir, names[i])
+		files[i] = file
+		var text string
+		if slices.Contains(stages, stage) {
+			text, err = run(r.root, []string{"cat-file", "blob", fmt.Sprintf(":%d:%s", stage, path)}, false)
+			if err != nil {
+				return "", err
+			}
+			if strings.ContainsRune(text, 0) {
+				return "", fmt.Errorf("%s is a binary file; choose Accept Yours or Accept Theirs", path)
+			}
+		}
+		if err := os.WriteFile(file, []byte(text), 0o600); err != nil {
+			return "", err
+		}
 	}
 	cmd := command(r.root, []string{
-		"merge-file", "-p", "--object-id", "--zdiff3", "--marker-size", strconv.Itoa(MarkerSize),
-		"-L", "yours", "-L", "base", "-L", "theirs", ":2:" + path, base, ":3:" + path,
+		"merge-file", "-p", "--zdiff3", "--marker-size", strconv.Itoa(MarkerSize),
+		"-L", "yours", "-L", "base", "-L", "theirs", files[0], files[1], files[2],
 	})
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
@@ -446,11 +468,7 @@ func (r *Repo) MergeConflictText(path string) (string, error) {
 			return "", fmt.Errorf("Cannot merge %s: %s", path, strings.TrimSpace(stderr.String()))
 		}
 	}
-	text := string(out)
-	if strings.ContainsRune(text, 0) {
-		return "", fmt.Errorf("%s is a binary file; choose Accept Yours or Accept Theirs", path)
-	}
-	return text, nil
+	return string(out), nil
 }
 
 // Operation is the stopped merge, rebase, cherry-pick or revert, if any.
