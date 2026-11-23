@@ -94,3 +94,18 @@ func rowsOf(lv *LogView) []int {
 	lv.applyFilter()
 	return lv.rows
 }
+
+// Choosing the file shown again, or reading the commit again, keeps the
+// diff rather than reload it.
+func TestLogKeepsTheDiffOfTheFileChosenAgain(t *testing.T) {
+	ws := branchesWorkspace(t)
+	lv := ws.log
+	lv.details = &git.CommitDetails{ID: "abc123"}
+	lv.files = map[string]git.FileChange{"a.txt": {Path: "a.txt"}}
+	lv.showFile("a.txt")
+	generation := lv.diff.generation
+	lv.showFile("a.txt")
+	if lv.diff.generation != generation {
+		t.Fatal("the diff loaded again")
+	}
+}

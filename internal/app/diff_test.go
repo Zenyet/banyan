@@ -38,6 +38,62 @@ func TestSlowDiffSaysItIsLoading(t *testing.T) {
 	close(release)
 }
 
+// Reloading the file shown keeps its diff on screen, rather than flash the
+// loading state that belongs to another file.
+func TestReloadingTheSameFileKeepsItsDiff(t *testing.T) {
+	const patch = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old line\n+new line\n"
+	p := &DiffPane{Remote: true}
+	p.Load("a.txt", func() (string, error) { return patch, nil })
+	for deadline := time.Now().Add(2 * time.Second); p.loading && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
+	release := make(chan struct{})
+	p.Load("a.txt", func() (string, error) {
+		<-release
+		return patch, nil
+	})
+	tt := ui.NewTester(p.View, 800, 400)
+	time.Sleep(diffLoadingDelay + 50*time.Millisecond)
+	tt.Frame()
+	message := "Downloading the file's contents from the remote (this repository is a partial clone)…"
+	if tt.HasText(message) {
+		t.Fatalf("a reload of the same file says it is loading: %q", tt.Texts())
+	}
+	if !tt.HasText("Old text") {
+		t.Fatalf("the diff left the pane: %q", tt.Texts())
+	}
+	close(release)
+}
+
+// A reload that makes the patch already shown keeps its state, and with it
+// its scroll, rather than build the diff again.
+func TestSamePatchReloadKeepsTheDiffState(t *testing.T) {
+	const patch = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old line\n+new line\n"
+	p := &DiffPane{}
+	p.Load("a.txt", func() (string, error) { return patch, nil })
+	for deadline := time.Now().Add(2 * time.Second); p.loading && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
+	shown := p.state
+	p.Load("a.txt", func() (string, error) { return patch, nil })
+	for deadline := time.Now().Add(2 * time.Second); p.loading && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if p.state != shown {
+		t.Fatal("the same patch was built again")
+	}
+	// A patch that changed replaces it.
+	p.Load("a.txt", func() (string, error) {
+		return "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old line\n+other line\n", nil
+	})
+	for deadline := time.Now().Add(2 * time.Second); p.loading && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if p.state == shown {
+		t.Fatal("the new patch did not show")
+	}
+}
+
 // A diff in a window of its own leaves the view it belongs to without
 // it, and comes back there once it is docked.
 func TestDetachedDiffLeavesTheLog(t *testing.T) {

@@ -20,3 +20,15 @@ func TestChecksCommitMessages(t *testing.T) {
 		}
 	}
 }
+
+// Choosing the file shown again keeps its diff, rather than reload it.
+func TestChangesKeepsTheDiffOfTheFileChosenAgain(t *testing.T) {
+	ws := branchesWorkspace(t)
+	cv := newChangesView(ws)
+	cv.selected = "a.txt"
+	generation := cv.diff.generation
+	cv.selectPath("a.txt")
+	if cv.diff.generation != generation {
+		t.Fatal("the diff loaded again")
+	}
+}

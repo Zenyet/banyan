@@ -64,31 +64,32 @@ func worktreeFile(repo *git.Repo, path string) ([]byte, error) {
 }
 
 // load reads what a source shows: the patch parsed, and for a binary file
-// the preview of its versions.
-func (s *DiffSource) load() ([]editor.FilePatch, *binaryPreview, error) {
+// the preview of its versions. It returns the patch as well, so a reload
+// that made the same one keeps the diff on screen.
+func (s *DiffSource) load() (string, []editor.FilePatch, *binaryPreview, error) {
 	if s.Patch == nil {
-		return nil, nil, nil
+		return "", nil, nil, nil
 	}
 	patch, err := s.Patch()
 	if err != nil {
-		return nil, nil, err
+		return "", nil, nil, err
 	}
 	files, err := editor.ParsePatch(patch)
 	if err != nil {
-		return nil, nil, err
+		return "", nil, nil, err
 	}
 	if len(files) == 0 || !files[0].Binary || s.Old == nil && s.New == nil {
-		return files, nil, nil
+		return patch, files, nil, nil
 	}
 	old, err := readVersion(s.Old)
 	if err != nil {
-		return nil, nil, err
+		return "", nil, nil, err
 	}
 	new, err := readVersion(s.New)
 	if err != nil {
-		return nil, nil, err
+		return "", nil, nil, err
 	}
-	return files, newBinaryPreview(s.Path, old, new), nil
+	return patch, files, newBinaryPreview(s.Path, old, new), nil
 }
 
 // DiffPane is the diff preview shared by the Log and Commit views.
@@ -100,6 +101,13 @@ type DiffPane struct {
 	// file, which shows in place of the text diff.
 	source *DiffSource
 	binary *binaryPreview
+	// shownTitle and shownPatch are what the pane holds: a reload of the
+	// same file that makes the same patch keeps it, rather than flash the
+	// loading state and lose its scroll. applied says it holds a source
+	// rather than a message.
+	shownTitle string
+	shownPatch string
+	applied    bool
 	// ws is the workspace whose editor opens the file, and editable
 	// whether the file is in the work tree and holds text, at editLine.
 	ws       *Workspace
@@ -151,9 +159,13 @@ func (p *DiffPane) Load(title string, load func() (string, error)) {
 // Show shows what src holds, off the main thread: a text file's patch, or
 // for a binary file the preview of its versions.
 func (p *DiffPane) Show(src DiffSource) {
+	// A reload of the file shown keeps its preview until the new one is
+	// ready; another file's goes.
+	if p.shownTitle != src.Title {
+		p.binary = nil
+	}
 	p.source = &src
 	p.title = src.Title
-	p.binary = nil
 	p.checkEditable()
 	p.run()
 	p.redraw()
@@ -284,7 +296,7 @@ func (p *DiffPane) run() {
 		model.Post(func() {})
 	}()
 	go func() {
-		files, bin, err := src.load()
+		patch, files, bin, err := src.load()
 		model.Post(func() {
 			if p.generation != generation {
 				return
@@ -294,14 +306,20 @@ func (p *DiffPane) run() {
 				p.setMessage(title, err.Error())
 				return
 			}
-			p.apply(title, files, bin)
+			// The same file made the same patch again, as a refresh of it
+			// does: keep what shows, with its scroll.
+			if bin == nil && p.applied && p.shownTitle == title && p.shownPatch == patch {
+				return
+			}
+			p.apply(title, patch, files, bin)
 		})
 	}()
 }
 
 // apply shows what the source loaded: a patch, or a binary file's preview.
-func (p *DiffPane) apply(title string, files []editor.FilePatch, bin *binaryPreview) {
-	p.title = title
+func (p *DiffPane) apply(title, patch string, files []editor.FilePatch, bin *binaryPreview) {
+	p.title, p.shownTitle, p.shownPatch = title, title, patch
+	p.applied = true
 	p.editLine = 1
 	if len(files) > 0 && len(files[0].Hunks) > 0 {
 		p.editLine = max(files[0].Hunks[0].NewStart, 1)
@@ -343,7 +361,8 @@ func (p *DiffPane) ShowMessage(title, message string) {
 }
 
 func (p *DiffPane) setMessage(title, message string) {
-	p.title = title
+	p.title, p.shownTitle, p.shownPatch = title, title, ""
+	p.applied = false
 	p.message = message
 	p.state = nil
 	p.binary = nil
@@ -463,9 +482,9 @@ func (p *DiffPane) View(c *ui.Context) {
 				}
 			}
 		})
-		// What showed before is another file's: rather than leave it under
-		// this one's title, say the diff is on its way.
-		if p.loading && time.Since(p.loadingFrom) >= diffLoadingDelay {
+		// Another file's diff says it is on its way rather than leave the
+		// old one under this title; a reload of the file shown keeps it.
+		if p.loading && p.shownTitle != p.title && time.Since(p.loadingFrom) >= diffLoadingDelay {
 			message := i18n.T("Loading…")
 			if p.Remote {
 				message = i18n.T("Downloading the file's contents from the remote (this repository is a partial clone)…")

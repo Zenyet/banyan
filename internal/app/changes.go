@@ -198,9 +198,12 @@ func (cv *ChangesView) entry(path string) (git.StatusEntry, bool) {
 }
 
 func (cv *ChangesView) selectPath(path string) {
-	if cv.selected != path {
-		clear(cv.expanded)
+	// The file shown is loaded again by the refresh that sees it change,
+	// not by choosing it again.
+	if cv.selected == path {
+		return
 	}
+	clear(cv.expanded)
 	cv.selected = path
 	cv.loadDiff()
 }

@@ -126,7 +126,7 @@ type LogView struct {
 	fileRows    []treeRow
 	fileList    ui.ListState
 	fileRow     int
-	shownFile   string
+	shownDiff   string
 	diff        *DiffPane
 	loading     bool
 	loadingFrom time.Time
@@ -691,7 +691,7 @@ func (lv *LogView) loadDetails() {
 			}
 			// Preview the first file, like JetBrains' diff preview.
 			lv.fileRow = slices.IndexFunc(lv.fileRows, func(r treeRow) bool { return !r.Node.IsDir })
-			lv.shownFile = ""
+			lv.shownDiff = ""
 			if lv.fileRow < 0 {
 				lv.diff.ShowMessage("", i18n.T("No changed files"))
 			} else {
@@ -732,7 +732,12 @@ func (lv *LogView) showFile(path string) {
 	if d == nil || !ok {
 		return
 	}
-	lv.shownFile = path
+	// The file chosen again, or the commit read again, keeps the diff.
+	key := d.ID + "\x00" + path
+	if key == lv.shownDiff {
+		return
+	}
+	lv.shownDiff = key
 	repo := lv.ws.Model.Repo
 	title := file.Path + "  (" + short(d.ID) + ")"
 	if file.OrigPath != "" {
@@ -1428,7 +1433,7 @@ func (lv *LogView) filesPanel(c *ui.Context) {
 		lv.fileRows = flatten(lv.fileNodes, lv.fileClosed)
 	}
 	if lv.fileRow >= 0 && lv.fileRow < len(lv.fileRows) {
-		if n := lv.fileRows[lv.fileRow].Node; !n.IsDir && n.Path != lv.shownFile {
+		if n := lv.fileRows[lv.fileRow].Node; !n.IsDir {
 			lv.showFile(n.Path)
 		}
 	}
