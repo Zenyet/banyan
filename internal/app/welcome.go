@@ -218,6 +218,11 @@ func recentRow(s *Shell, c *ui.Context, ix int, path string) {
 				recentHeadCell(c, head)
 			}
 		}
+		if remote {
+			if host, _, ok := git.ParseLocation(path); ok {
+				ui.Icon(c, icon("server")).FontSize(t.FontSize + 1).TextColor(t.TextMuted).Shrink(0).Tooltip(host)
+			}
+		}
 		remove := iconButton(c.Key("remove"), "x", i18n.T("Remove from Recent"))
 		if !hovered {
 			remove.Invisible()

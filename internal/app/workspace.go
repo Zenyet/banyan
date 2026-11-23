@@ -206,6 +206,9 @@ func (ws *Workspace) statusBar(c *ui.Context) {
 	m := ws.Model
 	ui.Row(c.Key("status")).Height(26).PaddingX(14).Gap(12).Background(chromeBG(t)).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).
 		FontSize(t.FontSize - 1).TextColor(t.TextMuted).Children(func() {
+		if m.Repo.Remote() {
+			ui.Icon(c, icon("server")).FontSize(t.FontSize - 1).TextColor(t.TextMuted).Shrink(0)
+		}
 		ui.Text(c, m.Repo.Label()).SingleLine().Shrink(1).MinWidth(0)
 		ui.Spacer(c)
 		if m.Busy != "" && busyButton(m.Busy) == "" {
@@ -255,7 +258,14 @@ func (ws *Workspace) header(c *ui.Context) {
 	ui.Row(c.Key("toolbar")).Height(titleBarHeight).Shrink(0).Padding(0, bar.Right+12, 0, bar.Left+12).Gap(8).
 		Background(chromeBG(t)).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).ClipX().DragWindow().Children(func() {
 		glassGroup(c.Key("where"), func() {
-			capsuleButton(c.Key("repo"), "folder-git-2", m.Repo.Name(), width < compactRepoWidth, true).Shrink(0).Menu(ws.repoMenu)
+			repoIcon := "folder-git-2"
+			if m.Repo.Remote() {
+				repoIcon = "server"
+			}
+			repoButton := capsuleButton(c.Key("repo"), repoIcon, m.Repo.Name(), width < compactRepoWidth, true).Shrink(0).Menu(ws.repoMenu)
+			if m.Repo.Remote() {
+				repoButton.Tooltip(m.Repo.Label())
+			}
 			capsuleButton(c.Key("branch"), "git-branch", ws.branchLabel(), false, true).Shrink(1).MinWidth(0).
 				Tooltip(ws.branchLabel()).Menu(ws.branchPopup)
 		}).Shrink(1).MinWidth(0).ClipX()

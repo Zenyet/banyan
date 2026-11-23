@@ -334,6 +334,9 @@ func (rw *repoWindow) tab(c *ui.Context, ix int) {
 	tab.Children(func() {
 		ui.Icon(c, icon("folder-git-2")).FontSize(t.FontSize - 1)
 		ui.Text(c, m.Repo.Name()).SingleLine().Shrink(1).MinWidth(0)
+		if m.Repo.Remote() {
+			ui.Icon(c, icon("server")).FontSize(t.FontSize - 2).TextColor(t.TextMuted).Shrink(0).Tooltip(m.Repo.SSHHost())
+		}
 		// A crowded tab bar leaves the branch to the tab shown.
 		roomy := c.Root().Bounds().W/float32(len(rw.tabs)) >= 260
 		if m.CurrentBranch != "" && (roomy || active) {
