@@ -163,6 +163,7 @@ func openPush(ws *Workspace) {
 	var target *git.PushTarget
 	var commits []git.Commit
 	var files []git.FileChange
+	var details *git.CommitDetails
 	var loadErr error
 	loading := true
 	selected := -1
@@ -177,9 +178,9 @@ func openPush(ws *Workspace) {
 			d, err := repo.CommitDetails(id)
 			model.Post(func() {
 				if g == gen {
-					files = nil
+					files, details = nil, nil
 					if err == nil {
-						files = d.Files
+						details, files = d, d.Files
 					}
 				}
 			})
@@ -246,7 +247,9 @@ func openPush(ws *Workspace) {
 			}, func() {
 				ui.Scroll(c.Key("files")).Fill().PaddingY(4).Children(func() {
 					for ix := range files {
-						fileRow(c, &files[ix], false)
+						if fileRow(c, &files[ix], false).Clicked() {
+							openPushFile(ws, details, files[ix])
+						}
 					}
 				})
 			}).Fill()
@@ -279,6 +282,31 @@ func openPush(ws *Workspace) {
 				ws.run(label, func(r *git.Repo) (string, error) { return r.PushTo(&tg, f, tt) })
 			}
 		})
+	}})
+}
+
+// openPushFile shows a file of the commit the Push dialog has chosen, in
+// a dialog over it.
+func openPushFile(ws *Workspace, d *git.CommitDetails, f git.FileChange) {
+	if d == nil {
+		return
+	}
+	oldPath := f.OrigPath
+	if oldPath == "" {
+		oldPath = f.Path
+	}
+	repo := ws.Model.Repo
+	diff := newDiffPane(ws)
+	diff.Show(DiffSource{
+		Title: f.Path,
+		Path:  f.Path,
+		Patch: func() (string, error) { return repo.CommitFileDiff(d, &f) },
+		Old:   blob(repo, d.BaseParent(), oldPath),
+		New:   blob(repo, d.ID, f.Path),
+	})
+	title := f.Path + "  (" + short(d.ID) + ")"
+	ws.Shell.Open(&Dialog{Title: title, Width: 1100, Body: func(c *ui.Context, dd *Dialog) {
+		framed(c, 620, func() { diff.View(c) })
 	}})
 }
 
