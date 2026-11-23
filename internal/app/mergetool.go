@@ -43,6 +43,11 @@ type mergeTool struct {
 	current    int
 	reveal     bool
 	undo, redo [][]*conflict.Resolution
+	// width is the code's width, wider than a pane for long lines, which
+	// do not wrap; hx pans all panes sideways, within paneWidth.
+	width     float32
+	paneWidth float32
+	hx        float32
 }
 
 // shown is a line as shown: without its ending, tabs as spaces.
@@ -198,6 +203,8 @@ func (mt *mergeTool) apply(d *Dialog) {
 
 func (mt *mergeTool) view(c *ui.Context, d *Dialog) {
 	t := c.Theme()
+	mt.width = mt.codeWidth(c, t)
+	mt.hx = min(mt.hx, max(mt.width-mt.paneWidth, 0))
 	total := len(mt.resolutions)
 	resolved := 0
 	for _, r := range mt.resolutions {
@@ -291,31 +298,85 @@ func (mt *mergeTool) view(c *ui.Context, d *Dialog) {
 	})
 }
 
-// lines shows lines in color, numbered from first when not 0. Long lines
-// wrap; every column keeps the line-number gutter so they wrap alike.
-func mergeLines(c *ui.Context, lines []string, first int, color ui.Color) {
-	t := c.Theme()
-	for ix, l := range lines {
-		ui.Row(c.Key(ix)).AlignItems(ui.Start).MinHeight(mergeLineHeight).Children(func() {
-			number := ""
-			if first > 0 {
-				number = fmt.Sprint(first + ix)
+// codeWidth measures the widest line the panes show, so that a long line
+// scrolls sideways rather than wrapping.
+func (mt *mergeTool) codeWidth(c *ui.Context, t *ui.Theme) float32 {
+	longest := ""
+	consider := func(lines []string) {
+		for _, l := range lines {
+			if s := shown(l); len(s) > len(longest) {
+				longest = s
 			}
-			ui.Text(c, number).Width(36).PaddingEnd(8).TextAlign(ui.End).TextColor(t.TextMuted).FontSize(t.FontSize - 1)
-			ui.Text(c, shown(l)).Grow(1).Shrink(1).MinWidth(0).PaddingStart(8).TextColor(color)
-		})
+		}
 	}
+	ix := 0
+	for _, seg := range mt.segments {
+		if seg.Conflict == nil {
+			consider(seg.Clean)
+			continue
+		}
+		consider(seg.Conflict.Ours)
+		consider(seg.Conflict.Base)
+		consider(seg.Conflict.Theirs)
+		if r := mt.resolutions[ix]; r != nil {
+			consider(seg.Conflict.Resolved(*r))
+		}
+		ix++
+	}
+	w, _ := c.MeasureText(0, ui.Span{Text: longest, Font: monoFont, Size: t.FontSize})
+	// The line-number gutter and the code's padding.
+	return w + 60
+}
+
+// mergeLines shows lines in color, numbered from first when not 0. Long
+// lines scroll sideways, all three panes together, rather than wrap.
+func (mt *mergeTool) mergeLines(c *ui.Context, lines []string, first int, color ui.Color) {
+	t := c.Theme()
+	pane := ui.Column(c.Key("lines")).FillWidth().Clip()
+	if w := pane.Bounds().W; w > 0 {
+		mt.paneWidth = w
+	}
+	pane.HandleInput(mt.sideways).Children(func() {
+		ui.Column(c.Key("code")).Width(mt.width).Translate(-mt.hx, 0).Children(func() {
+			for ix, l := range lines {
+				ui.Row(c.Key(ix)).AlignItems(ui.Start).Height(mergeLineHeight).Children(func() {
+					number := ""
+					if first > 0 {
+						number = fmt.Sprint(first + ix)
+					}
+					ui.Text(c, number).Width(36).PaddingEnd(8).TextAlign(ui.End).TextColor(t.TextMuted).FontSize(t.FontSize - 1)
+					ui.Text(c, shown(l)).NoWrap().PaddingStart(8).PaddingEnd(8).TextColor(color)
+				})
+			}
+		})
+	})
+}
+
+// sideways takes a horizontal wheel, or a wheel with Shift, over a pane
+// and pans all three, so the sides stay lined up. A wheel that also goes
+// up or down passes on, so the rows scroll too.
+func (mt *mergeTool) sideways(ev ui.InputEvent) bool {
+	shift := ev.Mods&ui.Shift != 0
+	dx := ev.DX
+	if shift && dx == 0 {
+		dx = ev.DY
+	}
+	if dx == 0 {
+		return false
+	}
+	mt.hx = min(max(mt.hx+dx, 0), max(mt.width-mt.paneWidth, 0))
+	return shift
 }
 
 func (mt *mergeTool) cleanRows(c *ui.Context, si int, lines []string, first int) {
 	t := c.Theme()
 	threeColumns := func(key string, lines []string, first int) {
 		ui.Row(c.Key(key)).AlignItems(ui.Start).Children(func() {
-			ui.Column(c.Key("ours")).Grow(1).Basis(0).MinWidth(0).Children(func() { mergeLines(c, lines, 0, t.TextMuted) })
+			ui.Column(c.Key("ours")).Grow(1).Basis(0).MinWidth(0).Children(func() { mt.mergeLines(c, lines, 0, t.TextMuted) })
 			ui.Box(c).Width(mergeGutter)
-			ui.Column(c.Key("result")).Grow(1).Basis(0).MinWidth(0).Children(func() { mergeLines(c, lines, first, t.Text) })
+			ui.Column(c.Key("result")).Grow(1).Basis(0).MinWidth(0).Children(func() { mt.mergeLines(c, lines, first, t.Text) })
 			ui.Box(c).Width(mergeGutter)
-			ui.Column(c.Key("theirs")).Grow(1).Basis(0).MinWidth(0).Children(func() { mergeLines(c, lines, 0, t.TextMuted) })
+			ui.Column(c.Key("theirs")).Grow(1).Basis(0).MinWidth(0).Children(func() { mt.mergeLines(c, lines, 0, t.TextMuted) })
 		})
 	}
 	head, tail := foldContext, foldContext
@@ -369,7 +430,7 @@ func (mt *mergeTool) conflictRows(c *ui.Context, ix int, cf *conflict.Conflict, 
 			if len(lines) == 0 {
 				noLines(i18n.T("(no lines)"))
 			}
-			mergeLines(c, lines, 0, t.Text)
+			mt.mergeLines(c, lines, 0, t.Text)
 		})
 	}
 	arrow := func(key, name, tip string, ours bool) {
@@ -421,7 +482,7 @@ func (mt *mergeTool) conflictRows(c *ui.Context, ix int, cf *conflict.Conflict, 
 				if len(lines) == 0 {
 					noLines(i18n.T("(no lines)"))
 				}
-				mergeLines(c, lines, first, t.Text)
+				mt.mergeLines(c, lines, first, t.Text)
 			})
 		default:
 			middle.Background(unresolvedBG).Children(func() {
@@ -429,7 +490,7 @@ func (mt *mergeTool) conflictRows(c *ui.Context, ix int, cf *conflict.Conflict, 
 				if len(cf.Base) == 0 {
 					noLines(i18n.T("(not in the common ancestor)"))
 				}
-				mergeLines(c, cf.Base, 0, t.TextMuted)
+				mt.mergeLines(c, cf.Base, 0, t.TextMuted)
 			})
 		}
 		arrow("take-theirs", "chevrons-left", i18n.T("Accept Theirs"), false)
