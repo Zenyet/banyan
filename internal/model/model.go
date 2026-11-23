@@ -131,7 +131,7 @@ func New(repo *git.Repo) *Model {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &Model{
 		Repo:        repo,
-		Changelists: changelists.Load(repo.GitDir()),
+		Changelists: changelists.LoadAt(repo, repo.GitDir()),
 		listeners:   map[int]func(Event){},
 		ctx:         ctx,
 		cancel:      cancel,
@@ -529,7 +529,7 @@ func (m *Model) ChangeLists(change func(*changelists.Changelists) error) {
 	m.emit(Event{Kind: Changed})
 }
 
-func (m *Model) saveChangelists() { m.Changelists.Save(m.Repo.GitDir()) }
+func (m *Model) saveChangelists() { m.Changelists.SaveTo(m.Repo, m.Repo.GitDir()) }
 
 // Shelve shelves the changes of paths, remembering their changelist.
 func (m *Model) Shelve(name string, paths []string) {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -285,8 +286,17 @@ func savePatch(ws *Workspace, ids []string, title string) {
 		}
 	}
 	name := strings.Join(words, "-") + ".patch"
+	defaultDir := ws.Model.Repo.Root()
+	if ws.Model.Repo.Remote() {
+		// The save dialog is this machine's: a patch of a remote repository
+		// is saved here, in the home folder.
+		defaultDir = ""
+		if home, err := os.UserHomeDir(); err == nil {
+			defaultDir = home
+		}
+	}
 	go func() {
-		dest, err := mygo.Dialog.Save(mygo.SaveDialogOptions{Parent: ws.Shell.Win, DefaultPath: filepath.Join(ws.Model.Repo.Root(), name)})
+		dest, err := mygo.Dialog.Save(mygo.SaveDialogOptions{Parent: ws.Shell.Win, DefaultPath: filepath.Join(defaultDir, name)})
 		if err != nil || dest == "" {
 			return
 		}
@@ -304,10 +314,15 @@ func savePatch(ws *Workspace, ids []string, title string) {
 func reword(ws *Workspace, id string) {
 	rw := &git.Rewrite{Kind: git.RewriteReword, IDs: []string{id}}
 	withChecks(ws, rw, "", func() {
-		current, _ := ws.Model.Repo.CommitMessage(id)
-		ws.Shell.PromptMessage(i18n.Tf("Edit Commit Message of {}", short(id)), "", i18n.T("Save"), current, func(message string) {
-			runRewrite(ws, i18n.Tf("Edit message of {}", short(id)), &git.Rewrite{Kind: git.RewriteReword, IDs: []string{id}, Message: message})
-		})
+		repo := ws.Model.Repo
+		go func() {
+			current, _ := repo.CommitMessage(id)
+			model.Post(func() {
+				ws.Shell.PromptMessage(i18n.Tf("Edit Commit Message of {}", short(id)), "", i18n.T("Save"), current, func(message string) {
+					runRewrite(ws, i18n.Tf("Edit message of {}", short(id)), &git.Rewrite{Kind: git.RewriteReword, IDs: []string{id}, Message: message})
+				})
+			})
+		}()
 	})
 }
 
@@ -315,27 +330,37 @@ func reword(ws *Workspace, id string) {
 // oldest.
 func squashCommits(ws *Workspace, ids []string) {
 	withChecks(ws, &git.Rewrite{Kind: git.RewriteSquash, IDs: ids}, "", func() {
-		var messages []string
-		for i := len(ids) - 1; i >= 0; i-- {
-			if msg, err := ws.Model.Repo.CommitMessage(ids[i]); err == nil {
-				messages = append(messages, msg)
+		repo := ws.Model.Repo
+		go func() {
+			var messages []string
+			for i := len(ids) - 1; i >= 0; i-- {
+				if msg, err := repo.CommitMessage(ids[i]); err == nil {
+					messages = append(messages, msg)
+				}
 			}
-		}
-		count := len(ids)
-		ws.Shell.PromptMessage(i18n.Tf("Squash {} Commits", count), i18n.T("The commits become one, with this message:"), i18n.T("Squash"),
-			strings.Join(messages, "\n\n"), func(message string) {
-				runRewrite(ws, i18n.Tf("Squash {} commits", count), &git.Rewrite{Kind: git.RewriteSquash, IDs: ids, Message: message})
+			model.Post(func() {
+				count := len(ids)
+				ws.Shell.PromptMessage(i18n.Tf("Squash {} Commits", count), i18n.T("The commits become one, with this message:"), i18n.T("Squash"),
+					strings.Join(messages, "\n\n"), func(message string) {
+						runRewrite(ws, i18n.Tf("Squash {} commits", count), &git.Rewrite{Kind: git.RewriteSquash, IDs: ids, Message: message})
+					})
 			})
+		}()
 	})
 }
 
 func squashIntoParent(ws *Workspace, id string) {
-	parent, err := ws.Model.Repo.Git("rev-parse", "--verify", "-q", id+"^")
-	if err != nil {
-		ws.Shell.Toast("warning", i18n.T("The first commit has no parent to squash into."))
-		return
-	}
-	squashCommits(ws, []string{id, strings.TrimSpace(parent)})
+	repo := ws.Model.Repo
+	go func() {
+		parent, err := repo.Git("rev-parse", "--verify", "-q", id+"^")
+		model.Post(func() {
+			if err != nil {
+				ws.Shell.Toast("warning", i18n.T("The first commit has no parent to squash into."))
+				return
+			}
+			squashCommits(ws, []string{id, strings.TrimSpace(parent)})
+		})
+	}()
 }
 
 func fixupIntoParent(ws *Workspace, id string) {
@@ -376,33 +401,40 @@ func undoCommit(ws *Workspace, id string) {
 // about rewriting pushed commits in one confirmation, and goes on with
 // proceed.
 func withChecks(ws *Workspace, rw *git.Rewrite, question string, proceed func()) {
+	// The checks walk the history, and a repository over SSH takes them
+	// over the network: they run before the question is asked, off the
+	// main thread.
 	repo := ws.Model.Repo
-	base, err := repo.RewriteBase(rw)
-	if err != nil {
-		ws.Shell.Toast("warning", err.Error())
-		return
-	}
-	upstream, pushed := repo.PushedTo(base)
-	if pushed && isProtected(upstream) {
-		ws.Shell.Toast("warning", protectedMessage(upstream))
-		return
-	}
-	var parts []string
-	if question != "" {
-		parts = append(parts, question)
-	}
-	if pushed {
-		parts = append(parts, i18n.Tf("These commits are already in {}; rewriting them means force pushing later.", upstream))
-	}
-	if len(parts) == 0 {
-		proceed()
-		return
-	}
-	title := i18n.T("Rewrite Pushed Commits")
-	if question != "" {
-		title = i18n.T("Drop Commits")
-	}
-	ws.Shell.Confirm(title, strings.Join(parts, " "), i18n.T("Continue"), proceed)
+	go func() {
+		base, err := repo.RewriteBase(rw)
+		if err != nil {
+			model.Post(func() { ws.Shell.Toast("warning", err.Error()) })
+			return
+		}
+		upstream, pushed := repo.PushedTo(base)
+		if pushed && isProtected(upstream) {
+			model.Post(func() { ws.Shell.Toast("warning", protectedMessage(upstream)) })
+			return
+		}
+		model.Post(func() {
+			var parts []string
+			if question != "" {
+				parts = append(parts, question)
+			}
+			if pushed {
+				parts = append(parts, i18n.Tf("These commits are already in {}; rewriting them means force pushing later.", upstream))
+			}
+			if len(parts) == 0 {
+				proceed()
+				return
+			}
+			title := i18n.T("Rewrite Pushed Commits")
+			if question != "" {
+				title = i18n.T("Drop Commits")
+			}
+			ws.Shell.Confirm(title, strings.Join(parts, " "), i18n.T("Continue"), proceed)
+		})
+	}()
 }
 
 func runRewrite(ws *Workspace, label string, rw *git.Rewrite) {

@@ -117,6 +117,9 @@ type Config struct {
 	// AllowTools lets an ACP agent use its tools; it may then run commands
 	// in the repository.
 	AllowTools bool
+	// RemoteRepo is the repository when it is on another machine: an ACP
+	// agent then runs there. Nil when it is on this one.
+	RemoteRepo *RemoteRepo
 	// SubjectOnly writes the subject line alone, as git logs show it. Off,
 	// the model may add a body after a blank line.
 	SubjectOnly bool
@@ -156,6 +159,13 @@ func (c Config) Validate() error {
 		return errors.New(i18n.T("Unknown AI provider"))
 	}
 	return nil
+}
+
+// RemoteRepo is a repository on another machine, reached over SSH: the ACP
+// agent runs there, and the files it asks for are read from there.
+type RemoteRepo struct {
+	Host     string
+	ReadFile func(path string) ([]byte, error)
 }
 
 // Request is what the model is told about the commit.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -24,19 +25,32 @@ type Repo struct {
 	// partial is a partial clone, whose file contents git downloads from
 	// the remote the first time they are needed.
 	partial bool
+	// ssh is the host the repository is on, nil when it is on this machine.
+	ssh *SSH
 }
 
+// Open opens the repository at path on this machine.
 func Open(path string) (*Repo, error) {
-	out, err := run(path, []string{"rev-parse", "--show-toplevel", "--absolute-git-dir"}, false)
+	return open(&Repo{root: path})
+}
+
+// open fills in a repository's root and git directory, running git through
+// its transport.
+func open(r *Repo) (*Repo, error) {
+	out, err := r.run([]string{"rev-parse", "--show-toplevel", "--absolute-git-dir"})
 	if err != nil {
-		return nil, fmt.Errorf("%s is not a git repository: %w", path, err)
+		return nil, fmt.Errorf("%s is not a git repository: %w", r.Location(), err)
 	}
 	ls := lines(out)
 	if len(ls) < 2 {
-		return nil, fmt.Errorf("%s is not a git repository", path)
+		return nil, fmt.Errorf("%s is not a git repository", r.Location())
 	}
-	r := &Repo{root: filepath.FromSlash(ls[0]), gitDir: filepath.FromSlash(ls[1])}
-	if out, err := run(r.root, []string{"config", "--get-regexp", `^remote\..*\.promisor$`}, false); err == nil {
+	root, gitDir := ls[0], ls[1]
+	if r.ssh == nil {
+		root, gitDir = filepath.FromSlash(root), filepath.FromSlash(gitDir)
+	}
+	r.root, r.gitDir = root, gitDir
+	if out, err := r.run([]string{"config", "--get-regexp", `^remote\..*\.promisor$`}); err == nil {
 		r.partial = strings.Contains(out, " true")
 	}
 	return r, nil
@@ -60,7 +74,7 @@ func (r *Repo) Prefetch(ctx context.Context, base, id string) error {
 	}
 	// git fetches what a diff needs in one batch; the patch itself is not
 	// wanted.
-	cmd := commandContext(ctx, r.root, args)
+	cmd := r.commandContext(ctx, args)
 	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 	return cmd.Run()
 }
@@ -104,19 +118,23 @@ func (r *Repo) Root() string   { return r.root }
 func (r *Repo) GitDir() string { return r.gitDir }
 
 func (r *Repo) Name() string {
-	if name := filepath.Base(r.root); name != "" && name != "." && name != string(filepath.Separator) {
-		return name
+	base := filepath.Base(r.root)
+	if r.ssh != nil {
+		base = path.Base(r.root)
+	}
+	if base != "" && base != "." && base != string(filepath.Separator) {
+		return base
 	}
 	return r.root
 }
 
 func (r *Repo) Git(args ...string) (string, error) {
-	return run(r.root, args, r.recorded)
+	return r.run(args)
 }
 
 // GitWithInput runs git with input on stdin.
 func (r *Repo) GitWithInput(input string, args ...string) (string, error) {
-	return runInput(r.root, args, []byte(input), r.recorded)
+	return r.runInput(args, []byte(input))
 }
 
 func (r *Repo) ok(args ...string) bool {
@@ -534,7 +552,7 @@ func (r *Repo) NotIgnored(paths []string) ([]string, error) {
 		input.WriteString(p)
 		input.WriteByte(0)
 	}
-	cmd := command(r.root, []string{"check-ignore", "--stdin", "-z"})
+	cmd := r.command([]string{"check-ignore", "--stdin", "-z"})
 	cmd.Stdin = strings.NewReader(input.String())
 	// check-ignore exits with 1 when nothing is ignored.
 	out, _ := cmd.Output()
@@ -595,13 +613,13 @@ func (r *Repo) CommitDetailsAgainst(id string, base int) (*CommitDetails, error)
 // history walks much of it, and checks its signature, which runs gpg or
 // ssh. Canceling ctx stops them.
 func (r *Repo) CommitExtras(ctx context.Context, id string) (branches []string, sig Signature, err error) {
-	out, err := runContext(ctx, r.root, []string{"show", "-s", "--format=%G?" + field + "%GS", id}, nil, false)
+	out, err := r.runContext(ctx, []string{"show", "-s", "--format=%G?" + field + "%GS", id}, nil)
 	if err != nil {
 		return nil, Signature{}, err
 	}
 	code, signer, _ := strings.Cut(strings.TrimRight(out, "\n"), field)
 	sig = parseSignature(code, signer)
-	out, err = runContext(ctx, r.root, []string{"branch", "-a", "--format=%(refname:short)", "--contains", id}, nil, false)
+	out, err = r.runContext(ctx, []string{"branch", "-a", "--format=%(refname:short)", "--contains", id}, nil)
 	if err != nil {
 		return nil, sig, err
 	}
@@ -780,7 +798,7 @@ func (r *Repo) Status() ([]StatusEntry, error) {
 // unstaged together).
 func (r *Repo) WorktreeDiff(e *StatusEntry, ignoreWhitespace bool) (string, error) {
 	if e.IsUntracked() {
-		return runAllowDiff(r.root, []string{"diff", "--no-index", "--", os.DevNull, e.Path})
+		return r.runAllowDiff([]string{"diff", "--no-index", "--", r.ignoredPath(), e.Path})
 	}
 	args := []string{"diff", "-M"}
 	if ignoreWhitespace {
@@ -798,20 +816,22 @@ func (r *Repo) WorktreeDiff(e *StatusEntry, ignoreWhitespace bool) (string, erro
 	return r.Git(args...)
 }
 
-func exists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
 func (r *Repo) State() RepoState {
+	present := r.existing(
+		r.join(r.gitDir, "rebase-merge"),
+		r.join(r.gitDir, "rebase-apply"),
+		r.join(r.gitDir, "MERGE_HEAD"),
+		r.join(r.gitDir, "CHERRY_PICK_HEAD"),
+		r.join(r.gitDir, "REVERT_HEAD"),
+	)
 	switch {
-	case exists(filepath.Join(r.gitDir, "rebase-merge")) || exists(filepath.Join(r.gitDir, "rebase-apply")):
+	case present[0] || present[1]:
 		return Rebasing
-	case exists(filepath.Join(r.gitDir, "MERGE_HEAD")):
+	case present[2]:
 		return Merging
-	case exists(filepath.Join(r.gitDir, "CHERRY_PICK_HEAD")):
+	case present[3]:
 		return CherryPicking
-	case exists(filepath.Join(r.gitDir, "REVERT_HEAD")):
+	case present[4]:
 		return Reverting
 	}
 	return Clean
@@ -820,7 +840,7 @@ func (r *Repo) State() RepoState {
 // MergeMessage is the prepared message of an in-progress merge, cherry-pick
 // or revert.
 func (r *Repo) MergeMessage() string {
-	text, err := os.ReadFile(filepath.Join(r.gitDir, "MERGE_MSG"))
+	text, err := r.ReadFile(r.join(r.gitDir, "MERGE_MSG"))
 	if err != nil {
 		return ""
 	}

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"path"
 	"path/filepath"
 	"slices"
@@ -35,6 +36,10 @@ type changes struct {
 // level or its refs reads the repository again, one in the work tree only
 // the status, unless git ignores where it was.
 func (m *Model) watch() {
+	if m.Repo.Remote() {
+		m.watchRemote()
+		return
+	}
 	root, gitDir := m.Repo.Root(), m.Repo.GitDir()
 	found := make(chan changes, 16)
 	// ignoring leaves out the git directory's objects, logs and the like,
@@ -127,6 +132,49 @@ func (m *Model) watch() {
 					}
 				})
 			}
+		}
+	}()
+}
+
+// watchRemote polls a repository over SSH, whose files cannot be watched
+// here: every few seconds it reads the status, and now and then everything,
+// so that changes made in a terminal there show up.
+func (m *Model) watchRemote() {
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		lastStatus, lastHead := "", ""
+		tick := 0
+		for {
+			select {
+			case <-m.ctx.Done():
+				return
+			case <-ticker.C:
+			}
+			status, err := m.Repo.Status()
+			if err != nil {
+				continue
+			}
+			head, _ := m.Repo.Head()
+			key := fmt.Sprintf("%v", status)
+			statusChanged, headChanged := key != lastStatus, head != lastHead
+			lastStatus, lastHead = key, head
+			tick++
+			full := tick%6 == 0
+			if !statusChanged && !headChanged && !full {
+				continue
+			}
+			Post(func() {
+				// An operation of our own refreshes when it finishes.
+				if m.Busy != "" || m.ctx.Err() != nil {
+					return
+				}
+				if headChanged || full {
+					m.Refresh()
+				} else {
+					m.refreshStatus()
+				}
+			})
 		}
 	}()
 }

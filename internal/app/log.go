@@ -460,7 +460,24 @@ func (lv *LogView) togglePathFilter(path string) {
 }
 
 func (lv *LogView) choosePathFilter() {
-	root := lv.ws.Model.Repo.Root()
+	repo := lv.ws.Model.Repo
+	if repo.Remote() {
+		// The file dialog is this machine's; a repository over SSH takes
+		// the path in the repository instead.
+		lv.ws.Shell.PromptText(i18n.T("Filter"), i18n.T("Filter"), "", func(p string) {
+			p = strings.Trim(filepath.ToSlash(strings.TrimSpace(p)), "/")
+			if p == "" || p == "." {
+				lv.pathFilter = nil
+				lv.reload()
+				return
+			}
+			if !slices.Contains(lv.pathFilter, p) {
+				lv.togglePathFilter(p)
+			}
+		})
+		return
+	}
+	root := repo.Root()
 	go func() {
 		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: lv.ws.Shell.Win, Title: i18n.T("Filter"), Directory: false})
 		if err != nil || len(paths) == 0 {

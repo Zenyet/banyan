@@ -22,6 +22,7 @@ func setMenu() {
 	file := []*mygo.MenuItem{
 		item("open"),
 		{Label: i18n.T("Clone Repository…"), Click: func(_ *mygo.MenuItem, w *mygo.Window) { openClone(targetShell(w)) }},
+		{Label: i18n.T("Open Repository over SSH…"), Click: func(_ *mygo.MenuItem, w *mygo.Window) { openSSHRepo(targetShell(w)) }},
 		mygo.Separator(),
 		item("save"),
 		mygo.Separator(),

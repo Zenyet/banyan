@@ -7,6 +7,7 @@ package changelists
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -199,20 +200,46 @@ func (c *Changelists) text() string {
 	return b.String()
 }
 
+// FileSystem is the file access the changelists need: this machine's, or
+// a repository's over SSH.
+type FileSystem interface {
+	ReadFile(path string) ([]byte, error)
+	WriteFile(path string, data []byte, mode fs.FileMode) error
+	MkdirAll(path string, mode fs.FileMode) error
+	JoinPath(elem ...string) string
+}
+
+// localFS is the file system of this machine.
+type localFS struct{}
+
+func (localFS) ReadFile(path string) ([]byte, error) { return os.ReadFile(path) }
+func (localFS) WriteFile(path string, data []byte, m fs.FileMode) error {
+	return os.WriteFile(path, data, m)
+}
+func (localFS) MkdirAll(path string, m fs.FileMode) error { return os.MkdirAll(path, m) }
+func (localFS) JoinPath(elem ...string) string            { return filepath.Join(elem...) }
+
 // Load reads the changelists of the repository whose git directory is
-// gitDir.
-func Load(gitDir string) *Changelists {
-	text, err := os.ReadFile(filepath.Join(gitDir, "banyan", "changelists"))
+// gitDir, on this machine.
+func Load(gitDir string) *Changelists { return LoadAt(localFS{}, gitDir) }
+
+// LoadAt reads the changelists of the repository whose git directory is
+// gitDir, through fsys.
+func LoadAt(fsys FileSystem, gitDir string) *Changelists {
+	text, err := fsys.ReadFile(fsys.JoinPath(gitDir, "banyan", "changelists"))
 	if err != nil {
 		return New()
 	}
 	return parse(string(text))
 }
 
-func (c *Changelists) Save(gitDir string) error {
-	dir := filepath.Join(gitDir, "banyan")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+func (c *Changelists) Save(gitDir string) error { return c.SaveTo(localFS{}, gitDir) }
+
+// SaveTo writes the changelists through fsys.
+func (c *Changelists) SaveTo(fsys FileSystem, gitDir string) error {
+	dir := fsys.JoinPath(gitDir, "banyan")
+	if err := fsys.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "changelists"), []byte(c.text()), 0o644)
+	return fsys.WriteFile(fsys.JoinPath(dir, "changelists"), []byte(c.text()), 0o644)
 }

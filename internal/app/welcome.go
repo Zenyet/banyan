@@ -45,6 +45,11 @@ var recentHeads = map[string]recentHead{}
 // a folder that is not a repository is skipped.
 func loadRecentHeads(paths []string) {
 	for _, path := range paths {
+		if _, _, remote := git.ParseLocation(path); remote {
+			// Reading a remote repository's branch would connect, and
+			// perhaps ask for a password, just to fill in the list.
+			continue
+		}
 		if info, err := os.Stat(path); err != nil || !info.IsDir() {
 			continue
 		}
@@ -125,6 +130,12 @@ func welcomeView(s *Shell, c *ui.Context) {
 				if clone.Clicked() {
 					openClone(s)
 				}
+				ssh := selectedPill(ui.ButtonBase(c.Key("ssh")).FillWidth().Height(36).Radius(18).Center(), t).
+					Label(i18n.T("Open Repository over SSH…"))
+				ssh.Children(func() { ui.Text(c, i18n.T("Open Repository over SSH…")).FontWeight(500) })
+				if ssh.Clicked() {
+					openSSHRepo(s)
+				}
 				ui.Spacer(c)
 				if ghostButton(c.Key("settings"), "settings", i18n.T("Settings")).Radius(14).Clicked() {
 					openSettings()
@@ -139,7 +150,7 @@ func welcomeView(s *Shell, c *ui.Context) {
 					ui.Column(c).Grow(1).Center().Gap(12).Margin(12).Radius(14).Border(2, t.Border).BorderStyle(ui.BorderDashed).TextColor(t.TextMuted).Children(func() {
 						ui.Icon(c, icon("folder-open")).FontSize(28)
 						ui.Text(c, i18n.T("Drag a repository folder here to open it"))
-						ui.Text(c, i18n.T("or choose Open Repository… or Clone Repository…")).FontSize(t.FontSize - 1)
+						ui.Text(c, i18n.T("or choose Open Repository…, Clone Repository… or Open Repository over SSH…")).FontSize(t.FontSize - 1)
 					})
 				} else {
 					ui.Scroll(c.Key("recent-list")).Grow(1).Children(func() {
@@ -163,9 +174,13 @@ func welcomeView(s *Shell, c *ui.Context) {
 
 func recentRow(s *Shell, c *ui.Context, ix int, path string) {
 	t := c.Theme()
-	info, err := os.Stat(path)
-	exists := err == nil && info.IsDir()
-	name := filepath.Base(path)
+	_, _, remote := git.ParseLocation(path)
+	exists := true
+	if !remote {
+		info, err := os.Stat(path)
+		exists = err == nil && info.IsDir()
+	}
+	name := locationName(path)
 	row := ui.Row(c.Key(path)).PaddingX(12).PaddingY(8).Gap(12).Radius(10)
 	hovered := row.Hovered()
 	if hovered {
@@ -174,7 +189,7 @@ func recentRow(s *Shell, c *ui.Context, ix int, path string) {
 	if exists {
 		row.Cursor(ui.CursorPointer)
 		if row.Clicked() {
-			openPath(s, path, true)
+			openLocation(s, path, true)
 		}
 	}
 	row.Children(func() {
@@ -192,7 +207,7 @@ func recentRow(s *Shell, c *ui.Context, ix int, path string) {
 		}
 		col.Children(func() {
 			ui.Text(c, name).FontWeight(600).SingleLine()
-			where := tilde(path)
+			where := locationWhere(path)
 			if !exists {
 				where = i18n.Tf("{} (not found)", where)
 			}
@@ -211,6 +226,27 @@ func recentRow(s *Shell, c *ui.Context, ix int, path string) {
 			settings.RemoveRecent(path)
 		}
 	})
+}
+
+// locationName is the folder name of a location, local or remote.
+func locationName(location string) string {
+	if host, p, ok := git.ParseLocation(location); ok {
+		p = strings.TrimSuffix(p, "/")
+		if p == "" {
+			return host
+		}
+		return p[strings.LastIndex(p, "/")+1:]
+	}
+	return filepath.Base(location)
+}
+
+// locationWhere names a location in the interface: a path with ~ for the
+// home folder, or user@host:path for a repository over SSH.
+func locationWhere(location string) string {
+	if host, p, ok := git.ParseLocation(location); ok {
+		return host + ":" + p
+	}
+	return tilde(location)
 }
 
 // recentHeadCell shows how far a recent repository's branch is from its

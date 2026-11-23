@@ -72,6 +72,12 @@ func (r *tempRepo) read(path string) string {
 
 func (r *tempRepo) exists(path string) bool { return exists(r.path(path)) }
 
+// exists reports whether a path on this machine is there.
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 func (r *tempRepo) git(args ...string) string {
 	r.t.Helper()
 	out, err := r.repo.Git(args...)
@@ -612,7 +618,7 @@ func TestWorktreesAreListedAddedAndRemoved(t *testing.T) {
 		t.Fatal("current")
 	}
 	os.WriteFile(filepath.Join(newPath, "dirty.txt"), []byte("x"), 0o644)
-	if !WorktreeIsDirty(newPath) {
+	if !r.repo.WorktreeDirty(newPath) {
 		t.Fatal("dirty")
 	}
 	if _, err := r.repo.RemoveWorktree(newPath, false); err == nil {

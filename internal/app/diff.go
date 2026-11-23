@@ -1,8 +1,8 @@
 package app
 
 import (
+	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -52,10 +52,10 @@ func blob(repo *git.Repo, rev, path string) func() ([]byte, error) {
 }
 
 // worktreeFile reads a file of the work tree, nil when it is not there.
-func worktreeFile(root, path string) ([]byte, error) {
-	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+func worktreeFile(repo *git.Repo, path string) ([]byte, error) {
+	data, err := repo.ReadFile(repo.Path(path))
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
 		return nil, err
@@ -171,25 +171,40 @@ func (p *DiffPane) checkEditable() {
 	case preview.Image, preview.Spreadsheet, preview.Document:
 		return
 	}
-	full := filepath.Join(p.ws.Model.Repo.Root(), filepath.FromSlash(p.source.Path))
-	info, err := os.Stat(full)
-	if err != nil || info.IsDir() {
+	repo := p.ws.Model.Repo
+	full := repo.Path(p.source.Path)
+	editable := func() bool {
+		if repo.IsDir(full) {
+			return false
+		}
+		if _, err := repo.Stat(full); err != nil {
+			return false
+		}
+		return isTextFile(repo, full)
+	}
+	if !repo.Remote() {
+		p.editable = editable()
 		return
 	}
-	p.editable = isTextFile(full)
+	// A remote file is a few ssh round trips; making them while the frame
+	// builds would hold up the interface.
+	src := p.source
+	go func() {
+		text := editable()
+		model.Post(func() {
+			if p.source == src {
+				p.editable = text
+				p.redraw()
+			}
+		})
+	}()
 }
 
 // isTextFile reports whether a file holds text: it has no NUL byte near its
 // start.
-func isTextFile(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	buf := make([]byte, 8000)
-	n, _ := f.Read(buf)
-	return !strings.ContainsRune(string(buf[:n]), 0)
+func isTextFile(repo *git.Repo, path string) bool {
+	data, err := repo.ReadHead(path, 8000)
+	return err == nil && !strings.ContainsRune(string(data), 0)
 }
 
 // Docked reports whether the pane shows in the view it belongs to, which

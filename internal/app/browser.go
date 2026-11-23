@@ -429,7 +429,7 @@ func openWorktreeDiff(ws *Workspace, from, to, path string) {
 		}
 		nw := blob(repo, to, f.Path)
 		if to == "" {
-			nw = func() ([]byte, error) { return worktreeFile(repo.Root(), f.Path) }
+			nw = func() ([]byte, error) { return worktreeFile(repo, f.Path) }
 		}
 		diff.Show(DiffSource{
 			Title: f.Path,

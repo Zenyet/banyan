@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Zenyet/banyan/internal/git"
 	"github.com/Zenyet/banyan/internal/i18n"
 )
 
@@ -31,7 +33,11 @@ type acpClient struct {
 	stdout io.ReadCloser
 	stderr *tailBuffer
 
-	root         string
+	root string
+	// sshHost runs the agent on another machine, whose files ReadFile
+	// reads.
+	sshHost      string
+	readFile     func(path string) ([]byte, error)
 	allowTools   bool
 	version      int
 	sessionID    string
@@ -89,13 +95,26 @@ type acpContent struct {
 }
 
 func startACP(ctx context.Context, cfg Config, root string) (*acpClient, error) {
+	var sshHost string
+	var readFile func(path string) ([]byte, error)
+	if cfg.RemoteRepo != nil {
+		sshHost, readFile = cfg.RemoteRepo.Host, cfg.RemoteRepo.ReadFile
+	}
 	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
+	switch {
+	case cfg.RemoteRepo != nil:
+		// The agent runs where the repository is, so that it sees the
+		// repository's own files and tools.
+		script := "cd " + git.QuoteArg(root) + " && exec sh -c " + git.QuoteArg(cfg.Command)
+		cmd = git.SSHCommand(ctx, cfg.RemoteRepo.Host, script)
+	case runtime.GOOS == "windows":
 		cmd = exec.CommandContext(ctx, "cmd", "/c", cfg.Command)
-	} else {
+	default:
 		cmd = exec.CommandContext(ctx, "sh", "-c", cfg.Command)
 	}
-	cmd.Dir = root
+	if cfg.RemoteRepo == nil {
+		cmd.Dir = root
+	}
 	setProcessGroup(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -116,6 +135,8 @@ func startACP(ctx context.Context, cfg Config, root string) (*acpClient, error) 
 		stdout:     stdout,
 		stderr:     stderr,
 		root:       root,
+		sshHost:    sshHost,
+		readFile:   readFile,
 		allowTools: cfg.AllowTools,
 		clientVer:  cfg.ClientVersion,
 		pending:    map[string]chan acpEnvelope{},
@@ -142,7 +163,7 @@ func startACP(ctx context.Context, cfg Config, root string) (*acpClient, error) 
 func (c *acpClient) initialize(ctx context.Context, both bool) (int, error) {
 	capabilities := map[string]any{
 		"fs":       map[string]bool{"readTextFile": true, "writeTextFile": false},
-		"terminal": c.allowTools,
+		"terminal": c.allowTools && c.sshHost == "",
 	}
 	params := map[string]any{
 		"protocolVersion":    2,
@@ -501,7 +522,7 @@ func (c *acpClient) serve(env acpEnvelope) {
 	case "session/request_permission":
 		c.reply(env.ID, c.permission(env.Params))
 	case "terminal/create", "terminal/output", "terminal/wait_for_exit", "terminal/kill", "terminal/release":
-		if !c.allowTools {
+		if !c.allowTools || c.sshHost != "" {
 			c.replyError(env.ID, -32601, i18n.T("The client does not run commands for the agent"))
 			return
 		}
@@ -525,14 +546,27 @@ func (c *acpClient) readTextFile(raw json.RawMessage) (any, error) {
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, err
 	}
-	abs, err := filepath.Abs(p.Path)
-	if err != nil {
-		return nil, err
+	var abs string
+	if c.sshHost != "" {
+		// Remote paths are the remote host's, always with slashes.
+		abs = path.Clean(p.Path)
+		if !path.IsAbs(abs) {
+			abs = path.Join(c.root, abs)
+		}
+		if !withinPath(c.root, abs) {
+			return nil, errors.New(i18n.T("The agent asked for a file outside the repository"))
+		}
+	} else {
+		var err error
+		abs, err = filepath.Abs(p.Path)
+		if err != nil {
+			return nil, err
+		}
+		if !within(c.root, abs) {
+			return nil, errors.New(i18n.T("The agent asked for a file outside the repository"))
+		}
 	}
-	if !within(c.root, abs) {
-		return nil, errors.New(i18n.T("The agent asked for a file outside the repository"))
-	}
-	data, err := os.ReadFile(abs)
+	data, err := c.readFileOf(abs)
 	if err != nil {
 		return nil, err
 	}
@@ -574,6 +608,22 @@ func (c *acpClient) permission(raw json.RawMessage) any {
 		}
 	}
 	return map[string]any{"outcome": map[string]string{"outcome": "cancelled"}}
+}
+
+// readFileOf reads a file the agent asked for: through the repository's
+// transport when it is on another machine.
+func (c *acpClient) readFileOf(path string) ([]byte, error) {
+	if c.readFile != nil {
+		return c.readFile(path)
+	}
+	return os.ReadFile(path)
+}
+
+// withinPath reports whether path is root or inside it, for paths on a
+// remote Unix host.
+func withinPath(root, path string) bool {
+	root = strings.TrimSuffix(root, "/")
+	return path == root || strings.HasPrefix(path, root+"/")
 }
 
 // within reports whether path is root or inside it.

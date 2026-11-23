@@ -50,7 +50,7 @@ func Run(requested string) error {
 			fmt.Fprintln(os.Stderr, "credential prompts unavailable:", err)
 		}
 		setMenu()
-		repos := initialRepos(requested)
+		repos, remote := initialRepos(requested)
 		if len(repos) > 0 {
 			openRepos(repos, false)
 		} else {
@@ -59,6 +59,10 @@ func Run(requested string) error {
 			if info, err := os.Stat(requested); requested != "" && err == nil && info.IsDir() {
 				openPath(welcome, requested, true)
 			}
+		}
+		// Repositories on other machines connect after their window is up.
+		for _, location := range remote {
+			openLocation(welcome, location, false)
 		}
 		checkGit()
 		// A newer release is looked for once a day, after the window is up.
@@ -96,10 +100,14 @@ func Run(requested string) error {
 		}
 	})
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
-		// The editor's files are saved as the app goes, as JetBrains does.
+		// The editor's files are saved as the app goes, as JetBrains does;
+		// writes to a repository over SSH finish first, within reason.
 		for _, rw := range repoWindows {
 			for _, ws := range rw.tabs {
 				ws.editorSave()
+				if ws.editor != nil {
+					ws.editor.WaitSaves(3 * time.Second)
+				}
 			}
 		}
 	})
@@ -170,35 +178,42 @@ func slicesEqual(a, b []settings.Shortcut) bool {
 
 // initialRepos are the repositories to open at launch: the one named on the
 // command line, the current directory, or (when launched from Finder) the
-// tabs open last time, else the last repository opened.
-func initialRepos(requested string) []*git.Repo {
-	if requested != "" {
-		if repo, err := git.Open(requested); err == nil {
-			return []*git.Repo{repo}
+// tabs open last time, else the last repository opened. Those on other
+// machines are returned by their locations, to connect to once the window is
+// up, so that a host that takes long to answer does not hold the app back.
+func initialRepos(requested string) (repos []*git.Repo, remote []string) {
+	open := func(location string) {
+		if _, _, ok := git.ParseLocation(location); ok {
+			remote = append(remote, location)
+			return
 		}
-		return nil
+		if repo, err := git.Open(location); err == nil {
+			repos = append(repos, repo)
+		}
+	}
+	if requested != "" {
+		open(requested)
+		return repos, remote
 	}
 	if dir, err := os.Getwd(); err == nil && dir != "/" {
 		if repo, err := git.Open(dir); err == nil {
-			return []*git.Repo{repo}
+			return []*git.Repo{repo}, nil
 		}
 	}
 	s := settings.Get()
-	var session []*git.Repo
-	for _, path := range s.Session {
-		if repo, err := git.Open(path); err == nil {
-			session = append(session, repo)
+	for _, location := range s.Session {
+		open(location)
+	}
+	if len(repos) > 0 || len(remote) > 0 {
+		return repos, remote
+	}
+	for _, location := range s.Recent {
+		open(location)
+		if len(repos) > 0 || len(remote) > 0 {
+			break
 		}
 	}
-	if len(session) > 0 {
-		return session
-	}
-	for _, path := range s.Recent {
-		if repo, err := git.Open(path); err == nil {
-			return []*git.Repo{repo}
-		}
-	}
-	return nil
+	return repos, remote
 }
 
 // promptOpenRepo asks for a repository folder and opens it, closing the

@@ -179,6 +179,12 @@ func (cv *ChangesView) generateCommitMessage() {
 		cv.ws.toast("warning", i18n.T("Select the changes to describe first"))
 		return
 	}
+	repo := cv.ws.Model.Repo
+	if repo.Remote() {
+		// The agent runs where the repository is; its file requests come
+		// back here through the same ssh connection.
+		cfg.RemoteRepo = &ai.RemoteRepo{Host: repo.SSHHost(), ReadFile: repo.ReadFile}
+	}
 	snap := cv.aiSnapshot()
 	before := cv.message
 	language := "en"
@@ -190,7 +196,6 @@ func (cv *ChangesView) generateCommitMessage() {
 	cv.genSeq++
 	seq := cv.genSeq
 	cv.genCancel = cancel
-	repo := cv.ws.Model.Repo
 	go func() {
 		req, err := snap.request(repo, language)
 		var message string

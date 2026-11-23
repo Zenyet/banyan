@@ -1,5 +1,7 @@
 // Package git is a thin wrapper over the git CLI, the same backend
-// JetBrains IDEs use.
+// JetBrains IDEs use. A repository may be on this machine or on another
+// one reached over SSH: every command and file access goes through the
+// repository's transport.
 package git
 
 import (
@@ -42,13 +44,31 @@ func GitVersion(program string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// command is git in dir on this machine.
 func command(dir string, args []string) *exec.Cmd {
-	return commandContext(context.Background(), dir, args)
+	return (&Repo{root: dir}).command(args)
 }
 
-// commandContext is git in dir, killed once ctx is done.
+// commandContext is git in dir on this machine, killed once ctx is done.
 func commandContext(ctx context.Context, dir string, args []string) *exec.Cmd {
-	full := append([]string{"-C", dir, "-c", "color.ui=false", "-c", "core.quotepath=false"}, args...)
+	return (&Repo{root: dir}).commandContext(ctx, args)
+}
+
+func (r *Repo) command(args []string) *exec.Cmd {
+	return r.commandContextEnv(context.Background(), args, nil)
+}
+
+func (r *Repo) commandContext(ctx context.Context, args []string) *exec.Cmd {
+	return r.commandContextEnv(ctx, args, nil)
+}
+
+// commandContextEnv is git in the repository, killed once ctx is done; env
+// are extra KEY=VALUE settings, ahead of the repository's own environment.
+func (r *Repo) commandContextEnv(ctx context.Context, args []string, env []string) *exec.Cmd {
+	if r.ssh != nil {
+		return r.ssh.commandContext(ctx, r.ssh.command(r.root, args, env))
+	}
+	full := append([]string{"-C", r.root, "-c", "color.ui=false", "-c", "core.quotepath=false"}, args...)
 	cmd := exec.CommandContext(ctx, Program(), full...)
 	cmd.Env = append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0",
@@ -57,6 +77,7 @@ func commandContext(ctx context.Context, dir string, args []string) *exec.Cmd {
 		"GIT_OPTIONAL_LOCKS=0",
 		"LC_ALL=C",
 	)
+	cmd.Env = append(cmd.Env, env...)
 	// Credentials and ssh passphrases are asked for in the app.
 	cmd.Env = append(cmd.Env, askpass.Env()...)
 	hideWindow(cmd)
@@ -69,12 +90,21 @@ func run(dir string, args []string, recorded bool) (string, error) {
 }
 
 func runInput(dir string, args []string, input []byte, recorded bool) (string, error) {
-	return runContext(context.Background(), dir, args, input, recorded)
+	r := &Repo{root: dir, recorded: recorded}
+	return r.runContext(context.Background(), args, input)
 }
 
-func runContext(ctx context.Context, dir string, args []string, input []byte, recorded bool) (string, error) {
+func (r *Repo) run(args []string) (string, error) {
+	return r.runContext(context.Background(), args, nil)
+}
+
+func (r *Repo) runInput(args []string, input []byte) (string, error) {
+	return r.runContext(context.Background(), args, input)
+}
+
+func (r *Repo) runContext(ctx context.Context, args []string, input []byte) (string, error) {
 	started := time.Now()
-	cmd := commandContext(ctx, dir, args)
+	cmd := r.commandContext(ctx, args)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if input != nil {
@@ -85,8 +115,8 @@ func runContext(ctx context.Context, dir string, args []string, input []byte, re
 	if os.Getenv("BANYAN_TRACE") != "" {
 		fmt.Fprintf(os.Stderr, "[%5d ms] git %s\n", elapsed.Milliseconds(), strings.Join(args, " "))
 	}
-	if recorded {
-		console.Record(dir, args, stdout.String(), stderr.String(), err == nil, elapsed.Milliseconds())
+	if r.recorded {
+		console.Record(r.location(), args, stdout.String(), stderr.String(), err == nil, elapsed.Milliseconds())
 	}
 	if err != nil {
 		if ctx.Err() != nil {
@@ -94,6 +124,9 @@ func runContext(ctx context.Context, dir string, args []string, input []byte, re
 		}
 		var exit *exec.ExitError
 		if !errors.As(err, &exit) {
+			if r.ssh != nil {
+				return "", fmt.Errorf("failed to run ssh; is it installed? %w", err)
+			}
 			return "", fmt.Errorf("failed to run git; is it installed? (Settings › Git): %w", err)
 		}
 		message := strings.TrimSpace(stderr.String())
@@ -107,8 +140,8 @@ func runContext(ctx context.Context, dir string, args []string, input []byte, re
 
 // runAllowDiff runs git diff --no-index, which exits with 1 when the files
 // differ.
-func runAllowDiff(dir string, args []string) (string, error) {
-	cmd := command(dir, args)
+func (r *Repo) runAllowDiff(args []string) (string, error) {
+	cmd := r.command(args)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
@@ -117,6 +150,15 @@ func runAllowDiff(dir string, args []string) (string, error) {
 		return stdout.String(), nil
 	}
 	return "", &Error{Args: args, Message: strings.TrimSpace(stderr.String())}
+}
+
+// ignoredPath is the null device as the repository's git sees it (a remote
+// host is a Unix one).
+func (r *Repo) ignoredPath() string {
+	if r.ssh != nil {
+		return "/dev/null"
+	}
+	return os.DevNull
 }
 
 // lines splits text into lines as Rust's str::lines does: no empty last

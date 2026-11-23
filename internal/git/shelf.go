@@ -3,8 +3,6 @@ package git
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -26,12 +24,12 @@ type Shelf struct {
 	Files      []string
 }
 
-func readShelf(dir string) (Shelf, bool) {
-	info, err := os.ReadFile(filepath.Join(dir, "info"))
+func (r *Repo) readShelf(dir string) (Shelf, bool) {
+	info, err := r.ReadFile(r.join(dir, "info"))
 	if err != nil {
 		return Shelf{}, false
 	}
-	s := Shelf{ID: filepath.Base(dir), Changelist: changelists.Default}
+	s := Shelf{ID: r.baseName(dir), Changelist: changelists.Default}
 	for _, line := range lines(string(info)) {
 		key, value, ok := strings.Cut(line, "=")
 		if !ok {
@@ -51,14 +49,14 @@ func readShelf(dir string) (Shelf, bool) {
 	return s, true
 }
 
-func (s *Shelf) write(dir string) error {
+func (r *Repo) writeShelf(s *Shelf, dir string) error {
 	oneLine := strings.NewReplacer("\n", " ", "\r", " ").Replace
 	var b strings.Builder
 	fmt.Fprintf(&b, "name=%s\nchangelist=%s\ntime=%d\n", oneLine(s.Name), oneLine(s.Changelist), s.Time)
 	for _, f := range s.Files {
 		fmt.Fprintf(&b, "file=%s\n", f)
 	}
-	return os.WriteFile(filepath.Join(dir, "info"), []byte(b.String()), 0o644)
+	return r.WriteFile(r.join(dir, "info"), []byte(b.String()), 0o644)
 }
 
 // patchBlocks returns the per-file parts of a patch, each starting at its
@@ -103,17 +101,17 @@ func globLiteral(path string) string {
 	return b.String()
 }
 
-func (r *Repo) shelfRoot() string { return filepath.Join(r.gitDir, "banyan", "shelf") }
+func (r *Repo) shelfRoot() string { return r.join(r.gitDir, "banyan", "shelf") }
 
 // Shelves returns shelved changes, newest first.
 func (r *Repo) Shelves() []Shelf {
-	entries, err := os.ReadDir(r.shelfRoot())
+	entries, err := r.ReadDirs(r.shelfRoot())
 	if err != nil {
 		return nil
 	}
 	var shelves []Shelf
-	for _, e := range entries {
-		if s, ok := readShelf(filepath.Join(r.shelfRoot(), e.Name())); ok {
+	for _, name := range entries {
+		if s, ok := r.readShelf(r.join(r.shelfRoot(), name)); ok {
 			shelves = append(shelves, s)
 		}
 	}
@@ -198,20 +196,20 @@ func (r *Repo) Shelve(name, changelist string, paths []string) (*Shelf, error) {
 		Time:       now.Unix(),
 		Files:      files,
 	}
-	dir := filepath.Join(r.shelfRoot(), shelf.ID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	dir := r.join(r.shelfRoot(), shelf.ID)
+	if err := r.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	patchFile := filepath.Join(dir, "patch.diff")
-	if err := os.WriteFile(patchFile, []byte(patch), 0o644); err != nil {
+	patchFile := r.join(dir, "patch.diff")
+	if err := r.WriteFile(patchFile, []byte(patch), 0o644); err != nil {
 		return nil, err
 	}
-	if err := shelf.write(dir); err != nil {
+	if err := r.writeShelf(shelf, dir); err != nil {
 		return nil, err
 	}
 	// Only touch the work tree once the patch is known to undo cleanly.
 	if _, err := r.Git("apply", "--check", "-R", "--binary", patchFile); err != nil {
-		os.RemoveAll(dir)
+		r.RemoveAll(dir)
 		undoIntent()
 		return nil, fmt.Errorf("the shelf patch does not undo cleanly; nothing was changed: %w", err)
 	}
@@ -239,7 +237,7 @@ func (r *Repo) Shelve(name, changelist string, paths []string) (*Shelf, error) {
 			return nil, err
 		}
 		for _, p := range remove {
-			os.Remove(filepath.Join(r.root, p))
+			r.Remove(r.join(r.root, p))
 		}
 	}
 	return shelf, nil
@@ -250,8 +248,8 @@ func (r *Repo) Shelve(name, changelist string, paths []string) (*Shelf, error) {
 // It returns the shelf as it was and the files restored. Hunks that no
 // longer fit are merged three-way and left with conflict markers.
 func (r *Repo) Unshelve(id string, paths []string) (*Shelf, []string, error) {
-	dir := filepath.Join(r.shelfRoot(), id)
-	shelf, ok := readShelf(dir)
+	dir := r.join(r.shelfRoot(), id)
+	shelf, ok := r.readShelf(dir)
 	if !ok {
 		return nil, nil, errors.New("this shelf no longer exists")
 	}
@@ -267,8 +265,8 @@ func (r *Repo) Unshelve(id string, paths []string) (*Shelf, []string, error) {
 	if len(files) == 0 {
 		return nil, nil, errors.New("nothing to unshelve")
 	}
-	patchFile := filepath.Join(dir, "patch.diff")
-	patchBytes, err := os.ReadFile(patchFile)
+	patchFile := r.join(dir, "patch.diff")
+	patchBytes, err := r.ReadFile(patchFile)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -292,7 +290,7 @@ func (r *Repo) Unshelve(id string, paths []string) (*Shelf, []string, error) {
 			continue
 		}
 		for _, f := range files {
-			if blockIsFor(block, f) && exists(filepath.Join(r.root, f)) {
+			if blockIsFor(block, f) && r.Exists(r.join(r.root, f)) {
 				added = append(added, f)
 				break
 			}
@@ -309,7 +307,7 @@ func (r *Repo) Unshelve(id string, paths []string) (*Shelf, []string, error) {
 		}
 	}
 	if len(remaining) == 0 {
-		if err := os.RemoveAll(dir); err != nil {
+		if err := r.RemoveAll(dir); err != nil {
 			return nil, nil, err
 		}
 	} else {
@@ -319,12 +317,12 @@ func (r *Repo) Unshelve(id string, paths []string) (*Shelf, []string, error) {
 				kept.WriteString(block)
 			}
 		}
-		if err := os.WriteFile(patchFile, []byte(kept.String()), 0o644); err != nil {
+		if err := r.WriteFile(patchFile, []byte(kept.String()), 0o644); err != nil {
 			return nil, nil, err
 		}
 		rest := shelf
 		rest.Files = remaining
-		if err := rest.write(dir); err != nil {
+		if err := r.writeShelf(&rest, dir); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -333,7 +331,7 @@ func (r *Repo) Unshelve(id string, paths []string) (*Shelf, []string, error) {
 
 // ShelfFilePatch is the part of shelf id's patch for path.
 func (r *Repo) ShelfFilePatch(id, path string) (string, error) {
-	patch, err := os.ReadFile(filepath.Join(r.shelfRoot(), id, "patch.diff"))
+	patch, err := r.ReadFile(r.join(r.shelfRoot(), id, "patch.diff"))
 	if err != nil {
 		return "", err
 	}
@@ -346,17 +344,17 @@ func (r *Repo) ShelfFilePatch(id, path string) (string, error) {
 }
 
 func (r *Repo) RenameShelf(id, name string) error {
-	dir := filepath.Join(r.shelfRoot(), id)
-	shelf, ok := readShelf(dir)
+	dir := r.join(r.shelfRoot(), id)
+	shelf, ok := r.readShelf(dir)
 	if !ok {
 		return errors.New("this shelf no longer exists")
 	}
 	shelf.Name = strings.TrimSpace(name)
-	return shelf.write(dir)
+	return r.writeShelf(&shelf, dir)
 }
 
 func (r *Repo) DeleteShelf(id string) error {
-	if err := os.RemoveAll(filepath.Join(r.shelfRoot(), id)); err != nil {
+	if err := r.RemoveAll(r.join(r.shelfRoot(), id)); err != nil {
 		return fmt.Errorf("cannot delete the shelf: %w", err)
 	}
 	return nil

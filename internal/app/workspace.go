@@ -1,6 +1,7 @@
 package app
 
 import (
+	"os"
 	"runtime"
 	"slices"
 	"strings"
@@ -154,7 +155,7 @@ func (ws *Workspace) View(c *ui.Context) {
 	// The commands of the keymap that have no menu item of their own work
 	// through the menus; Escape and the like are the views'.
 	if files := c.Root().DroppedFiles(); len(files) > 0 {
-		if repo, err := git.Open(files[0]); err != nil || repo.Root() != ws.Model.Repo.Root() {
+		if repo, err := git.Open(files[0]); err != nil || repo.Location() != ws.Model.Repo.Location() {
 			openPath(ws.Shell, files[0], false)
 		}
 	}
@@ -205,7 +206,7 @@ func (ws *Workspace) statusBar(c *ui.Context) {
 	m := ws.Model
 	ui.Row(c.Key("status")).Height(26).PaddingX(14).Gap(12).Background(chromeBG(t)).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).
 		FontSize(t.FontSize - 1).TextColor(t.TextMuted).Children(func() {
-		ui.Text(c, m.Repo.Root()).SingleLine().Shrink(1).MinWidth(0)
+		ui.Text(c, m.Repo.Label()).SingleLine().Shrink(1).MinWidth(0)
 		ui.Spacer(c)
 		if m.Busy != "" && busyButton(m.Busy) == "" {
 			ui.Row(c).Gap(4).Children(func() {
@@ -392,6 +393,9 @@ func (ws *Workspace) repoMenu(menu *ui.Menu) {
 	if menu.Item(i18n.T("Clone Repository…")).Chosen() {
 		openClone(ws.Shell)
 	}
+	if menu.Item(i18n.T("Open Repository over SSH…")).Chosen() {
+		openSSHRepo(ws.Shell)
+	}
 	if menu.Item(i18n.T("Manage Remotes…")).Chosen() {
 		openRemotes(ws)
 	}
@@ -403,7 +407,7 @@ func (ws *Workspace) repoMenu(menu *ui.Menu) {
 	}
 	var recent []string
 	for _, p := range settings.Get().Recent {
-		if p != m.Repo.Root() {
+		if p != m.Repo.Location() {
 			recent = append(recent, p)
 		}
 	}
@@ -412,7 +416,7 @@ func (ws *Workspace) repoMenu(menu *ui.Menu) {
 		menu.Submenu(i18n.T("Recent Repositories"), func(sub *ui.Menu) {
 			for _, p := range recent {
 				if sub.Item(recentLabel(p)).Chosen() {
-					openPath(ws.Shell, p, false)
+					openLocation(ws.Shell, p, false)
 				}
 			}
 		})
@@ -533,10 +537,16 @@ func (ws *Workspace) stashMenu(menu *ui.Menu) {
 	}
 }
 
-// recentLabel is "name — ~/dir/…/parent" for the recent repositories menu.
-func recentLabel(path string) string {
-	name := path[strings.LastIndexAny(path, `/\`)+1:]
-	dir := tilde(path[:max(strings.LastIndexAny(path, `/\`), 0)])
+// recentLabel is "name — ~/dir/…/parent" for the recent repositories menu,
+// and "name — user@host:/path" for one over SSH.
+func recentLabel(location string) string {
+	name := locationName(location)
+	dir := locationWhere(location)
+	if host, p, ok := git.ParseLocation(location); ok {
+		dir = host + ":" + p
+	} else {
+		dir = tilde(location[:max(strings.LastIndexAny(location, `/\`), 0)])
+	}
 	if n := utf8.RuneCountInString(dir); n > 48 {
 		runes := []rune(dir)
 		dir = string(runes[:16]) + "…" + string(runes[n-28:])
@@ -582,7 +592,13 @@ func applyPatch(ws *Workspace) {
 		}
 		file := paths[0]
 		model.Post(func() {
-			ws.run(i18n.T("Apply patch"), func(r *git.Repo) (string, error) { return r.ApplyPatch(file) })
+			ws.run(i18n.T("Apply patch"), func(r *git.Repo) (string, error) {
+				patch, err := os.ReadFile(file)
+				if err != nil {
+					return "", err
+				}
+				return r.ApplyPatchText(patch)
+			})
 		})
 	}()
 }

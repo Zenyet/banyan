@@ -1,16 +1,19 @@
 package app
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
 
+	"github.com/Zenyet/banyan/internal/git"
 	"github.com/Zenyet/banyan/internal/i18n"
 	"github.com/Zenyet/banyan/internal/model"
 	"github.com/Zenyet/banyan/internal/settings"
@@ -48,8 +51,10 @@ type EditorView struct {
 	// so that the shortcuts reach it before the views.
 	focused bool
 	// saveGen numbers the idle saves waiting, of which only the last one
-	// saves.
+	// saves. saves counts the remote writes under way, which quitting
+	// waits for.
 	saveGen int
+	saves   sync.WaitGroup
 }
 
 // EditorTab is a file open in the EditorView.
@@ -82,6 +87,9 @@ type EditorTab struct {
 	// seen is the version of the buffer at the last frame, whose edits
 	// start the idle save.
 	seen uint64
+	// checked is when a remote file was last compared with its disk copy,
+	// which costs an ssh round trip and so is done now and then.
+	checked time.Time
 }
 
 func newEditorView(ws *Workspace) *EditorView {
@@ -115,15 +123,47 @@ func (ev *EditorView) Open(path string, line int) {
 		ev.reveal()
 		return
 	}
-	full := filepath.Join(ws.Model.Repo.Root(), filepath.FromSlash(path))
-	info, err := os.Stat(full)
-	if err != nil {
-		ws.toast("error", err.Error())
+	repo := ws.Model.Repo
+	full := repo.Path(path)
+	if !repo.Remote() {
+		info, err := repo.Stat(full)
+		if err != nil {
+			ws.toast("error", err.Error())
+			return
+		}
+		data, err := repo.ReadFile(full)
+		if err != nil {
+			ws.toast("error", err.Error())
+			return
+		}
+		ev.addTab(path, full, line, info, data)
 		return
 	}
-	data, err := os.ReadFile(full)
-	if err != nil {
-		ws.toast("error", err.Error())
+	// A remote file is read over ssh, off the main thread.
+	go func() {
+		info, err := repo.Stat(full)
+		if err != nil {
+			model.Post(func() { ws.toast("error", err.Error()) })
+			return
+		}
+		data, err := repo.ReadFile(full)
+		if err != nil {
+			model.Post(func() { ws.toast("error", err.Error()) })
+			return
+		}
+		model.Post(func() { ev.addTab(path, full, line, info, data) })
+	}()
+}
+
+// addTab shows a file read from the repository, unless its tab came first.
+func (ev *EditorView) addTab(path, full string, line int, info git.FileStat, data []byte) {
+	if ix := slices.IndexFunc(ev.tabs, func(t *EditorTab) bool { return t.path == path }); ix >= 0 {
+		ev.activate(ix)
+		if line > 0 {
+			ev.tabs[ix].line = line
+			ev.tabs[ix].showDiff = false
+		}
+		ev.reveal()
 		return
 	}
 	t := &EditorTab{view: ev, path: path, full: full, line: line, focus: true}
@@ -131,7 +171,7 @@ func (ev *EditorView) Open(path string, line int) {
 	t.state.Buffer.SetLanguage(editor.LanguageFor(path))
 	t.state.LineNumbers = editor.LineNumbersOn
 	t.seen = t.state.Buffer.Version()
-	t.mtime, t.size = info.ModTime(), info.Size()
+	t.mtime, t.size = info.ModTime, info.Size
 	ev.tabs = append(ev.tabs, t)
 	ev.active = len(ev.tabs) - 1
 	ev.reveal()
@@ -240,6 +280,20 @@ func (ev *EditorView) redraw() {
 	}
 	if ev.ws != nil && ev.ws.Shell != nil && ev.ws.Shell.Win != nil {
 		ev.ws.Shell.Win.Invalidate()
+	}
+}
+
+// WaitSaves waits until the remote files written in the background are
+// written, at most timeout, as quitting does.
+func (ev *EditorView) WaitSaves(timeout time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		ev.saves.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
 	}
 }
 
@@ -416,46 +470,117 @@ func (t *EditorTab) save() {
 	if buf == nil || !buf.Modified() {
 		return
 	}
-	mode := os.FileMode(0o644)
-	if info, err := os.Stat(t.full); err == nil {
-		mode = info.Mode().Perm()
-	}
-	f, err := os.OpenFile(t.full, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
-	if err == nil {
-		// The text writes with the line endings the file had.
-		_, err = buf.WriteTo(f)
-		if cerr := f.Close(); err == nil {
-			err = cerr
-		}
-	}
-	if err != nil {
+	repo := t.view.ws.Model.Repo
+	// The text writes with the line endings the file had.
+	var data bytes.Buffer
+	if _, err := buf.WriteTo(&data); err != nil {
 		t.view.ws.toast("error", i18n.Tf("Could not save: {}", t.path+" — "+err.Error()))
 		return
 	}
-	buf.MarkSaved()
-	t.diskText, t.ignored, t.conflict = "", "", false
-	if info, err := os.Stat(t.full); err == nil {
-		t.mtime, t.size = info.ModTime(), info.Size()
+	written := func(info git.FileStat, err error) {
+		if err != nil {
+			t.view.ws.toast("error", i18n.Tf("Could not save: {}", t.path+" — "+err.Error()))
+			return
+		}
+		buf.MarkSaved()
+		t.diskText, t.ignored, t.conflict = "", "", false
+		t.mtime, t.size = info.ModTime, info.Size
+		t.view.ws.Model.RefreshStatus()
 	}
-	t.view.ws.Model.RefreshStatus()
+	if !repo.Remote() {
+		mode := os.FileMode(0o644)
+		if info, err := repo.Stat(t.full); err == nil {
+			mode = info.Mode.Perm()
+		}
+		err := repo.WriteFile(t.full, data.Bytes(), mode)
+		var info git.FileStat
+		if err == nil {
+			info, err = repo.Stat(t.full)
+		}
+		written(info, err)
+		return
+	}
+	// A remote file writes over ssh, off the main thread.
+	version := buf.Version()
+	t.view.saves.Add(1)
+	go func() {
+		defer t.view.saves.Done()
+		mode := os.FileMode(0o644)
+		if info, err := repo.Stat(t.full); err == nil {
+			mode = info.Mode.Perm()
+		}
+		err := repo.WriteFile(t.full, data.Bytes(), mode)
+		var info git.FileStat
+		if err == nil {
+			info, err = repo.Stat(t.full)
+		}
+		model.Post(func() {
+			if err != nil {
+				t.view.ws.toast("error", i18n.Tf("Could not save: {}", t.path+" — "+err.Error()))
+				return
+			}
+			if buf.Version() != version {
+				// Typed while the file wrote: what is left saves next.
+				t.mtime, t.size = info.ModTime, info.Size
+				t.view.ws.Model.RefreshStatus()
+				return
+			}
+			written(info, nil)
+		})
+	}()
 }
 
 // checkDisk reloads a file changed on disk when the buffer has no edits,
 // and asks what to do when it has.
 func (t *EditorTab) checkDisk() {
-	info, err := os.Stat(t.full)
-	if err != nil {
+	repo := t.view.ws.Model.Repo
+	if !repo.Remote() {
+		info, err := repo.Stat(t.full)
+		if err != nil {
+			return
+		}
+		if info.Size == t.size && info.ModTime.Equal(t.mtime) {
+			return
+		}
+		data, err := repo.ReadFile(t.full)
+		if err != nil {
+			return
+		}
+		t.applyDisk(string(data), info)
 		return
 	}
-	if info.Size() == t.size && info.ModTime().Equal(t.mtime) {
+	// Each look over ssh costs a round trip; a remote file changed
+	// elsewhere shows within a few seconds rather than at every refresh.
+	if time.Since(t.checked) < 10*time.Second {
 		return
 	}
-	data, err := os.ReadFile(t.full)
-	if err != nil {
-		return
-	}
-	text := string(data)
-	t.mtime, t.size = info.ModTime(), info.Size()
+	t.checked = time.Now()
+	size, mtime, full := t.size, t.mtime, t.full
+	go func() {
+		info, err := repo.Stat(full)
+		if err != nil {
+			return
+		}
+		if info.Size == size && info.ModTime.Equal(mtime) {
+			return
+		}
+		data, err := repo.ReadFile(full)
+		if err != nil {
+			return
+		}
+		model.Post(func() {
+			if !slices.Contains(t.view.tabs, t) {
+				return
+			}
+			t.applyDisk(string(data), info)
+		})
+	}()
+}
+
+// applyDisk takes the disk version of a file the tab shows, which changed
+// outside the app.
+func (t *EditorTab) applyDisk(text string, info git.FileStat) {
+	t.mtime, t.size = info.ModTime, info.Size
 	if text == t.ignored {
 		return
 	}
@@ -488,9 +613,6 @@ func (t *EditorTab) reload(text string) {
 	t.diff = nil
 	if t.state.Buffer != nil {
 		t.seen = t.state.Buffer.Version()
-	}
-	if info, err := os.Stat(t.full); err == nil {
-		t.mtime, t.size = info.ModTime(), info.Size()
 	}
 }
 
@@ -630,7 +752,7 @@ func (ev *EditorView) tab(c *ui.Context, ix int, tab *EditorTab) {
 		if menu.Item(i18n.T("Copy Path")).Chosen() {
 			mygo.Clipboard.WriteText(tab.full)
 		}
-		if menu.Item(revealLabel()).Chosen() {
+		if !ev.ws.Model.Repo.Remote() && menu.Item(revealLabel()).Chosen() {
 			mygo.Shell.ShowItemInFolder(tab.full)
 		}
 	})

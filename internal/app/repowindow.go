@@ -43,11 +43,11 @@ func openRepos(repos []*git.Repo, newWindow bool) {
 	if len(repos) == 0 {
 		return
 	}
-	if len(repos) == 1 && !newWindow && showExisting(repos[0].Root()) {
+	if len(repos) == 1 && !newWindow && showExisting(repos[0].Location()) {
 		return
 	}
 	for _, r := range repos {
-		settings.AddRecent(r.Root())
+		settings.AddRecent(r.Location())
 	}
 	var target *repoWindow
 	if !newWindow && !settings.Read(func(s *settings.Settings) bool { return s.OpenInNewWindow }) {
@@ -89,9 +89,9 @@ func newWindow_(rw *repoWindow) *Shell {
 
 // showExisting switches to the tab showing root, in whichever window has
 // it.
-func showExisting(root string) bool {
+func showExisting(location string) bool {
 	for _, rw := range repoWindows {
-		if ix := rw.indexOf(root); ix >= 0 {
+		if ix := rw.indexOf(location); ix >= 0 {
 			rw.activate(ix)
 			rw.shell.Win.Show()
 			rw.shell.Win.Focus()
@@ -121,13 +121,13 @@ func siblingModels(m *model.Model) []*model.Model {
 	return nil
 }
 
-func (rw *repoWindow) indexOf(root string) int {
-	return slices.IndexFunc(rw.tabs, func(ws *Workspace) bool { return ws.Model.Repo.Root() == root })
+func (rw *repoWindow) indexOf(location string) int {
+	return slices.IndexFunc(rw.tabs, func(ws *Workspace) bool { return ws.Model.Repo.Location() == location })
 }
 
 // add opens repo in a new tab and shows it, or shows its tab.
 func (rw *repoWindow) add(repo *git.Repo) {
-	if ix := rw.indexOf(repo.Root()); ix >= 0 {
+	if ix := rw.indexOf(repo.Location()); ix >= 0 {
 		rw.activate(ix)
 		return
 	}
@@ -215,11 +215,20 @@ func (rw *repoWindow) moveToNewWindow(ix int) {
 	if len(rw.tabs) < 2 {
 		return
 	}
-	root := rw.tabs[ix].Model.Repo.Root()
+	location := rw.tabs[ix].Model.Repo.Location()
 	rw.close(ix)
-	if repo, err := git.Open(root); err == nil {
-		openRepos([]*git.Repo{repo}, true)
-	}
+	// A repository over SSH connects in the background, as opening one
+	// from the welcome window does.
+	go func() {
+		repo, err := git.OpenLocation(location)
+		mygo.RunOnMain(func() {
+			if err != nil {
+				toastOn(rw.shell, "error", err.Error())
+				return
+			}
+			openRepos([]*git.Repo{repo}, true)
+		})
+	}()
 }
 
 // moveTab puts the tab at from where to is.
@@ -239,7 +248,7 @@ func (rw *repoWindow) moveTab(from, to int) {
 func (rw *repoWindow) remember() {
 	var roots []string
 	for _, ws := range rw.tabs {
-		roots = append(roots, ws.Model.Repo.Root())
+		roots = append(roots, ws.Model.Repo.Location())
 	}
 	if rw.active >= 0 && rw.active < len(roots) {
 		active := roots[rw.active]
@@ -288,7 +297,7 @@ func (rw *repoWindow) tab(c *ui.Context, ix int) {
 	active := ix == rw.active
 	// Short of room, the tabs cut their names short.
 	tab := ui.Row(c.Key(m)).Height(28).Radius(14).PaddingStart(12).PaddingEnd(3).Gap(6).Shrink(1).MinWidth(96).MaxWidth(220).
-		Drag(draggedTab{ix}).Tooltip(tilde(m.Repo.Root())).Cursor(ui.CursorPointer)
+		Drag(draggedTab{ix}).Tooltip(locationWhere(m.Repo.Location())).Cursor(ui.CursorPointer)
 	if active {
 		// The tab shown keeps its room; the others give way.
 		tab.Shrink(0).MaxWidth(280).Material(glass.Glass{})
@@ -318,7 +327,7 @@ func (rw *repoWindow) tab(c *ui.Context, ix int) {
 		if menu.Item(i18n.T("Copy Path")).Chosen() {
 			mygo.Clipboard.WriteText(m.Repo.Root())
 		}
-		if menu.Item(revealLabel()).Chosen() {
+		if !m.Repo.Remote() && menu.Item(revealLabel()).Chosen() {
 			mygo.Shell.ShowItemInFolder(m.Repo.Root())
 		}
 	})

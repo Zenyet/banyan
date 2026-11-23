@@ -18,7 +18,7 @@ type ConsoleView struct {
 
 func (cv *ConsoleView) View(c *ui.Context) {
 	t := c.Theme()
-	root := cv.ws.Model.Repo.Root()
+	root := cv.ws.Model.Repo.Location()
 	entries := console.EntriesFor(root)
 	cv.list.FollowEnd = true
 	ui.Row(c.Key("console-toolbar")).Height(32).PaddingX(8).Gap(8).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {

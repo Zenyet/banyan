@@ -2,8 +2,6 @@ package app
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -191,7 +189,7 @@ func (mt *mergeTool) apply(d *Dialog) {
 	path := mt.path
 	d.Close()
 	model.Run(mt.m, i18n.Tf("Resolve {}", path), func(r *git.Repo) (string, error) {
-		if err := os.WriteFile(filepath.Join(r.Root(), filepath.FromSlash(path)), []byte(text), 0o644); err != nil {
+		if err := r.WriteFile(r.Path(path), []byte(text), 0o644); err != nil {
 			return "", err
 		}
 		return r.ResolveConflict(path, nil)

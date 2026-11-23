@@ -2,6 +2,7 @@ package app
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"unicode"
@@ -51,14 +52,17 @@ func badge(c *ui.Context, text string) {
 }
 
 // suggestedPath is ~/x/repo-feature-login for ~/x/repo and branch
-// feature/login.
-func suggestedPath(root, branch string) string {
+// feature/login, in the separators of the repository's file system.
+func suggestedPath(repo *git.Repo, root, branch string) string {
 	safe := strings.Map(func(r rune) rune {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' {
 			return r
 		}
 		return '-'
 	}, branch)
+	if repo.Remote() {
+		return repo.JoinPath(path.Dir(root), path.Base(root)+"-"+safe)
+	}
 	return filepath.Join(filepath.Dir(root), filepath.Base(root)+"-"+safe)
 }
 
@@ -70,7 +74,7 @@ func openWorktrees(ws *Workspace, branch string) {
 	root := m.Repo.Root()
 	path, pathEdited := "", false
 	if branch != "" {
-		path = suggestedPath(root, branch)
+		path = suggestedPath(m.Repo, root, branch)
 	}
 	var trees reloader[[]git.Worktree]
 	ws.Shell.Open(&Dialog{Title: i18n.T("Worktrees"), Width: 760, Body: func(c *ui.Context, d *Dialog) {
@@ -106,18 +110,24 @@ func openWorktrees(ws *Workspace, branch string) {
 						muted(c, tilde(tree.Path)).SingleLine()
 					})
 					if !tree.IsCurrent && !tree.Prunable && button(c.Key("open"), i18n.T("Open")).Clicked() {
-						openPath(ws.Shell, tree.Path, false)
+						openRepoAt(ws.Shell, m.Repo, tree.Path, false)
 					}
 					if !tree.IsMain && !tree.IsCurrent && !tree.Prunable && iconButton(c.Key("remove"), "x", i18n.T("Remove Worktree")).Clicked() {
 						p := tree.Path
-						dirty := git.WorktreeIsDirty(p)
-						message := i18n.Tf("Remove the worktree at {}? Its branch stays.", tilde(p))
-						if dirty {
-							message = i18n.Tf("{} has local changes. Remove it anyway? Its changes are lost.", tilde(p))
-						}
-						ws.Shell.Confirm(i18n.T("Remove Worktree"), message, i18n.T("Remove"), func() {
-							ws.run(i18n.T("Remove worktree"), func(r *git.Repo) (string, error) { return r.RemoveWorktree(p, dirty) })
-						})
+						// Reading a remote worktree's status is an ssh round
+						// trip, so the question comes once it is read.
+						go func() {
+							dirty := m.Repo.WorktreeDirty(p)
+							model.Post(func() {
+								message := i18n.Tf("Remove the worktree at {}? Its branch stays.", tilde(p))
+								if dirty {
+									message = i18n.Tf("{} has local changes. Remove it anyway? Its changes are lost.", tilde(p))
+								}
+								ws.Shell.Confirm(i18n.T("Remove Worktree"), message, i18n.T("Remove"), func() {
+									ws.run(i18n.T("Remove worktree"), func(r *git.Repo) (string, error) { return r.RemoveWorktree(p, dirty) })
+								})
+							})
+						}()
 					}
 				})
 			}
@@ -136,7 +146,7 @@ func openWorktrees(ws *Workspace, branch string) {
 			if ui.TextInput(c.Key("branch"), &branch).Placeholder(i18n.T("Branch")).Width(220).Changed() && !pathEdited {
 				path = ""
 				if b := strings.TrimSpace(branch); b != "" {
-					path = suggestedPath(root, b)
+					path = suggestedPath(m.Repo, root, b)
 				}
 			}
 			if ui.TextInput(c.Key("path"), &path).Placeholder(i18n.T("Location")).Grow(1).Changed() {
@@ -208,7 +218,7 @@ func openSubmodules(ws *Workspace) {
 							update([]string{sub.Path})
 						}
 						if sub.State != git.SubmoduleUninitialized && button(c.Key("open"), i18n.T("Open")).Clicked() {
-							openPath(ws.Shell, filepath.Join(m.Repo.Root(), filepath.FromSlash(sub.Path)), false)
+							openRepoAt(ws.Shell, m.Repo, m.Repo.Path(sub.Path), false)
 						}
 					})
 				}
@@ -306,8 +316,10 @@ func openRemotes(ws *Workspace) {
 // defaultCloneParent is where new clones go: next to the most recently
 // opened repository.
 func defaultCloneParent() string {
-	if recent := settings.Get().Recent; len(recent) > 0 {
-		return filepath.Dir(recent[0])
+	for _, recent := range settings.Get().Recent {
+		if _, _, remote := git.ParseLocation(recent); !remote {
+			return filepath.Dir(recent)
+		}
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		return home

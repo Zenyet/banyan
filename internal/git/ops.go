@@ -1,9 +1,11 @@
 package git
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -149,13 +151,13 @@ func (r *Repo) SetSigningKey(key string) (string, error) {
 // AddToGitignore appends path to the top-level .gitignore, anchored to the
 // root.
 func (r *Repo) AddToGitignore(path string) error {
-	file := filepath.Join(r.root, ".gitignore")
-	text, _ := os.ReadFile(file)
+	file := r.join(r.root, ".gitignore")
+	text, _ := r.ReadFile(file)
 	if len(text) > 0 && text[len(text)-1] != '\n' {
 		text = append(text, '\n')
 	}
 	text = append(text, "/"+strings.TrimRight(path, "/")+"\n"...)
-	if err := os.WriteFile(file, text, 0o644); err != nil {
+	if err := r.WriteFile(file, text, 0o644); err != nil {
 		return fmt.Errorf("failed to write %s: %w", file, err)
 	}
 	return nil
@@ -331,13 +333,13 @@ func (r *Repo) Abort(state RepoState) (string, error) {
 // rebase that is no longer running.
 func (r *Repo) cleanupRebaseFiles() {
 	if r.State() == Clean {
-		os.RemoveAll(r.rebaseFilesDir())
+		r.RemoveAll(r.rebaseFilesDir())
 	}
 }
 
 // rebaseFilesDir is kept inside the repository's git directory so
 // concurrent rebases of different repositories never share it.
-func (r *Repo) rebaseFilesDir() string { return filepath.Join(r.gitDir, "banyan-rebase") }
+func (r *Repo) rebaseFilesDir() string { return r.join(r.gitDir, "banyan-rebase") }
 
 func (r *Repo) abortOp(state RepoState) (string, error) {
 	switch state {
@@ -442,7 +444,7 @@ func (r *Repo) MergeConflictText(path string) (string, error) {
 		files[i] = file
 		var text string
 		if slices.Contains(stages, stage) {
-			text, err = run(r.root, []string{"cat-file", "blob", fmt.Sprintf(":%d:%s", stage, path)}, false)
+			text, err = r.run([]string{"cat-file", "blob", fmt.Sprintf(":%d:%s", stage, path)})
 			if err != nil {
 				return "", err
 			}
@@ -454,7 +456,7 @@ func (r *Repo) MergeConflictText(path string) (string, error) {
 			return "", err
 		}
 	}
-	cmd := command(r.root, []string{
+	cmd := r.command([]string{
 		"merge-file", "-p", "--zdiff3", "--marker-size", strconv.Itoa(MarkerSize),
 		"-L", "yours", "-L", "base", "-L", "theirs", files[0], files[1], files[2],
 	})
@@ -478,7 +480,7 @@ func (r *Repo) Operation() *Operation {
 		return nil
 	}
 	read := func(name string) string {
-		text, err := os.ReadFile(filepath.Join(r.gitDir, name))
+		text, err := r.ReadFile(r.join(r.gitDir, name))
 		if err != nil {
 			return ""
 		}
@@ -508,7 +510,7 @@ func (r *Repo) Operation() *Operation {
 		return op(i18n.Tf("Merging {} into {}", theirs, head), head, theirs)
 	case Rebasing:
 		dir := "rebase-apply"
-		if exists(filepath.Join(r.gitDir, "rebase-merge")) {
+		if r.Exists(r.join(r.gitDir, "rebase-merge")) {
 			dir = "rebase-merge"
 		}
 		branch := strings.TrimPrefix(read(dir+"/head-name"), "refs/heads/")
@@ -583,14 +585,16 @@ func (r *Repo) FetchRemote(remote string) (string, error) {
 // a prompt nobody asked for would be confusing. Stored credentials still
 // work.
 func (r *Repo) FetchQuietly() error {
-	cmd := command(r.root, []string{"fetch", "--all", "--prune", "--quiet"})
-	env := cmd.Env[:0:0]
-	for _, kv := range cmd.Env {
-		if !strings.HasPrefix(kv, "GIT_ASKPASS=") && !strings.HasPrefix(kv, "SSH_ASKPASS=") && !strings.HasPrefix(kv, "SSH_ASKPASS_REQUIRE=") {
-			env = append(env, kv)
+	cmd := r.command([]string{"fetch", "--all", "--prune", "--quiet"})
+	if r.ssh == nil {
+		env := cmd.Env[:0:0]
+		for _, kv := range cmd.Env {
+			if !strings.HasPrefix(kv, "GIT_ASKPASS=") && !strings.HasPrefix(kv, "SSH_ASKPASS=") && !strings.HasPrefix(kv, "SSH_ASKPASS_REQUIRE=") {
+				env = append(env, kv)
+			}
 		}
+		cmd.Env = env
 	}
-	cmd.Env = env
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git fetch: %s", strings.TrimSpace(string(out)))
 	}
@@ -734,13 +738,24 @@ func (r *Repo) CreatePatch(ids []string, dest string) error {
 	return nil
 }
 
-// ApplyPatch applies a patch file to the work tree; hunks that no longer
-// fit are merged three-way and left with conflict markers.
+// ApplyPatch applies a patch file on this machine to the work tree; hunks
+// that no longer fit are merged three-way and left with conflict markers.
 func (r *Repo) ApplyPatch(file string) (string, error) {
-	if out, err := r.Git("apply", "--binary", file); err == nil {
+	patch, err := os.ReadFile(file)
+	if err != nil {
+		return "", err
+	}
+	return r.ApplyPatchText(patch)
+}
+
+// ApplyPatchText applies a patch to the work tree, through the
+// repository's transport, so that a patch chosen on this machine reaches a
+// repository over SSH too.
+func (r *Repo) ApplyPatchText(patch []byte) (string, error) {
+	if out, err := r.GitWithInput(string(patch), "apply", "--binary", "-"); err == nil {
 		return out, nil
 	}
-	out, err := r.Git("apply", "--3way", "--binary", file)
+	out, err := r.GitWithInput(string(patch), "apply", "--3way", "--binary", "-")
 	if err != nil && strings.Contains(err.Error(), "with conflicts") {
 		return "", nil
 	}
@@ -792,7 +807,7 @@ func (r *Repo) GetFromRevision(rev, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	os.Remove(filepath.Join(r.root, path))
+	r.Remove(r.join(r.root, path))
 	return out, nil
 }
 
@@ -962,7 +977,7 @@ func (r *Repo) InteractiveRebase(from string, plan []RebaseStep) (string, error)
 		return "", errors.New("the first commit cannot be squashed or fixed up")
 	}
 	dir := r.rebaseFilesDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := r.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	var todo strings.Builder
@@ -979,19 +994,19 @@ func (r *Repo) InteractiveRebase(from string, plan []RebaseStep) (string, error)
 		case Edit:
 			fmt.Fprintf(&todo, "edit %s\n", step.ID)
 		case Reword:
-			file := filepath.Join(dir, fmt.Sprintf("message-%d", ix))
-			if err := os.WriteFile(file, []byte(step.Action.Message), 0o644); err != nil {
+			file := r.join(dir, fmt.Sprintf("message-%d", ix))
+			if err := r.WriteFile(file, []byte(step.Action.Message), 0o644); err != nil {
 				return "", err
 			}
 			fmt.Fprintf(&todo, "pick %s\n", step.ID)
-			fmt.Fprintf(&todo, "exec git commit --amend --allow-empty -q -F '%s'\n", filepath.ToSlash(file))
+			fmt.Fprintf(&todo, "exec git commit --amend --allow-empty -q -F %s\n", QuoteArg(filepath.ToSlash(file)))
 		}
 	}
-	todoFile := filepath.Join(dir, "todo")
-	if err := os.WriteFile(todoFile, []byte(todo.String()), 0o644); err != nil {
+	todoFile := r.join(dir, "todo")
+	if err := r.WriteFile(todoFile, []byte(todo.String()), 0o644); err != nil {
 		return "", err
 	}
-	args := []string{"-c", "sequence.editor=cp '" + filepath.ToSlash(todoFile) + "'", "-c", "core.editor=true", "rebase", "-i", "--autostash"}
+	args := []string{"-c", "sequence.editor=cp " + QuoteArg(filepath.ToSlash(todoFile)), "-c", "core.editor=true", "rebase", "-i", "--autostash"}
 	if r.ok("rev-parse", "--verify", "-q", from+"^") {
 		args = append(args, from+"^")
 	} else {
@@ -1000,7 +1015,7 @@ func (r *Repo) InteractiveRebase(from string, plan []RebaseStep) (string, error)
 	out, err := r.Git(args...)
 	// A rebase stopped on a conflict still needs the reworded messages.
 	if r.State() == Clean {
-		os.RemoveAll(dir)
+		r.RemoveAll(dir)
 	}
 	return out, err
 }
@@ -1127,11 +1142,19 @@ func (r *Repo) HasCommitGraph() bool {
 	if !ok {
 		return false
 	}
+	if r.ssh != nil {
+		if !path.IsAbs(info) {
+			info = path.Join(r.root, info)
+		}
+		found := r.existing(path.Join(info, "commit-graph"), path.Join(info, "commit-graphs"))
+		return found[0] || found[1]
+	}
 	info = filepath.FromSlash(info)
 	if !filepath.IsAbs(info) {
 		info = filepath.Join(r.root, info)
 	}
-	return exists(filepath.Join(info, "commit-graph")) || exists(filepath.Join(info, "commit-graphs"))
+	found := r.existing(filepath.Join(info, "commit-graph"), filepath.Join(info, "commit-graphs"))
+	return found[0] || found[1]
 }
 
 // RefreshIndex brings the file times cached in the index up to date. Status
@@ -1141,8 +1164,7 @@ func (r *Repo) HasCommitGraph() bool {
 // This lets git status take the index lock it calls optional, which it
 // skips when anything else holds it, so it never gets in the way.
 func (r *Repo) RefreshIndex() error {
-	cmd := command(r.root, []string{"status", "--porcelain", "--untracked-files=no"})
-	cmd.Env = append(cmd.Env, "GIT_OPTIONAL_LOCKS=1")
+	cmd := r.commandContextEnv(context.Background(), []string{"status", "--porcelain", "--untracked-files=no"}, []string{"GIT_OPTIONAL_LOCKS=1"})
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git status: %s", strings.TrimSpace(string(out)))
 	}
@@ -1151,7 +1173,7 @@ func (r *Repo) RefreshIndex() error {
 
 // Worktrees returns the repository's working trees, the main one first.
 func (r *Repo) Worktrees() ([]Worktree, error) {
-	current := canonical(r.root)
+	current := r.canonical(r.root)
 	out, err := r.Git("worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, err
@@ -1163,8 +1185,11 @@ func (r *Repo) Worktrees() ([]Worktree, error) {
 			key, value, _ := strings.Cut(line, " ")
 			switch {
 			case key == "worktree":
-				path := filepath.FromSlash(value)
-				tree = &Worktree{Path: path, IsMain: len(trees) == 0, IsCurrent: canonical(path) == current}
+				worktree := value
+				if r.ssh == nil {
+					worktree = filepath.FromSlash(value)
+				}
+				tree = &Worktree{Path: worktree, IsMain: len(trees) == 0, IsCurrent: r.canonical(worktree) == current}
 			case tree == nil:
 			case key == "HEAD":
 				tree.Head = value
@@ -1183,17 +1208,30 @@ func (r *Repo) Worktrees() ([]Worktree, error) {
 	return trees, nil
 }
 
-func canonical(path string) string {
-	if p, err := filepath.EvalSymlinks(path); err == nil {
-		return p
+// canonical is path with symlinks resolved, on the machine the repository
+// is on.
+func (r *Repo) canonical(p string) string {
+	if r.ssh != nil {
+		return path.Clean(p)
 	}
-	return path
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	return p
 }
 
 // AddWorktree adds a working tree at path with branch checked out: an
 // existing local branch, a new one tracking the remote branch of that name,
 // or else a new branch from HEAD.
 func (r *Repo) AddWorktree(path, branch string) (*Repo, error) {
+	if r.ssh != nil {
+		// The path is the host's; ~ is the host's home folder.
+		resolved, err := r.ssh.expand(path)
+		if err != nil {
+			return nil, err
+		}
+		path = resolved
+	}
 	hasRemote := false
 	if out, err := r.Git("for-each-ref", "--format=%(refname)", "refs/remotes/*/"+branch); err == nil {
 		hasRemote = strings.TrimSpace(out) != ""
@@ -1208,13 +1246,14 @@ func (r *Repo) AddWorktree(path, branch string) (*Repo, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Open(path)
+	return r.OpenAt(path)
 }
 
-// WorktreeIsDirty reports whether the working tree at path has local
-// changes.
-func WorktreeIsDirty(path string) bool {
-	out, err := run(path, []string{"status", "--porcelain"}, false)
+// WorktreeDirty reports whether the working tree at path has local changes.
+func (r *Repo) WorktreeDirty(path string) bool {
+	sub := *r
+	sub.root = path
+	out, err := sub.run([]string{"status", "--porcelain"})
 	return err == nil && strings.TrimSpace(out) != ""
 }
 
@@ -1270,7 +1309,7 @@ func (r *Repo) UpdateSubmodules(paths []string) (string, error) {
 func (r *Repo) FavoriteBranches() []string {
 	file, err := r.favoritesFile()
 	if err == nil {
-		text, err := os.ReadFile(file)
+		text, err := r.ReadFile(file)
 		if err == nil {
 			var out []string
 			for _, l := range lines(string(text)) {
@@ -1293,14 +1332,14 @@ func (r *Repo) SetFavoriteBranch(fullName string, favorite bool) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+	if err := r.MkdirAll(r.dirOf(file), 0o755); err != nil {
 		return err
 	}
 	var text strings.Builder
 	for _, f := range favorites {
 		text.WriteString(f + "\n")
 	}
-	return os.WriteFile(file, []byte(text.String()), 0o644)
+	return r.WriteFile(file, []byte(text.String()), 0o644)
 }
 
 // favoritesFile is shared by all worktrees of the repository.
@@ -1308,6 +1347,9 @@ func (r *Repo) favoritesFile() (string, error) {
 	common, ok := r.trimmed("rev-parse", "--path-format=absolute", "--git-common-dir")
 	if !ok {
 		return "", errors.New("no git directory")
+	}
+	if r.ssh != nil {
+		return path.Join(common, "banyan", "favorite-branches"), nil
 	}
 	return filepath.Join(filepath.FromSlash(common), "banyan", "favorite-branches"), nil
 }

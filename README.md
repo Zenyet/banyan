@@ -141,6 +141,16 @@ where it builds with `cargo` as before.
 - **Git Authentication** dialog for HTTPS credentials and SSH passphrases
   (Banyan acts as `GIT_ASKPASS` / `SSH_ASKPASS`). Optional background fetch.
 
+### Repositories over SSH
+
+- **Open Repository over SSH…** (File menu, welcome window, and repository menu) opens a repository on a development
+  machine. Every git command and file read runs there through your `ssh`, with the keys, agent, `ProxyJump` and
+  other options of `~/.ssh/config`.
+- The editor, diffs, changelists, shelves, worktrees and submodules work as they do locally; recent and reopened
+  repositories remember their host. Changes made in a terminal on that machine show up within seconds.
+- ssh's own prompts — a key's passphrase, the host key — are asked for in the app. Remote git never prompts, so a push
+  over HTTPS there needs the remote host's credential helper or a stored token.
+
 ### Several repositories in one window
 
 - Repositories open as tabs of the current window (or in windows of their own, in Settings); each tab shows its
@@ -218,8 +228,8 @@ go run .                 # open the repository you're in
 ```
 
 Launched from Finder, Banyan reopens the last repository you used. Otherwise, and whenever you close the last
-repository window, the **welcome window** offers **Open Repository…**, **Clone Repository…** and your recent
-repositories. Drop a folder on the welcome window, or on any repository window, to open it; a folder that isn't
+repository window, the **welcome window** offers **Open Repository…**, **Clone Repository…**,
+**Open Repository over SSH…** and your recent repositories. Drop a folder on the welcome window, or on any repository window, to open it; a folder that isn't
 a Git repository yet can be made one. Recent repositories are also listed in the repository menu in the toolbar.
 
 ### Keyboard shortcuts

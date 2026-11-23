@@ -3,7 +3,6 @@ package app
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -231,7 +230,7 @@ func (cv *ChangesView) loadDiff() {
 			return repo.WorktreeDiff(&e, settings.Read(func(s *settings.Settings) bool { return s.IgnoreWhitespace }))
 		},
 		Old: blob(repo, "HEAD", oldPath),
-		New: func() ([]byte, error) { return worktreeFile(repo.Root(), e.Path) },
+		New: func() ([]byte, error) { return worktreeFile(repo, e.Path) },
 	})
 	cv.hunkGen++
 	gen := cv.hunkGen
@@ -370,9 +369,23 @@ func (cv *ChangesView) toggleGroup(g group, include bool) {
 
 func (cv *ChangesView) setAmend(amend bool) {
 	cv.amend = amend
-	if amend && strings.TrimSpace(cv.message) == "" {
-		cv.message, _ = cv.ws.Model.Repo.LastCommitMessage()
+	if !amend || strings.TrimSpace(cv.message) != "" {
+		return
 	}
+	repo := cv.ws.Model.Repo
+	if !repo.Remote() {
+		cv.message, _ = repo.LastCommitMessage()
+		return
+	}
+	// A remote commit message arrives over ssh, off the main thread.
+	go func() {
+		message, _ := repo.LastCommitMessage()
+		model.Post(func() {
+			if cv.amend && strings.TrimSpace(cv.message) == "" {
+				cv.message = message
+			}
+		})
+	}()
 }
 
 func (cv *ChangesView) commit(push bool) {
@@ -456,7 +469,7 @@ func (cv *ChangesView) deleteFile(e git.StatusEntry) {
 // deleteLocalFile is deleteFile's work, without the question.
 func deleteLocalFile(repo *git.Repo, e git.StatusEntry) error {
 	if e.IsUntracked() {
-		err := os.Remove(filepath.Join(repo.Root(), filepath.FromSlash(e.Path)))
+		err := repo.Remove(repo.Path(e.Path))
 		if os.IsNotExist(err) {
 			return nil
 		}
@@ -696,7 +709,7 @@ func (cv *ChangesView) entryRow(c *ui.Context, e *git.StatusEntry) {
 func (cv *ChangesView) entryMenu(menu *ui.Menu, e git.StatusEntry) {
 	ws, m := cv.ws, cv.ws.Model
 	path := e.Path
-	full := filepath.Join(m.Repo.Root(), filepath.FromSlash(path))
+	full := m.Repo.Path(path)
 	if !e.IsConflicted() {
 		if !e.IsUntracked() {
 			menu.Submenu(i18n.T("Move to Another Changelist"), func(sub *ui.Menu) {
@@ -757,7 +770,7 @@ func (cv *ChangesView) entryMenu(menu *ui.Menu, e git.StatusEntry) {
 	if menu.Item(i18n.T("Copy Path")).Chosen() {
 		mygo.Clipboard.WriteText(full)
 	}
-	if menu.Item(revealLabel()).Chosen() {
+	if !m.Repo.Remote() && menu.Item(revealLabel()).Chosen() {
 		mygo.Shell.ShowItemInFolder(full)
 	}
 	if e.DisplayStatus() != 'D' {
