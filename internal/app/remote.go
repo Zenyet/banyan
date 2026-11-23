@@ -1,6 +1,7 @@
 package app
 
 import (
+	"path"
 	"strings"
 
 	"github.com/egoist/mygo"
@@ -74,59 +75,55 @@ func toastOn(s *Shell, kind, message string) {
 	}
 }
 
-// lastSSH is the host and path of the most recently opened repository over
-// SSH, from the recent repositories.
-func lastSSH() (host, path string) {
+// lastSSHHost is the host of the most recently opened repository over SSH.
+func lastSSHHost() string {
 	for _, location := range settings.Get().Recent {
-		if h, p, ok := git.ParseLocation(location); ok {
-			return h, p
+		if host, _, ok := git.ParseLocation(location); ok {
+			return host
 		}
 	}
-	return "", ""
+	return ""
 }
 
-// openSSHRepo asks for a host and a path, and opens the repository there.
+// openSSHRepo asks for a host, connects, and then lets the user choose the
+// repository's folder there.
 func openSSHRepo(s *Shell) {
 	if s == nil {
 		return
 	}
-	host, path := lastSSH()
+	host := lastSSHHost()
 	connecting, problem := false, ""
-	s.Open(&Dialog{Title: i18n.T("Open Repository over SSH"), Width: 560, Body: func(c *ui.Context, d *Dialog) {
+	s.Open(&Dialog{Title: i18n.T("Open Repository over SSH"), Width: 520, Body: func(c *ui.Context, d *Dialog) {
 		t := c.Theme()
 		start := func() {
-			h, p := strings.TrimSpace(host), strings.TrimSpace(path)
-			if h == "" || p == "" || connecting {
+			h := strings.TrimSpace(host)
+			if h == "" || connecting {
 				return
 			}
 			connecting, problem = true, ""
 			go func() {
-				repo, err := git.OpenSSH(h, p)
+				ssh, err := git.ConnectSSH(h)
 				model.Post(func() {
 					connecting = false
 					if err != nil {
 						problem = err.Error()
 						return
 					}
-					d.Close()
-					openRepos([]*git.Repo{repo}, false)
-					if s == welcome {
-						closeWelcome()
+					if !d.open {
+						return
 					}
+					d.Close()
+					chooseRemoteDir(s, ssh)
 				})
 			}()
 		}
 		muted(c, i18n.T("Uses your ssh configuration: keys, agent, ProxyJump and ControlMaster from ~/.ssh/config."))
 		muted(c, i18n.T("Host"))
-		h := ui.TextInput(c.Key("host"), &host).Placeholder("user@dev-machine").AutoFocus().FillWidth()
-		if h.Submitted() {
+		in := ui.TextInput(c.Key("host"), &host).Placeholder("user@dev-machine").AutoFocus().FillWidth()
+		if in.Submitted() {
 			start()
 		}
-		muted(c, i18n.T("Repository Path (on the remote host)"))
-		p := ui.TextInput(c.Key("path"), &path).Placeholder("/home/me/project or ~/project").FillWidth()
-		if p.Submitted() {
-			start()
-		}
+		muted(c, i18n.T("After connecting, choose the repository folder."))
 		if problem != "" {
 			ui.Text(c, problem).TextColor(t.Danger)
 		}
@@ -137,10 +134,125 @@ func openSSHRepo(s *Shell) {
 			if button(c.Key("cancel"), i18n.T("Cancel")).Clicked() {
 				d.Close()
 			}
-			if primaryButton(c.Key("open"), i18n.T("Open")).Disabled(connecting ||
-				strings.TrimSpace(host) == "" || strings.TrimSpace(path) == "").Clicked() {
+			if primaryButton(c.Key("connect"), i18n.T("Connect")).Disabled(connecting || strings.TrimSpace(host) == "").Clicked() {
 				start()
 			}
 		})
 	}})
+}
+
+// chooseRemoteDir shows the folders of a host, from its home folder, for
+// the user to choose the repository's folder: one ssh round trip per folder
+// shown.
+func chooseRemoteDir(s *Shell, ssh *git.SSH) {
+	dir := "~"
+	var folders []string
+	loading, opening, problem := true, false, ""
+	gen := 0
+	load := func(target string) {
+		target = strings.TrimSpace(target)
+		if target == "" {
+			return
+		}
+		gen++
+		g := gen
+		loading, problem = true, ""
+		go func() {
+			resolved, names, err := ssh.Dirs(target)
+			model.Post(func() {
+				if g != gen {
+					return
+				}
+				loading = false
+				if err != nil {
+					problem = err.Error()
+					return
+				}
+				dir, folders = resolved, names
+			})
+		}()
+	}
+	load(dir)
+	s.Open(&Dialog{Title: i18n.Tf("Choose a Directory on {}", ssh.Host), Width: 620, Body: func(c *ui.Context, d *Dialog) {
+		t := c.Theme()
+		open := func() {
+			if loading || opening || dir == "" {
+				return
+			}
+			opening, problem = true, ""
+			target := dir
+			go func() {
+				repo, err := ssh.Open(target)
+				model.Post(func() {
+					opening = false
+					if err != nil {
+						problem = err.Error()
+						return
+					}
+					if !d.open {
+						return
+					}
+					d.Close()
+					openRepos([]*git.Repo{repo}, false)
+				})
+			}()
+		}
+		muted(c, i18n.T("Choose the folder of a repository, or one of its subfolders."))
+		ui.Row(c).Gap(8).Children(func() {
+			in := ui.TextInput(c.Key("path"), &dir).Placeholder("~/project").Grow(1)
+			if in.Submitted() {
+				load(dir)
+			}
+			if button(c.Key("go"), i18n.T("Go")).Clicked() {
+				load(dir)
+			}
+		})
+		ui.Scroll(c.Key("folders")).MaxHeight(300).Shrink(1).MinHeight(120).Border(1, t.Border).Radius(t.Radius).Padding(4).Children(func() {
+			if loading {
+				muted(c, i18n.T("Loading…")).Padding(8)
+				return
+			}
+			if up := path.Dir(dir); dir != "/" && up != dir {
+				folderRow(c, "..", "chevrons-left", func() { load(up) })
+			}
+			for _, name := range folders {
+				name := name
+				folderRow(c, name, "folder-open", func() { load(path.Join(dir, name)) })
+			}
+			if len(folders) == 0 {
+				muted(c, i18n.T("No folders here")).Padding(8)
+			}
+		})
+		if problem != "" {
+			ui.Text(c, problem).TextColor(t.Danger)
+		}
+		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
+			if loading || opening {
+				muted(c, i18n.T("Loading…"))
+			}
+			if button(c.Key("cancel"), i18n.T("Cancel")).Clicked() {
+				d.Close()
+			}
+			if primaryButton(c.Key("open"), i18n.T("Open")).Disabled(loading || opening || dir == "").Clicked() {
+				open()
+			}
+		})
+	}})
+}
+
+// folderRow is a folder in the remote directory chooser, which the user
+// clicks to go into it.
+func folderRow(c *ui.Context, label, iconName string, enter func()) {
+	t := c.Theme()
+	row := ui.Row(c.Key(label)).PaddingX(8).PaddingY(6).Gap(8).Radius(6).Cursor(ui.CursorPointer)
+	if row.Hovered() {
+		row.Background(hoverBG(t))
+	}
+	if row.Clicked() {
+		enter()
+	}
+	row.Children(func() {
+		ui.Icon(c, icon(iconName)).TextColor(t.TextMuted)
+		ui.Text(c, label).SingleLine().Shrink(1).MinWidth(0)
+	})
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -110,6 +111,49 @@ func TestRemoteRepositoryRunsGitAndFilesOverSSH(t *testing.T) {
 	}
 	if text := local.read("a.txt"); text != "changed\n" {
 		t.Fatalf("unshelved %q", text)
+	}
+}
+
+func TestSSHListsFoldersForTheChooser(t *testing.T) {
+	fakeSSH(t)
+	dir := t.TempDir()
+	for _, name := range []string{"b", "a", ".hidden", ".git"} {
+		if err := os.MkdirAll(filepath.Join(dir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ssh := &SSH{Host: "dev@example.test"}
+	resolved, names, err := ssh.Dirs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != want {
+		t.Errorf("resolved %q, want %q", resolved, want)
+	}
+	if want := []string{".hidden", "a", "b"}; !slices.Equal(names, want) {
+		t.Errorf("folders %q, want %q", names, want)
+	}
+}
+
+func TestConnectSSHChecksTheHostAndFindsItsHome(t *testing.T) {
+	fakeSSH(t)
+	if _, err := ConnectSSH(" "); err == nil {
+		t.Fatal("a host is needed")
+	}
+	ssh, err := ConnectSSH("dev@example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := ssh.Home()
+	if err != nil || !filepath.IsAbs(home) {
+		t.Fatalf("home %q, %v", home, err)
 	}
 }
 

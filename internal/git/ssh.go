@@ -3,10 +3,13 @@ package git
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/Zenyet/banyan/internal/askpass"
@@ -143,6 +146,67 @@ func (s *SSH) expand(path string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// ConnectSSH checks that host answers over ssh, and returns the connection
+// to choose a repository on it.
+func ConnectSSH(host string) (*SSH, error) {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return nil, errors.New("a repository over SSH needs a host")
+	}
+	ssh := &SSH{Host: host}
+	if _, err := ssh.Home(); err != nil {
+		return nil, err
+	}
+	return ssh, nil
+}
+
+// Home is the host's home folder, with symlinks resolved.
+func (s *SSH) Home() (string, error) {
+	out, err := s.runScript(context.Background(), `cd "$HOME" && pwd -P`, nil)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// Dirs lists the folders in dir, a path on the host: it returns the
+// resolved path and the folders' names, sorted, leaving out .git.
+func (s *SSH) Dirs(dir string) (string, []string, error) {
+	if strings.TrimSpace(dir) == "" {
+		dir = "~"
+	}
+	resolved, err := s.expand(dir)
+	if err != nil {
+		return "", nil, err
+	}
+	script := "cd " + QuoteArg(resolved) + " && pwd -P && find . -mindepth 1 -maxdepth 1 -type d -print0"
+	out, err := s.runScript(context.Background(), script, nil)
+	if err != nil {
+		return "", nil, err
+	}
+	at := strings.IndexByte(string(out), '\n')
+	if at < 0 {
+		return "", nil, fmt.Errorf("%s: cannot list the folders", dir)
+	}
+	resolved = strings.TrimSpace(string(out[:at]))
+	var names []string
+	for _, entry := range strings.Split(string(out[at+1:]), "\x00") {
+		if entry == "" {
+			continue
+		}
+		name := path.Base(entry)
+		if name == ".git" {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return resolved, names, nil
+}
+
+// Open opens the repository at dir on the host.
+func (s *SSH) Open(dir string) (*Repo, error) { return OpenSSH(s.Host, dir) }
+
 // SSHLocation is where a repository on host at path is remembered and
 // named, as ssh://user@host/path.
 func SSHLocation(host, path string) string {
@@ -184,7 +248,7 @@ func OpenSSH(host, path string) (*Repo, error) {
 	ssh := &SSH{Host: host}
 	resolved, err := ssh.expand(path)
 	if err != nil {
-		return nil, fmt.Errorf("cannot reach %s: %w", host, err)
+		return nil, err
 	}
 	return open(&Repo{root: resolved, ssh: ssh})
 }

@@ -144,8 +144,9 @@ where it builds with `cargo` as before.
 ### Repositories over SSH
 
 - **Open Repository over SSH…** (File menu, welcome window, and repository menu) opens a repository on a development
-  machine. Every git command and file read runs there through your `ssh`, with the keys, agent, `ProxyJump` and
-  other options of `~/.ssh/config`.
+  machine: connect with `user@host`, then choose the repository's folder from the folders listed there, starting at
+  its home folder. Every git command and file read runs there through your `ssh`, with the keys, agent, `ProxyJump`
+  and other options of `~/.ssh/config`.
 - The editor, diffs, changelists, shelves, worktrees and submodules work as they do locally; recent and reopened
   repositories remember their host. Changes made in a terminal on that machine show up within seconds.
 - ssh's own prompts — a key's passphrase, the host key — are asked for in the app. Remote git never prompts, so a push
