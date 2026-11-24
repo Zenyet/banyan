@@ -286,27 +286,91 @@ func openPush(ws *Workspace) {
 }
 
 // openPushFile shows a file of the commit the Push dialog has chosen, in
-// a dialog over it.
+// a dialog over it, with the commit's files beside it.
 func openPushFile(ws *Workspace, d *git.CommitDetails, f git.FileChange) {
 	if d == nil {
 		return
 	}
-	oldPath := f.OrigPath
-	if oldPath == "" {
-		oldPath = f.Path
-	}
 	repo := ws.Model.Repo
+	width := float32(820)
+	closed := map[string]bool{}
+	selected := f.Path
 	diff := newDiffPane(ws)
-	diff.Show(DiffSource{
-		Title: f.Path,
-		Path:  f.Path,
-		Patch: func() (string, error) { return repo.CommitFileDiff(d, &f) },
-		Old:   blob(repo, d.BaseParent(), oldPath),
-		New:   blob(repo, d.ID, f.Path),
-	})
+	show := func(path string) {
+		change := f
+		for _, c := range d.Files {
+			if c.Path == path {
+				change = c
+				break
+			}
+		}
+		oldPath := change.OrigPath
+		if oldPath == "" {
+			oldPath = change.Path
+		}
+		diff.Show(DiffSource{
+			Title: change.Path,
+			Path:  change.Path,
+			Patch: func() (string, error) { return repo.CommitFileDiff(d, &change) },
+			Old:   blob(repo, d.BaseParent(), oldPath),
+			New:   blob(repo, d.ID, change.Path),
+		})
+	}
+	show(selected)
 	title := f.Path + "  (" + short(d.ID) + ")"
 	ws.Shell.Open(&Dialog{Title: title, Width: 1100, Fill: true, Height: 620, Body: func(c *ui.Context, dd *Dialog) {
-		ui.Column(c).Fill().Children(func() { diff.View(c) })
+		t := c.Theme()
+		ui.Split(c.Key("push-diff"), &width, func() {
+			ui.Column(c).Fill().Children(func() { diff.View(c) })
+		}, func() {
+			ui.Column(c).Fill().Children(func() {
+				muted(c, fileCount(len(d.Files))).Padding(4, 8)
+				paths := make([]string, 0, len(d.Files))
+				byPath := make(map[string]git.FileChange, len(d.Files))
+				for _, ch := range d.Files {
+					paths = append(paths, ch.Path)
+					byPath[ch.Path] = ch
+				}
+				rows := flatten(pathTree(paths), closed)
+				ui.Scroll(c.Key("push-files")).Grow(1).PaddingY(4).Children(func() {
+					for _, r := range rows {
+						n := r.Node
+						row := ui.Row(c.Key(n.Path)).Height(22).PaddingStart(float32(6 + r.Depth*12)).PaddingEnd(6).Gap(4).Cursor(ui.CursorPointer)
+						switch {
+						case !n.IsDir && n.Path == selected:
+							row.Background(selectionBG)
+						case row.Hovered():
+							row.Background(hoverBG(t))
+						}
+						if row.Clicked() {
+							if n.IsDir {
+								closed[n.Path] = !closed[n.Path]
+							} else {
+								selected = n.Path
+								show(n.Path)
+							}
+						}
+						row.Children(func() {
+							if n.IsDir {
+								name := "folder"
+								if !closed[n.Path] {
+									name = "folder-open"
+								}
+								ui.Icon(c, icon(name)).FontSize(t.FontSize - 1).TextColor(t.TextMuted)
+								ui.Text(c, n.Name).SingleLine().TextColor(t.TextMuted).Shrink(1)
+								return
+							}
+							color := statusColor(byPath[n.Path].Status, t)
+							if n.Path == selected {
+								color = t.AccentText
+							}
+							ui.Image(c, fileIcon(n.Path)).Size(t.FontSize+1, t.FontSize+1)
+							ui.Text(c, n.Name).SingleLine().TextColor(color).Shrink(1)
+						})
+					}
+				})
+			})
+		}).Fill()
 	}})
 }
 

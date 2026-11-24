@@ -50,7 +50,14 @@ func TestPushFileOpensPreview(t *testing.T) {
 	run(dir, "remote", "add", "origin", remote)
 	run(dir, "push", "-q", "origin", "main")
 	write("two\n")
-	run(dir, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qam", "second")
+	if err := os.MkdirAll(filepath.Join(dir, "internal", "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "internal", "app", "shell.go"), []byte("package app\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(dir, "add", ".")
+	run(dir, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", "second")
 
 	repo, err := git.Open(dir)
 	if err != nil {
@@ -78,5 +85,9 @@ func TestPushFileOpensPreview(t *testing.T) {
 	}
 	if title := s.dialogs[1].Title; !strings.HasPrefix(title, "a.txt") {
 		t.Fatalf("the preview is %q", title)
+	}
+	tt.Frame()
+	if !tt.HasText("internal/app") {
+		t.Fatalf("the preview has no file tree: %q", tt.Texts())
 	}
 }
