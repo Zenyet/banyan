@@ -39,7 +39,12 @@ type Shell struct {
 type Dialog struct {
 	Title string
 	Width float32
-	Body  func(c *ui.Context, d *Dialog)
+	// Fill makes the body fill the window edge to edge, as a diff
+	// viewer's does, and Height is its content height. Without Fill the
+	// window sizes to its content.
+	Fill   bool
+	Height float32
+	Body   func(c *ui.Context, d *Dialog)
 	// OnDismiss runs when Escape or the window's close control closes it.
 	OnDismiss func()
 	open      bool
@@ -160,6 +165,8 @@ func (s *Shell) openNative(d *Dialog) {
 	var root ui.Element
 	shown := false
 	var height float32
+	userSized := false
+	var fitAt time.Time
 	content := ui.View(func(c *ui.Context) {
 		applyTheme(c)
 		t := c.Theme()
@@ -167,22 +174,37 @@ func (s *Shell) openNative(d *Dialog) {
 			d.dismiss()
 			return
 		}
-		root = ui.Column(c).FillWidth().Padding(20).Background(t.Background).TextColor(t.Text)
-		root.Children(func() {
-			ui.Scroll(c.Key("body")).MaxHeight(float32(maxHeight)).Shrink(1).MinHeight(0).Children(func() {
+		if d.Fill {
+			root = ui.Column(c).Fill().Background(t.Background).TextColor(t.Text)
+			root.Children(func() {
 				d.Body(c, d)
+				if d.blocked {
+					ui.Box(c.Key("blocked")).Absolute().Left(0).Top(0).Right(0).Bottom(0).Modal().
+						HandleInput(func(ui.InputEvent) bool { return true })
+				}
 			})
-			if d.blocked {
-				ui.Box(c.Key("blocked")).Absolute().Left(0).Top(0).Right(0).Bottom(0).Modal().
-					HandleInput(func(ui.InputEvent) bool { return true })
-			}
-		})
-		// The body may load or grow after the window shows, as the Push
-		// dialog's commits do; follow it.
+		} else {
+			root = ui.Column(c).FillWidth().Padding(20).Background(t.Background).TextColor(t.Text)
+			root.Children(func() {
+				ui.Scroll(c.Key("body")).MaxHeight(float32(maxHeight)).Shrink(1).MinHeight(0).Children(func() {
+					d.Body(c, d)
+				})
+				if d.blocked {
+					ui.Box(c.Key("blocked")).Absolute().Left(0).Top(0).Right(0).Bottom(0).Modal().
+						HandleInput(func(ui.InputEvent) bool { return true })
+				}
+			})
+		}
+		if d.Fill {
+			return
+		}
+		// The body may load or grow after the window shows, as a dialog
+		// that waits for a command does; follow it.
 		if h := root.Bounds().H; h > 0 {
 			h = min(h, float32(maxHeight))
-			if !shown || h < height-1 || h > height+1 {
+			if !userSized && (!shown || h < height-1 || h > height+1) {
 				height = h
+				fitAt = time.Now()
 				win.SetContentSize(width, int(h))
 				pb = parent.Bounds()
 				win.SetPosition(pb.X+(pb.Width-width)/2, pb.Y+(pb.Height-int(h))/2)
@@ -198,12 +220,36 @@ func (s *Shell) openNative(d *Dialog) {
 		}
 	})
 	s.dialogs = append(s.dialogs, d)
-	win = mygo.NewWindow(mygo.WindowOptions{
-		Title: d.Title, Width: width, Height: 120, UseContentSize: true,
-		Parent: parent, Modal: modal, Opacity: 0,
-		DisableResize: true,
-		SkipTaskbar:   true, Content: content,
-	})
+	opts := mygo.WindowOptions{
+		Title: d.Title, Width: width, UseContentSize: true,
+		Parent: parent, Modal: modal, SkipTaskbar: true, Content: content,
+	}
+	if d.Fill {
+		h := int(d.Height)
+		if h <= 0 {
+			h = 620
+		}
+		opts.Height = h
+		opts.MinWidth, opts.MinHeight = 360, 240
+		opts.Opacity = 1
+	} else {
+		opts.Height = 120
+		opts.Opacity = 0
+		opts.MinWidth, opts.MinHeight = 320, 160
+	}
+	win = mygo.NewWindow(opts)
+	if !d.Fill {
+		win.OnResize(func() {
+			if time.Since(fitAt) > 150*time.Millisecond {
+				userSized = true
+			}
+		})
+	}
+	if d.Fill {
+		pb = parent.Bounds()
+		win.SetPosition(pb.X+(pb.Width-width)/2, pb.Y+(pb.Height-int(opts.Height))/2)
+		win.Focus()
+	}
 	d.win = win
 	dialogWindows[win] = true
 	if !d.open {

@@ -200,87 +200,87 @@ func openPush(ws *Workspace) {
 			}
 		})
 	}()
-	ws.Shell.Open(&Dialog{Title: i18n.T("Push Commits"), Width: 900, Body: func(c *ui.Context, d *Dialog) {
+	ws.Shell.Open(&Dialog{Title: i18n.T("Push Commits"), Width: 900, Fill: true, Height: 520, Body: func(c *ui.Context, d *Dialog) {
 		t := c.Theme()
-		switch {
-		case loadErr != nil:
-			ui.Text(c, loadErr.Error()).TextColor(t.Danger)
-		case target != nil:
-			ui.Row(c).Gap(6).Children(func() {
-				ui.Icon(c, icon("git-branch"))
-				ui.Text(c, target.Branch)
-				muted(c, "→")
-				ui.Text(c, target.Remote+" : "+target.RemoteBranch)
-				if target.IsNew {
-					ui.Box(c).PaddingX(4).Radius(3).Background(ui.Hex("#5f9e5f")).Children(func() {
-						ui.Text(c, i18n.T("New")).FontSize(t.FontSize - 2).TextColor(ui.RGB(255, 255, 255))
-					})
-				}
-			})
-		default:
-			muted(c, i18n.T("Loading…"))
-		}
-		framed(c, 380, func() {
-			if !loading && len(commits) == 0 && loadErr == nil {
-				emptyMessage(c, i18n.T("Nothing to push"))
-				return
-			}
-			ui.Split(c.Key("push"), &width, func() {
-				ui.Scroll(c.Key("commits")).Fill().Children(func() {
-					for ix, commit := range commits {
-						row := ui.Row(c.Key(ix)).Height(24).PaddingX(8).Gap(8).Cursor(ui.CursorPointer)
-						switch {
-						case ix == selected:
-							row.Background(selectionBG)
-						case row.Hovered():
-							row.Background(hoverBG(t))
-						}
-						if row.Clicked() {
-							choose(ix)
-						}
-						row.Children(func() {
-							ui.Text(c, commit.Subject).SingleLine().Grow(1).Shrink(1)
-							muted(c, formatTime(commit.Time)).SingleLine()
+		ui.Column(c).Fill().Padding(12, 16).Children(func() {
+			switch {
+			case loadErr != nil:
+				ui.Text(c, loadErr.Error()).TextColor(t.Danger)
+			case target != nil:
+				ui.Row(c).Gap(6).Margin(0, 0, 8, 0).Children(func() {
+					ui.Icon(c, icon("git-branch"))
+					ui.Text(c, target.Branch)
+					muted(c, "→")
+					ui.Text(c, target.Remote+" : "+target.RemoteBranch)
+					if target.IsNew {
+						ui.Box(c).PaddingX(4).Radius(3).Background(ui.Hex("#5f9e5f")).Children(func() {
+							ui.Text(c, i18n.T("New")).FontSize(t.FontSize - 2).TextColor(ui.RGB(255, 255, 255))
 						})
 					}
 				})
-			}, func() {
-				ui.Scroll(c.Key("files")).Fill().PaddingY(4).Children(func() {
-					for ix := range files {
-						if fileRow(c, &files[ix], false).Clicked() {
-							openPushFile(ws, details, files[ix])
-						}
-					}
-				})
-			}).Fill()
-		})
-		protected := target != nil && settings.Read(func(s *settings.Settings) bool { return s.IsProtected(target.RemoteBranch) })
-		canPush := target != nil && (len(commits) > 0 || force || tags)
-		ui.Row(c).Gap(8).Children(func() {
-			if protected {
-				muted(c, i18n.T("Protected branch: no force push"))
-				force = false
+			default:
+				muted(c, i18n.T("Loading…"))
+			}
+			if !loading && len(commits) == 0 && loadErr == nil {
+				ui.Column(c).Grow(1).Children(func() { emptyMessage(c, i18n.T("Nothing to push")) })
 			} else {
-				ui.Checkbox(c.Key("force"), &force, i18n.T("Force push (--force-with-lease)"))
+				ui.Split(c.Key("push"), &width, func() {
+					ui.Scroll(c.Key("commits")).Fill().Children(func() {
+						for ix, commit := range commits {
+							row := ui.Row(c.Key(ix)).Height(24).PaddingX(8).Gap(8).Cursor(ui.CursorPointer)
+							switch {
+							case ix == selected:
+								row.Background(selectionBG)
+							case row.Hovered():
+								row.Background(hoverBG(t))
+							}
+							if row.Clicked() {
+								choose(ix)
+							}
+							row.Children(func() {
+								ui.Text(c, commit.Subject).SingleLine().Grow(1).Shrink(1)
+								muted(c, formatTime(commit.Time)).SingleLine()
+							})
+						}
+					})
+				}, func() {
+					ui.Scroll(c.Key("files")).Fill().PaddingY(4).Children(func() {
+						for ix := range files {
+							if fileRow(c, &files[ix], false).Clicked() {
+								openPushFile(ws, details, files[ix])
+							}
+						}
+					})
+				}).Grow(1).Shrink(1).MinHeight(0)
 			}
-			ui.Checkbox(c.Key("tags"), &tags, i18n.T("Push tags"))
-			ui.Spacer(c)
-			if button(c.Key("cancel"), i18n.T("Cancel")).Clicked() {
-				d.Close()
-			}
-			label := i18n.T("Push")
-			if force {
-				label = i18n.T("Force Push")
-			}
-			ok := primaryButton(c.Key("push"), label).Disabled(!canPush)
-			if force {
-				ok.Background(t.Danger)
-			}
-			if ok.Clicked() {
-				tg, f, tt := *target, force, tags
-				d.Close()
-				ws.run(label, func(r *git.Repo) (string, error) { return r.PushTo(&tg, f, tt) })
-			}
+			protected := target != nil && settings.Read(func(s *settings.Settings) bool { return s.IsProtected(target.RemoteBranch) })
+			canPush := target != nil && (len(commits) > 0 || force || tags)
+			ui.Row(c).Margin(8, 0, 0, 0).Gap(8).Children(func() {
+				if protected {
+					muted(c, i18n.T("Protected branch: no force push"))
+					force = false
+				} else {
+					ui.Checkbox(c.Key("force"), &force, i18n.T("Force push (--force-with-lease)"))
+				}
+				ui.Checkbox(c.Key("tags"), &tags, i18n.T("Push tags"))
+				ui.Spacer(c)
+				if button(c.Key("cancel"), i18n.T("Cancel")).Clicked() {
+					d.Close()
+				}
+				label := i18n.T("Push")
+				if force {
+					label = i18n.T("Force Push")
+				}
+				ok := primaryButton(c.Key("push"), label).Disabled(!canPush)
+				if force {
+					ok.Background(t.Danger)
+				}
+				if ok.Clicked() {
+					tg, f, tt := *target, force, tags
+					d.Close()
+					ws.run(label, func(r *git.Repo) (string, error) { return r.PushTo(&tg, f, tt) })
+				}
+			})
 		})
 	}})
 }
@@ -305,8 +305,8 @@ func openPushFile(ws *Workspace, d *git.CommitDetails, f git.FileChange) {
 		New:   blob(repo, d.ID, f.Path),
 	})
 	title := f.Path + "  (" + short(d.ID) + ")"
-	ws.Shell.Open(&Dialog{Title: title, Width: 1100, Body: func(c *ui.Context, dd *Dialog) {
-		framed(c, 620, func() { diff.View(c) })
+	ws.Shell.Open(&Dialog{Title: title, Width: 1100, Fill: true, Height: 620, Body: func(c *ui.Context, dd *Dialog) {
+		ui.Column(c).Fill().Children(func() { diff.View(c) })
 	}})
 }
 
