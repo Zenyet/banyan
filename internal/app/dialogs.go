@@ -37,21 +37,24 @@ func choiceCard(c *ui.Context, title, detail string, chosen bool) ui.Element {
 // incoming changes, or only fast-forward.
 func openUpdate(ws *Workspace) {
 	method := settings.Read(func(s *settings.Settings) git.UpdateMethod { return s.UpdateMethod })
-	ws.Shell.Open(&Dialog{Title: i18n.T("Update Project"), Width: 440, Body: func(c *ui.Context, d *Dialog) {
-		branch := ws.Model.CurrentBranch
-		if branch == "" {
-			branch = "HEAD"
-		}
-		muted(c, i18n.Tf("Fetch and update {} from its tracked branch. Local changes are stashed and restored.", branch))
-		for _, m := range git.AllUpdateMethods {
-			if choiceCard(c.Key(m), m.Label(), m.Detail(), method == m).Clicked() {
-				method = m
+	ws.Shell.Open(&Dialog{Title: i18n.T("Update Project"), Width: 440, Fill: true, Height: 400, Body: func(c *ui.Context, d *Dialog) {
+		ui.Column(c).Fill().Padding(20).Gap(12).Children(func() {
+			branch := ws.Model.CurrentBranch
+			if branch == "" {
+				branch = "HEAD"
 			}
-		}
-		dialogButtons(c, d, i18n.T("Update"), false, false, func() {
-			d.Close()
-			changeSettings(func(s *settings.Settings) { s.UpdateMethod = method })
-			ws.run(i18n.T("Update Project"), func(r *git.Repo) (string, error) { return r.UpdateProject(method) })
+			muted(c, i18n.Tf("Fetch and update {} from its tracked branch. Local changes are stashed and restored.", branch))
+			for _, m := range git.AllUpdateMethods {
+				if choiceCard(c.Key(m), m.Label(), m.Detail(), method == m).Clicked() {
+					method = m
+				}
+			}
+			ui.Spacer(c)
+			dialogButtons(c, d, i18n.T("Update"), false, false, func() {
+				d.Close()
+				changeSettings(func(s *settings.Settings) { s.UpdateMethod = method })
+				ws.run(i18n.T("Update Project"), func(r *git.Repo) (string, error) { return r.UpdateProject(method) })
+			})
 		})
 	}})
 }
