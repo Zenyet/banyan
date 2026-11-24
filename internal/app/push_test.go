@@ -17,6 +17,17 @@ import (
 // Clicking a file in the Push dialog opens its diff over the dialog.
 func TestPushFileOpensPreview(t *testing.T) {
 	remote, dir := t.TempDir(), t.TempDir()
+	// A git of the model's background work can still be writing the index
+	// or the commit-graph as the test ends; removing the folder again once
+	// that git has gone clears it.
+	t.Cleanup(func() {
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+			if os.RemoveAll(dir) == nil {
+				return
+			}
+		}
+		t.Errorf("could not remove %s", dir)
+	})
 	run := func(dir string, args ...string) {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
@@ -26,6 +37,8 @@ func TestPushFileOpensPreview(t *testing.T) {
 	}
 	run(remote, "init", "-q", "--bare")
 	run(dir, "init", "-q", "-b", "main")
+	run(dir, "config", "gc.auto", "0")
+	run(dir, "config", "maintenance.auto", "false")
 	write := func(text string) {
 		if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte(text), 0o644); err != nil {
 			t.Fatal(err)

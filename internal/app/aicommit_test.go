@@ -138,6 +138,17 @@ func TestAISettingsPageRenders(t *testing.T) {
 // The commit box offers generation even before a provider is set up.
 func TestCommitBoxOffersGeneration(t *testing.T) {
 	dir := t.TempDir()
+	// A git of the model's background work can still be writing the index
+	// or the commit-graph as the test ends, which leaves the folder not
+	// empty; removing it again once that git has gone clears it.
+	t.Cleanup(func() {
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+			if os.RemoveAll(dir) == nil {
+				return
+			}
+		}
+		t.Errorf("could not remove %s", dir)
+	})
 	run := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"}, args...)...)
@@ -147,6 +158,9 @@ func TestCommitBoxOffersGeneration(t *testing.T) {
 		}
 	}
 	run("init", "-q", "-b", "main")
+	// Nothing in the background writes the repository as the test ends.
+	run("config", "gc.auto", "0")
+	run("config", "maintenance.auto", "false")
 	write := func(text string) {
 		t.Helper()
 		if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte(text), 0o644); err != nil {
