@@ -186,9 +186,7 @@ func (s *Shell) openNative(d *Dialog) {
 		} else {
 			root = ui.Column(c).FillWidth().Padding(20).Gap(12).Background(t.Background).TextColor(t.Text)
 			root.Children(func() {
-				ui.Scroll(c.Key("body")).MaxHeight(float32(maxHeight)).Shrink(1).MinHeight(0).Children(func() {
-					d.Body(c, d)
-				})
+				d.Body(c, d)
 				if d.blocked {
 					ui.Box(c.Key("blocked")).Absolute().Left(0).Top(0).Right(0).Bottom(0).Modal().
 						HandleInput(func(ui.InputEvent) bool { return true })
