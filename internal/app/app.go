@@ -34,9 +34,7 @@ func Run(requested string) error {
 	model.Post = func(fn func()) {
 		go mygo.RunOnMain(func() {
 			fn()
-			for w := range shells {
-				w.Invalidate()
-			}
+			invalidateWindows()
 		})
 	}
 	mygo.App.WhenReady(func() {
@@ -159,9 +157,7 @@ func changeSettings(f func(*settings.Settings)) {
 	if !slicesEqual(after.Shortcuts, before.Shortcuts) {
 		setMenu()
 	}
-	for w := range shells {
-		w.Invalidate()
-	}
+	invalidateWindows()
 }
 
 func slicesEqual(a, b []settings.Shortcut) bool {

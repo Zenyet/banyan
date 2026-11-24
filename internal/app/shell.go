@@ -40,24 +40,58 @@ type Dialog struct {
 	Title string
 	Width float32
 	Body  func(c *ui.Context, d *Dialog)
-	// OnDismiss runs when Escape or a click outside closes it.
+	// OnDismiss runs when Escape or the window's close control closes it.
 	OnDismiss func()
 	open      bool
+	// win is the native window of a dialog in the app; a shell of the
+	// tests draws its dialogs over its own window instead.
+	win *mygo.Window
+	// byCode is whether the body closed it, which runs no OnDismiss.
+	byCode bool
+	// blocked is whether a dialog over this one covers it, as a sheet
+	// does on macOS, where child windows are not modal.
+	blocked bool
 }
 
 // Close closes the dialog, from its body or anywhere.
-func (d *Dialog) Close() { d.open = false }
+func (d *Dialog) Close() {
+	d.open = false
+	d.byCode = true
+	if d.win != nil {
+		d.win.Close()
+	}
+}
 
-// dismiss closes the dialog as Escape or a click outside does, running
-// OnDismiss.
+// dismiss closes the dialog as Escape or the window's close control does,
+// running OnDismiss.
 func (d *Dialog) dismiss() {
 	d.open = false
+	if d.win != nil {
+		d.byCode = false
+		d.win.Close()
+		return
+	}
+	d.byCode = true
 	if d.OnDismiss != nil {
 		d.OnDismiss()
 	}
 }
 
 var shells = map[*mygo.Window]*Shell{}
+
+// dialogWindows are the native windows of dialogs, which model.Post and
+// settings changes redraw along with the shells.
+var dialogWindows = map[*mygo.Window]bool{}
+
+// invalidateWindows redraws every window of the app, dialogs included.
+func invalidateWindows() {
+	for w := range shells {
+		w.Invalidate()
+	}
+	for w := range dialogWindows {
+		w.Invalidate()
+	}
+}
 
 // newWindow opens a window of native UI around content.
 func newWindow(opts mygo.WindowOptions, content func(s *Shell, c *ui.Context)) *Shell {
@@ -87,16 +121,144 @@ func shellOf(w *mygo.Window) *Shell {
 	return shells[w]
 }
 
-// Open shows a dialog over the window.
+// Open shows a dialog: a native window of its own over the window, as
+// JetBrains' dialogs are, or over the shell's window in the tests.
 func (s *Shell) Open(d *Dialog) {
 	d.open = true
 	if d.Width == 0 {
 		d.Width = 440
 	}
+	if s.Win == nil {
+		s.dialogs = append(s.dialogs, d)
+		return
+	}
+	s.openNative(d)
+}
+
+// openNative shows d in a native child window, sized to its content once
+// that has laid out. On macOS it is a child window with the window's own
+// traffic lights, over a blocked parent; elsewhere the system makes it
+// modal to the parent.
+func (s *Shell) openNative(d *Dialog) {
+	parent := s.topWindow()
+	if parent == nil {
+		return
+	}
+	pb := parent.Bounds()
+	width := min(int(d.Width), max(pb.Width-80, 280))
+	maxHeight := max(pb.Height-120, 200)
+	modal := runtime.GOOS != "darwin"
+	if !modal {
+		if prev := s.topDialog(); prev != nil {
+			prev.blocked = true
+			if prev.win != nil {
+				prev.win.Invalidate()
+			}
+		}
+	}
+	var win *mygo.Window
+	var root ui.Element
+	shown := false
+	var height float32
+	content := ui.View(func(c *ui.Context) {
+		applyTheme(c)
+		t := c.Theme()
+		if c.Shortcut(0, ui.KeyEscape) {
+			d.dismiss()
+			return
+		}
+		root = ui.Column(c).FillWidth().Padding(20).Background(t.Background).TextColor(t.Text)
+		root.Children(func() {
+			ui.Scroll(c.Key("body")).MaxHeight(float32(maxHeight)).Shrink(1).MinHeight(0).Children(func() {
+				d.Body(c, d)
+			})
+			if d.blocked {
+				ui.Box(c.Key("blocked")).Absolute().Left(0).Top(0).Right(0).Bottom(0).Modal().
+					HandleInput(func(ui.InputEvent) bool { return true })
+			}
+		})
+		// The body may load or grow after the window shows, as the Push
+		// dialog's commits do; follow it.
+		if h := root.Bounds().H; h > 0 {
+			h = min(h, float32(maxHeight))
+			if !shown || h < height-1 || h > height+1 {
+				height = h
+				win.SetContentSize(width, int(h))
+				pb = parent.Bounds()
+				win.SetPosition(pb.X+(pb.Width-width)/2, pb.Y+(pb.Height-int(h))/2)
+				if !shown {
+					shown = true
+					win.SetOpacity(1)
+					win.Focus()
+				}
+			}
+		} else if !shown {
+			// Lay out once more, now that the content has a size.
+			c.AnimationFrame()
+		}
+	})
 	s.dialogs = append(s.dialogs, d)
-	// A shell of the tests has no window.
+	win = mygo.NewWindow(mygo.WindowOptions{
+		Title: d.Title, Width: width, Height: 120, UseContentSize: true,
+		Parent: parent, Modal: modal, Opacity: 0,
+		DisableResize: true,
+		SkipTaskbar:   true, Content: content,
+	})
+	d.win = win
+	dialogWindows[win] = true
+	if !d.open {
+		win.Close()
+	}
 	if s.Win != nil {
 		s.Win.Invalidate()
+	}
+	win.OnClosed(func() {
+		delete(dialogWindows, win)
+		d.open, d.win = false, nil
+		s.remove(d)
+		if !modal {
+			if prev := s.topDialog(); prev != nil {
+				prev.blocked = false
+				if prev.win != nil {
+					prev.win.Invalidate()
+				}
+			}
+			if s.Win != nil {
+				s.Win.Invalidate()
+			}
+		}
+		if !d.byCode && d.OnDismiss != nil {
+			d.OnDismiss()
+		}
+	})
+}
+
+// topDialog is the last dialog open, nil for none.
+func (s *Shell) topDialog() *Dialog {
+	for i := len(s.dialogs) - 1; i >= 0; i-- {
+		if s.dialogs[i].win != nil {
+			return s.dialogs[i]
+		}
+	}
+	return nil
+}
+
+// topWindow is the window the next dialog goes over: the last dialog
+// open, or the shell's own window.
+func (s *Shell) topWindow() *mygo.Window {
+	if d := s.topDialog(); d != nil {
+		return d.win
+	}
+	return s.Win
+}
+
+// remove takes a closed dialog out of the stack.
+func (s *Shell) remove(d *Dialog) {
+	for i, x := range s.dialogs {
+		if x == d {
+			s.dialogs = append(s.dialogs[:i], s.dialogs[i+1:]...)
+			return
+		}
 	}
 }
 
@@ -173,40 +335,50 @@ func (s *Shell) view(c *ui.Context) {
 	} else {
 		root.Background(t.Background)
 	}
-	root.Children(func() { s.content(c) })
-	for _, d := range s.dialogs {
-		was := d.open
-		panel := ui.Modal(c.Key(d), &d.open, func() {
-			ui.Row(c.Key("dialog-title")).AlignItems(ui.Center).Gap(8).Children(func() {
-				if runtime.GOOS == "darwin" {
-					windowClose(c, d)
-				}
-				if d.Title != "" {
-					ui.Text(c, d.Title).FontSize(t.FontSize + 2).Bold().SingleLine().Grow(1).Shrink(1).MinWidth(0)
-				} else {
-					ui.Spacer(c)
-				}
-				if runtime.GOOS != "darwin" {
-					windowClose(c, d)
-				}
+	root.Children(func() {
+		s.content(c)
+		// macOS child windows are not modal: a dialog's window covers
+		// this one, and this keeps the window under it from taking input.
+		if s.Win != nil && runtime.GOOS == "darwin" && s.HasDialog() {
+			ui.Box(c.Key("dialog-blocker")).Absolute().Left(0).Top(0).Right(0).Bottom(0).Modal().
+				HandleInput(func(ui.InputEvent) bool { return true })
+		}
+	})
+	if s.Win == nil {
+		for _, d := range s.dialogs {
+			was := d.open
+			panel := ui.Modal(c.Key(d), &d.open, func() {
+				ui.Row(c.Key("dialog-title")).AlignItems(ui.Center).Gap(8).Children(func() {
+					if runtime.GOOS == "darwin" {
+						windowClose(c, d)
+					}
+					if d.Title != "" {
+						ui.Text(c, d.Title).FontSize(t.FontSize + 2).Bold().SingleLine().Grow(1).Shrink(1).MinWidth(0)
+					} else {
+						ui.Spacer(c)
+					}
+					if runtime.GOOS != "darwin" {
+						windowClose(c, d)
+					}
+				})
+				d.Body(c, d)
 			})
-			d.Body(c, d)
-		})
-		// As macOS's windows and sheets: a hairline around, lighter in
-		// the dark, and a deep, soft shadow.
-		edge, shade := ui.RGBA(0, 0, 0, 0.12), ui.RGBA(0, 0, 0, 0.22)
-		if t.Dark {
-			edge, shade = ui.RGBA(255, 255, 255, 0.14), ui.RGBA(0, 0, 0, 0.55)
-		}
-		panel.Width(d.Width).Radius(16).Border(1, edge).Shadow(0, 18, 50, 0, shade)
-		if s.controlsInset > 0 {
-			// Centered, a dialog keeps clear of the window's controls
-			// above it, however short the window.
-			_, h := c.Size()
-			panel.MaxHeight(h - 2*s.controlsInset)
-		}
-		if was && !d.open && panel.Dismissed() && d.OnDismiss != nil {
-			d.OnDismiss()
+			// As macOS's windows and sheets: a hairline around, lighter in
+			// the dark, and a deep, soft shadow.
+			edge, shade := ui.RGBA(0, 0, 0, 0.12), ui.RGBA(0, 0, 0, 0.22)
+			if t.Dark {
+				edge, shade = ui.RGBA(255, 255, 255, 0.14), ui.RGBA(0, 0, 0, 0.55)
+			}
+			panel.Width(d.Width).Radius(16).Border(1, edge).Shadow(0, 18, 50, 0, shade)
+			if s.controlsInset > 0 {
+				// Centered, a dialog keeps clear of the window's controls
+				// above it, however short the window.
+				_, h := c.Size()
+				panel.MaxHeight(h - 2*s.controlsInset)
+			}
+			if was && !d.open && panel.Dismissed() && d.OnDismiss != nil {
+				d.OnDismiss()
+			}
 		}
 	}
 	open := s.dialogs[:0]
