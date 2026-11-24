@@ -184,7 +184,7 @@ func (s *Shell) openNative(d *Dialog) {
 				}
 			})
 		} else {
-			root = ui.Column(c).FillWidth().Padding(20).Background(t.Background).TextColor(t.Text)
+			root = ui.Column(c).FillWidth().Padding(20).Gap(12).Background(t.Background).TextColor(t.Text)
 			root.Children(func() {
 				ui.Scroll(c.Key("body")).MaxHeight(float32(maxHeight)).Shrink(1).MinHeight(0).Children(func() {
 					d.Body(c, d)
@@ -234,16 +234,20 @@ func (s *Shell) openNative(d *Dialog) {
 		opts.Opacity = 1
 	} else {
 		opts.Height = 120
+		opts.Hidden = true
 		opts.Opacity = 0
 		opts.MinWidth, opts.MinHeight = 320, 160
 	}
 	win = mygo.NewWindow(opts)
 	if !d.Fill {
 		win.OnResize(func() {
-			if time.Since(fitAt) > 150*time.Millisecond {
+			if shown && time.Since(fitAt) > 150*time.Millisecond {
 				userSized = true
 			}
 		})
+		// Lay out once while hidden, so the window first shows at its
+		// size rather than growing from 120.
+		win.ShowInactive()
 	}
 	if d.Fill {
 		pb = parent.Bounds()
