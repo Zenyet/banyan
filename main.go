@@ -11,7 +11,7 @@ import (
 )
 
 // version is set at build time with -ldflags "-X main.version=…".
-var version = "0.5.4"
+var version = "0.5.5"
 
 func main() {
 	// Git runs this executable to ask for credentials; answer and exit.
