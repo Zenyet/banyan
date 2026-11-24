@@ -1,6 +1,7 @@
 package app
 
 import (
+	"runtime"
 	"strings"
 	"time"
 
@@ -46,6 +47,15 @@ type Dialog struct {
 
 // Close closes the dialog, from its body or anywhere.
 func (d *Dialog) Close() { d.open = false }
+
+// dismiss closes the dialog as Escape or a click outside does, running
+// OnDismiss.
+func (d *Dialog) dismiss() {
+	d.open = false
+	if d.OnDismiss != nil {
+		d.OnDismiss()
+	}
+}
 
 var shells = map[*mygo.Window]*Shell{}
 
@@ -118,6 +128,34 @@ func (s *Shell) ToastAction(kind, message, action string, onAction func()) {
 	}
 }
 
+// windowClose is a dialog's window-style close control: the red light of
+// a macOS window, or an X in the top right elsewhere.
+func windowClose(c *ui.Context, d *Dialog) {
+	t := c.Theme()
+	if runtime.GOOS == "darwin" {
+		b := ui.ButtonBase(c.Key("window-close")).Label(i18n.T("Close")).Tooltip(i18n.T("Close")).
+			Size(12, 12).Radius(6).Background(ui.Hex("#ff5f57")).Border(1, ui.Hex("#e0443e")).Center().Shrink(0)
+		if b.Hovered() {
+			b.Children(func() { ui.Icon(c, icon("x")).FontSize(8).TextColor(ui.Hex("#7a100c")) })
+		}
+		if b.Clicked() {
+			d.dismiss()
+		}
+		return
+	}
+	b := ui.ButtonBase(c.Key("window-close")).Label(i18n.T("Close")).Tooltip(i18n.T("Close")).
+		Size(28, 24).Radius(6).Center().Shrink(0)
+	color := t.TextMuted
+	if b.Hovered() {
+		b.Background(t.Danger.Alpha(0.14))
+		color = t.Danger
+	}
+	b.Children(func() { ui.Icon(c, icon("x")).FontSize(t.FontSize + 1).TextColor(color) })
+	if b.Clicked() {
+		d.dismiss()
+	}
+}
+
 func (s *Shell) view(c *ui.Context) {
 	applyTheme(c)
 	// A resized window builds one frame more, for the parts that fit
@@ -139,9 +177,19 @@ func (s *Shell) view(c *ui.Context) {
 	for _, d := range s.dialogs {
 		was := d.open
 		panel := ui.Modal(c.Key(d), &d.open, func() {
-			if d.Title != "" {
-				ui.Text(c, d.Title).FontSize(t.FontSize + 2).Bold()
-			}
+			ui.Row(c.Key("dialog-title")).AlignItems(ui.Center).Gap(8).Children(func() {
+				if runtime.GOOS == "darwin" {
+					windowClose(c, d)
+				}
+				if d.Title != "" {
+					ui.Text(c, d.Title).FontSize(t.FontSize + 2).Bold().SingleLine().Grow(1).Shrink(1).MinWidth(0)
+				} else {
+					ui.Spacer(c)
+				}
+				if runtime.GOOS != "darwin" {
+					windowClose(c, d)
+				}
+			})
 			d.Body(c, d)
 		})
 		// As macOS's windows and sheets: a hairline around, lighter in
