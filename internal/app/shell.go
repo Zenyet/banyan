@@ -164,7 +164,8 @@ func (s *Shell) openNative(d *Dialog) {
 	var win *mygo.Window
 	var root ui.Element
 	shown := false
-	var height float32
+	var height, last float32
+	stable, frames := 0, 0
 	userSized := false
 	var fitAt time.Time
 	content := ui.View(func(c *ui.Context) {
@@ -197,20 +198,35 @@ func (s *Shell) openNative(d *Dialog) {
 			return
 		}
 		// The body may load or grow after the window shows, as a dialog
-		// that waits for a command does; follow it.
+		// that waits for a command does; follow it. Until its height has
+		// settled, though, show nothing: a first frame can measure part
+		// of the content, and the window would grow from there.
+		frames++
 		if h := root.Bounds().H; h > 0 {
 			h = min(h, float32(maxHeight))
-			if !userSized && (!shown || h < height-1 || h > height+1) {
+			if h < last-1 || h > last+1 {
+				stable = 0
+			} else {
+				stable++
+			}
+			last = h
+			settled := stable >= 1 || frames >= 30
+			switch {
+			case !shown && settled:
+				shown = true
 				height = h
 				fitAt = time.Now()
 				win.SetContentSize(width, int(h))
 				pb = parent.Bounds()
 				win.SetPosition(pb.X+(pb.Width-width)/2, pb.Y+(pb.Height-int(h))/2)
-				if !shown {
-					shown = true
-					win.SetOpacity(1)
-					win.Focus()
-				}
+				win.SetOpacity(1)
+				win.Focus()
+			case shown && !userSized && (h < height-1 || h > height+1):
+				height = h
+				fitAt = time.Now()
+				win.SetContentSize(width, int(h))
+				pb = parent.Bounds()
+				win.SetPosition(pb.X+(pb.Width-width)/2, pb.Y+(pb.Height-int(h))/2)
 			}
 		} else if !shown {
 			// Lay out once more, now that the content has a size.
