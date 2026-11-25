@@ -228,8 +228,10 @@ func (s *Shell) openNative(d *Dialog) {
 				pb = parent.Bounds()
 				win.SetPosition(pb.X+(pb.Width-width)/2, pb.Y+(pb.Height-int(h))/2)
 			}
-		} else if !shown {
-			// Lay out once more, now that the content has a size.
+		}
+		if !shown {
+			// A hidden window may stop after the first frame; keep it
+			// building until its height settles and it can show.
 			c.AnimationFrame()
 		}
 	})
@@ -259,8 +261,9 @@ func (s *Shell) openNative(d *Dialog) {
 				userSized = true
 			}
 		})
-		// Lay out once while hidden, so the window first shows at its
-		// size rather than growing from 120.
+		// A child window may ignore WindowOptions.Opacity, and the
+		// window first shows at 120 until the content has measured.
+		win.SetOpacity(0)
 		win.ShowInactive()
 	}
 	if d.Fill {
